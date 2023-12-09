@@ -30,6 +30,7 @@ enum SocksError {
     NoAcceptableAuthMethod,
     CommandNotSupported,
     InvalidATYP,
+    InvalidDomainName,
     IO(io::Error),
 }
 
@@ -96,8 +97,8 @@ pub async fn handle_socks5(mut stream: TcpStream, client_id: usize) {
     };
 
     println!("Client {client_id} doing request...");
-    let request_address = match read_request(&mut reader).await {
-        Ok(request) => request,
+    let request_addresses = match read_request(&mut reader).await {
+        Ok(addresses) => addresses,
         Err(SocksError::IO(error)) => {
             println!("Client {client_id} IO error during request: {error:?}");
             return;
@@ -111,23 +112,11 @@ pub async fn handle_socks5(mut stream: TcpStream, client_id: usize) {
         },
     };
 
-    println!("Client {client_id} connecting to destination...");
-    let destination_socket = match TcpSocket::new_v4() {
-        Ok(dst_socket) => dst_socket,
-        Err(error) => {
-            println!("Client {client_id} failed to bind local socket: {error:?}");
-            if let Err(error2) = send_response(&mut writer, error.into(), None).await {
-                println!("Client {client_id} failed to send back failure response: {error2:?}");
-            }
-            return;
-        },
-    };
-
-    let mut destination_stream = match destination_socket.connect(request_address).await {
-        Ok(dst_stream) => dst_stream,
-        Err(error) => {
-            println!("Client {client_id} failed to connect to remote: {error:?}");
-            if let Err(error2) = send_response(&mut writer, error.into(), None).await {
+    let mut destination_stream = match connect_socket(request_addresses, client_id).await {
+        Ok(stream) => stream,
+        Err(status) => {
+            println!("Client {client_id} failed to connect to remote");
+            if let Err(error2) = send_response(&mut writer, status, None).await {
                 println!("Client {client_id} failed to send back failure response: {error2:?}");
             }
             return;
@@ -152,6 +141,45 @@ pub async fn handle_socks5(mut stream: TcpStream, client_id: usize) {
     }
 }
 
+async fn connect_socket(request_addresses: Vec<SocketAddr>, client_id: usize) -> Result<TcpStream, SocksStatus> {
+    let mut last_error = None;
+
+    for address in request_addresses {
+        println!("Client {client_id} connecting to destination...");
+        let destination_socket = if address.is_ipv4() {
+            TcpSocket::new_v4()
+        } else if address.is_ipv6() {
+            TcpSocket::new_v6()
+        } else {
+            continue;
+        };
+
+        let destination_socket = match destination_socket {
+            Ok(dst_socket) => dst_socket,
+            Err(error) => {
+                println!("Client {client_id} failed to bind local socket: {error:?}");
+                continue;
+            },
+        };
+
+        let destination_stream = match destination_socket.connect(address).await {
+            Ok(dst_stream) => dst_stream,
+            Err(error) => {
+                println!("Client {client_id} failed to connect to remote: {error:?}");
+                last_error = Some(error);
+                continue;
+            },
+        };
+
+        return Ok(destination_stream);
+    }
+
+    match last_error {
+        Some(error) => Err(SocksStatus::from(error)),
+        None => Err(SocksStatus::HostUnreachable),
+    }
+}
+
 async fn read_handshake(reader: &mut BufReader<ReadHalf<'_>>) -> Result<AuthMethod, SocksError> {
     let ver = reader.read_u8().await?;
     if ver != 5 {
@@ -170,7 +198,7 @@ async fn read_handshake(reader: &mut BufReader<ReadHalf<'_>>) -> Result<AuthMeth
     }
 }
 
-async fn read_request(reader: &mut BufReader<ReadHalf<'_>>) -> Result<SocketAddr, SocksError> {
+async fn read_request(reader: &mut BufReader<ReadHalf<'_>>) -> Result<Vec<SocketAddr>, SocksError> {
     let ver = reader.read_u8().await?;
     if ver != 5 {
         return Err(SocksError::InvalidVersion);
@@ -184,31 +212,50 @@ async fn read_request(reader: &mut BufReader<ReadHalf<'_>>) -> Result<SocketAddr
     let _rsv = reader.read_u8().await?;
     let atyp = reader.read_u8().await?;
 
-    let address = match atyp {
+    let addresses = match atyp {
         1 => {
             let mut octets = [0u8; 4];
             reader.read_exact(&mut octets).await?;
             let port = reader.read_u16().await?;
 
-            SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::from(octets), port))
+            vec![SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::from(octets), port))]
         },
-        /*3 => {
-            let length = reader.read_u8().await?();
-            // TODO: Implement domain ATYP
-        }*/
+        3 => {
+            let mut length = reader.read_u8().await?;
+            if length == 0 {
+                return Err(SocksError::InvalidDomainName);
+            }
+
+            let mut domainname = [0u8; 260];
+            reader.read_exact(&mut domainname[0..(length as usize)]).await?;
+            domainname[length as usize] = b':';
+            domainname[length as usize + 1] = b'0';
+            length += 2;
+
+            let domainname_str = std::str::from_utf8(&domainname[0..(length as usize)]).or(Err(SocksError::InvalidDomainName))?;
+            let dns_results = tokio::net::lookup_host(domainname_str).await?;
+
+            let port = reader.read_u16().await?;
+            let sockets: Vec<_> = dns_results.map(|mut x| {
+                x.set_port(port);
+                x
+            }).collect();
+
+            sockets
+        }
         4 => {
             let mut octets = [0u8; 16];
             reader.read_exact(&mut octets).await?;
             let port = reader.read_u16().await?;
 
-            SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::from(octets), port, 0, 0))
+            vec![SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::from(octets), port, 0, 0))]
         }
         _ => {
             return Err(SocksError::InvalidATYP);
         }
     };
 
-    Ok(address)
+    Ok(addresses)
 }
 
 async fn send_response(writer: &mut WriteHalf<'_>, status: SocksStatus, socket_bound: Option<SocketAddr>) -> Result<(), std::io::Error> {
