@@ -35,6 +35,7 @@ enum SocksError {
 }
 
 #[repr(u8)]
+#[derive(Debug)]
 enum AuthMethod {
     NoAuth = 0,
 }
@@ -74,7 +75,7 @@ pub async fn handle_socks5(mut stream: TcpStream, client_id: usize) {
     let mut reader = BufReader::new(reader);
 
     println!("Client {client_id} doing handshake...");
-    let _auth_method = match read_handshake(&mut reader).await {
+    let auth_method = match read_handshake(&mut reader).await {
         Ok(auth_method) => {
             if let Err(error) = writer.write_all(b"\x05\x00").await {
                 println!("Client {client_id} failed to send back successful handshake response: {error:?}");
@@ -96,8 +97,9 @@ pub async fn handle_socks5(mut stream: TcpStream, client_id: usize) {
         },
     };
 
+    println!("Client {client_id} will use auth method: {auth_method:?}");
     println!("Client {client_id} doing request...");
-    let request_addresses = match read_request(&mut reader).await {
+    let request_addresses = match read_request(&mut reader, client_id).await {
         Ok(addresses) => addresses,
         Err(SocksError::IO(error)) => {
             println!("Client {client_id} IO error during request: {error:?}");
@@ -171,6 +173,7 @@ async fn connect_socket(request_addresses: Vec<SocketAddr>, client_id: usize) ->
             },
         };
 
+        println!("Client {client_id} connection established to {}", address);
         return Ok(destination_stream);
     }
 
@@ -198,7 +201,7 @@ async fn read_handshake(reader: &mut BufReader<ReadHalf<'_>>) -> Result<AuthMeth
     }
 }
 
-async fn read_request(reader: &mut BufReader<ReadHalf<'_>>) -> Result<Vec<SocketAddr>, SocksError> {
+async fn read_request(reader: &mut BufReader<ReadHalf<'_>>, client_id: usize) -> Result<Vec<SocketAddr>, SocksError> {
     let ver = reader.read_u8().await?;
     if ver != 5 {
         return Err(SocksError::InvalidVersion);
@@ -217,8 +220,10 @@ async fn read_request(reader: &mut BufReader<ReadHalf<'_>>) -> Result<Vec<Socket
             let mut octets = [0u8; 4];
             reader.read_exact(&mut octets).await?;
             let port = reader.read_u16().await?;
+            let address = SocketAddrV4::new(Ipv4Addr::from(octets), port);
+            println!("Client {client_id} requested to connect to IPv4: {address}");
 
-            vec![SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::from(octets), port))]
+            vec![SocketAddr::V4(address)]
         },
         3 => {
             let mut length = reader.read_u8().await?;
@@ -233,6 +238,8 @@ async fn read_request(reader: &mut BufReader<ReadHalf<'_>>) -> Result<Vec<Socket
             length += 2;
 
             let domainname_str = std::str::from_utf8(&domainname[0..(length as usize)]).or(Err(SocksError::InvalidDomainName))?;
+            println!("Client {client_id} requested to connect to domainname: {domainname_str}");
+
             let dns_results = tokio::net::lookup_host(domainname_str).await?;
 
             let port = reader.read_u16().await?;
@@ -247,8 +254,10 @@ async fn read_request(reader: &mut BufReader<ReadHalf<'_>>) -> Result<Vec<Socket
             let mut octets = [0u8; 16];
             reader.read_exact(&mut octets).await?;
             let port = reader.read_u16().await?;
+            let address = SocketAddrV6::new(Ipv6Addr::from(octets), port, 0, 0);
+            println!("Client {client_id} requested to connect to IPv6: {address}");
 
-            vec![SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::from(octets), port, 0, 0))]
+            vec![SocketAddr::V6(address)]
         }
         _ => {
             return Err(SocksError::InvalidATYP);
