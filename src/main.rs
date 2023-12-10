@@ -11,7 +11,7 @@ async fn main() {
         Err(_) => {
             println!("Failed to set up socket at {bind_address}");
             return;
-        },
+        }
     };
 
     let mut client_id_counter: usize = 1;
