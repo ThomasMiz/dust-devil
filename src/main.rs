@@ -14,7 +14,7 @@ async fn main() {
         }
     };
 
-    let mut client_id_counter: usize = 1;
+    let mut client_id_counter: u64 = 1;
 
     loop {
         select! {

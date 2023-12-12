@@ -14,13 +14,14 @@ use crate::socks5::{
 };
 
 mod chunk_reader;
+mod copy;
 mod parsers;
 mod responses;
 
 use parsers::*;
 use responses::*;
 
-impl From<io::Error> for SocksStatus {
+impl From<io::Error> for responses::SocksStatus {
     fn from(value: io::Error) -> Self {
         match value.kind() {
             ErrorKind::ConnectionAborted | ErrorKind::ConnectionRefused | ErrorKind::ConnectionReset => SocksStatus::ConnectionRefused,
@@ -44,14 +45,14 @@ impl From<SocksError> for SocksStatus {
     }
 }
 
-pub async fn handle_socks5(stream: TcpStream, client_id: usize) {
+pub async fn handle_socks5(stream: TcpStream, client_id: u64) {
     match handle_socks5_inner(stream, client_id).await {
         Ok(()) => println!("Client {client_id} connection closed"),
         Err(error) => println!("Client {client_id} closed with IO error: {error}"),
     }
 }
 
-async fn handle_socks5_inner(mut stream: TcpStream, client_id: usize) -> Result<(), io::Error> {
+async fn handle_socks5_inner(mut stream: TcpStream, client_id: u64) -> Result<(), io::Error> {
     let (reader, mut writer) = stream.split();
     let mut reader = BufReader::new(reader);
 
@@ -126,7 +127,10 @@ async fn handle_socks5_inner(mut stream: TcpStream, client_id: usize) -> Result<
     send_request_response(&mut writer, SocksStatus::Success, destination_stream.local_addr().ok()).await?;
 
     println!("Client {client_id} doing the copy thingy...");
-    let result = tokio::io::copy_bidirectional(&mut stream, &mut destination_stream).await;
+    let (dst_reader, mut dst_writer) = destination_stream.split();
+    let mut dst_reader = BufReader::new(dst_reader);
+
+    let result = copy::copy_bidirectional(&mut reader, &mut writer, &mut dst_reader, &mut dst_writer, client_id).await;
     match result {
         Ok((client_to_remote, remote_to_client)) => {
             println!("Client {client_id} finished after {client_to_remote} bytes sent and {remote_to_client} bytes received");
@@ -147,7 +151,7 @@ fn select_auth_method(methods: &[u8]) -> AuthMethod {
     }
 }
 
-async fn connect_socket(request_addresses: Vec<SocketAddr>, client_id: usize) -> Result<TcpStream, SocksStatus> {
+async fn connect_socket(request_addresses: Vec<SocketAddr>, client_id: u64) -> Result<TcpStream, SocksStatus> {
     let mut last_error = None;
 
     for address in request_addresses {
