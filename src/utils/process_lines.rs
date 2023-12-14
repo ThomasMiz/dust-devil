@@ -8,7 +8,7 @@ const BUFFER_CAPACITY: usize = 0x2000;
 pub enum ProcessFileLinesError<T> {
     IO(io::Error),
     InvalidUtf8 { line_number: u32, byte_at: usize },
-    LineTooLong(u32),
+    LineTooLong { line_number: u32, byte_at: usize },
     Cancelled(u32, T),
 }
 
@@ -21,7 +21,7 @@ impl<T> From<io::Error> for ProcessFileLinesError<T> {
 pub async fn process_lines_utf8<R, F, T>(reader: &mut R, mut f: F) -> Result<u32, ProcessFileLinesError<T>>
 where
     R: AsyncRead + Unpin + ?Sized,
-    F: FnMut(&str) -> Result<(), T>,
+    F: FnMut(&str, u32) -> Result<(), T>,
 {
     let mut buffer = vec![0u8; BUFFER_CAPACITY].into_boxed_slice();
     let buffer_capacity = buffer.len();
@@ -38,7 +38,7 @@ where
         for i in buffer_length..(buffer_length + bytes_read) {
             if buffer[i] == b'\n' {
                 match std::str::from_utf8(&buffer[line_start..i]) {
-                    Ok(s) => f(s).map_err(|t| ProcessFileLinesError::Cancelled(line_number, t))?,
+                    Ok(s) => f(s, line_number).map_err(|t| ProcessFileLinesError::Cancelled(line_number, t))?,
                     Err(utf_error) => {
                         return Err(ProcessFileLinesError::InvalidUtf8 {
                             line_number,
@@ -58,7 +58,10 @@ where
         // is a substring of any other UTF-8 character.
 
         if line_start == 0 && bytes_read == buffer_capacity - buffer_length {
-            return Err(ProcessFileLinesError::LineTooLong(line_number));
+            return Err(ProcessFileLinesError::LineTooLong {
+                line_number,
+                byte_at: buffer_capacity,
+            });
         }
 
         buffer.copy_within(line_start..(buffer_length + bytes_read), 0);
@@ -68,7 +71,7 @@ where
 
     if buffer_length != 0 {
         match std::str::from_utf8(&buffer[..buffer_length]) {
-            Ok(s) => f(s).map_err(|t| ProcessFileLinesError::Cancelled(line_number, t))?,
+            Ok(s) => f(s, line_number).map_err(|t| ProcessFileLinesError::Cancelled(line_number, t))?,
             Err(utf_error) => {
                 return Err(ProcessFileLinesError::InvalidUtf8 {
                     line_number,
