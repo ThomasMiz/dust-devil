@@ -2,7 +2,7 @@ use std::io::{self, ErrorKind};
 
 use tokio::io::{AsyncRead, AsyncReadExt};
 
-pub async fn read_chunked_ascii_string<R>(reader: &mut R) -> Result<String, io::Error>
+pub async fn read_chunked_utf8_string<R>(reader: &mut R) -> Result<String, io::Error>
 where
     R: AsyncRead + Unpin + ?Sized,
 {
@@ -12,19 +12,11 @@ where
     unsafe {
         let buf = s.as_mut_vec();
         buf.set_len(length);
-        // SAFETY: We ensure the bytes read into the string are valid UTF-8 by checking that they are ASCII
+        reader.read_exact(&mut buf[0..length]).await?;
 
-        let mut total = 0;
-        while total < length {
-            let more = reader.read(&mut buf[total..(length - total)]).await?;
-
-            for c in &buf[total..(total + more)] {
-                if *c < b' ' || *c > 126 {
-                    return Err(ErrorKind::InvalidData.into());
-                }
-            }
-
-            total += more;
+        // SAFETY: We ensure the bytes read into the string are valid UTF-8
+        if std::str::from_utf8(buf).is_err() {
+            return Err(ErrorKind::InvalidData.into());
         }
     }
 
@@ -45,7 +37,8 @@ where
     unsafe {
         let buf = s.as_mut_vec();
         buf.set_len(length);
-        // SAFETY: We ensure the bytes read into the string are valid UTF-8 by checking that they are ASCII
+        // SAFETY: We ensure the bytes read into the string are valid UTF-8 by checking that they
+        // are graphical ASCII values, which are all valid UTF-8.
 
         let mut total = 0;
         while total < length {

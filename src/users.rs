@@ -289,6 +289,6 @@ impl UserManager {
     }
 
     pub fn count(&self) -> usize {
-        return self.users.len();
+        self.users.len()
     }
 }

@@ -1,6 +1,7 @@
 use std::{
     io::{self, ErrorKind},
     net::{SocketAddr, SocketAddrV4, SocketAddrV6},
+    sync::Arc,
 };
 
 use tokio::{
@@ -8,16 +9,21 @@ use tokio::{
     net::{TcpSocket, TcpStream},
 };
 
-use crate::socks5::{
-    parsers::{parse_handshake, parse_request, SocksRequestAddress},
-    responses::{send_handshake_response, send_request_response},
+use crate::{
+    socks5::{
+        parsers::{parse_handshake, parse_request, SocksRequestAddress},
+        responses::{send_handshake_response, send_request_response},
+    },
+    ServerState,
 };
 
+mod auth;
 mod chunk_reader;
 mod copy;
 mod parsers;
 mod responses;
 
+use auth::*;
 use parsers::*;
 use responses::*;
 
@@ -45,14 +51,14 @@ impl From<SocksError> for SocksStatus {
     }
 }
 
-pub async fn handle_socks5(stream: TcpStream, client_id: u64) {
-    match handle_socks5_inner(stream, client_id).await {
+pub async fn handle_socks5(stream: TcpStream, client_id: u64, state: Arc<ServerState>) {
+    match handle_socks5_inner(stream, client_id, state).await {
         Ok(()) => println!("Client {client_id} connection closed"),
         Err(error) => println!("Client {client_id} closed with IO error: {error}"),
     }
 }
 
-async fn handle_socks5_inner(mut stream: TcpStream, client_id: u64) -> Result<(), io::Error> {
+async fn handle_socks5_inner(mut stream: TcpStream, client_id: u64, state: Arc<ServerState>) -> Result<(), io::Error> {
     let (reader, mut writer) = stream.split();
     let mut reader = BufReader::new(reader);
 
@@ -78,11 +84,14 @@ async fn handle_socks5_inner(mut stream: TcpStream, client_id: u64) -> Result<()
     }
     send_handshake_response(&mut writer, auth_method).await?;
 
-    match auth_method {
-        AuthMethod::NoAcceptableMethod => return Ok(()),
-        AuthMethod::NoAuth => (),
-        // TODO: Implement other authentication methods apart from NoAuth (lol)
-        // _ => (),
+    let auth_status = match auth_method {
+        AuthMethod::NoAuth => true,
+        AuthMethod::UsernameAndPassword => handle_userpass_auth(&mut reader, &mut writer, &state, client_id).await?,
+        _ => false,
+    };
+
+    if !auth_status {
+        return Ok(());
     }
 
     println!("Client {client_id} doing request...");
@@ -144,7 +153,9 @@ async fn handle_socks5_inner(mut stream: TcpStream, client_id: u64) -> Result<()
 }
 
 fn select_auth_method(methods: &[u8]) -> AuthMethod {
-    if methods.contains(&0) {
+    if methods.contains(&(AuthMethod::UsernameAndPassword as u8)) {
+        AuthMethod::UsernameAndPassword
+    } else if methods.contains(&(AuthMethod::NoAuth as u8)) {
         AuthMethod::NoAuth
     } else {
         AuthMethod::NoAcceptableMethod

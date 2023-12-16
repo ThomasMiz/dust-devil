@@ -20,7 +20,7 @@ pub enum SocksStatus {
 pub enum AuthMethod {
     NoAuth = 0x00,
     // GSSAPI = 0x01,
-    // UsernameAndPassword = 0x02,
+    UsernameAndPassword = 0x02,
     NoAcceptableMethod = 0xFF,
 }
 
