@@ -24,16 +24,18 @@ pub enum AuthMethod {
     NoAcceptableMethod = 0xFF,
 }
 
-pub async fn send_handshake_response<W: AsyncWrite + Unpin>(writer: &mut W, method: AuthMethod) -> Result<(), io::Error> {
+pub async fn send_handshake_response<W>(writer: &mut W, method: AuthMethod) -> Result<(), io::Error>
+where
+    W: AsyncWrite + Unpin + ?Sized,
+{
     let buf = [0x05u8, method as u8];
     writer.write_all(&buf).await
 }
 
-pub async fn send_request_response<W: AsyncWrite + Unpin>(
-    writer: &mut W,
-    status: SocksStatus,
-    socket_bound: Option<SocketAddr>,
-) -> Result<(), std::io::Error> {
+pub async fn send_request_response<W>(writer: &mut W, status: SocksStatus, socket_bound: Option<SocketAddr>) -> Result<(), std::io::Error>
+where
+    W: AsyncWrite + Unpin + ?Sized,
+{
     let mut buf = [0u8; 32];
     buf[0] = 5;
     buf[1] = status as u8;

@@ -24,7 +24,10 @@ pub struct SocksHandshake {
     pub methods: Vec<u8>,
 }
 
-pub async fn parse_handshake<T: AsyncRead + Unpin>(reader: &mut T) -> Result<SocksHandshake, SocksError> {
+pub async fn parse_handshake<R>(reader: &mut R) -> Result<SocksHandshake, SocksError>
+where
+    R: AsyncRead + Unpin + ?Sized,
+{
     let ver = reader.read_u8().await?;
     if ver != 5 {
         return Err(SocksError::InvalidVersion(ver));
@@ -48,7 +51,10 @@ pub struct SocksRequest {
     pub port: u16,
 }
 
-pub async fn parse_request<T: AsyncRead + Unpin>(reader: &mut T) -> Result<SocksRequest, SocksError> {
+pub async fn parse_request<R>(reader: &mut R) -> Result<SocksRequest, SocksError>
+where
+    R: AsyncRead + Unpin + ?Sized,
+{
     let ver = reader.read_u8().await?;
     if ver != 5 {
         return Err(SocksError::InvalidVersion(ver));

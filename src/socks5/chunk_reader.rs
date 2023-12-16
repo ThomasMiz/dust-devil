@@ -2,7 +2,10 @@ use std::io::{self, ErrorKind};
 
 use tokio::io::{AsyncRead, AsyncReadExt};
 
-pub async fn read_chunked_ascii_string<T: AsyncRead + Unpin>(reader: &mut T) -> Result<String, io::Error> {
+pub async fn read_chunked_ascii_string<R>(reader: &mut R) -> Result<String, io::Error>
+where
+    R: AsyncRead + Unpin + ?Sized,
+{
     let length = reader.read_u8().await? as usize;
     let mut s = String::with_capacity(length as usize);
 
@@ -28,7 +31,10 @@ pub async fn read_chunked_ascii_string<T: AsyncRead + Unpin>(reader: &mut T) -> 
     Ok(s)
 }
 
-pub async fn read_domainname<T: AsyncReadExt + Unpin>(reader: &mut T, extra_capacity: usize) -> Result<String, io::Error> {
+pub async fn read_domainname<R>(reader: &mut R, extra_capacity: usize) -> Result<String, io::Error>
+where
+    R: AsyncRead + Unpin + ?Sized,
+{
     let length = reader.read_u8().await? as usize;
     if length == 0 {
         return Err(ErrorKind::InvalidData.into());

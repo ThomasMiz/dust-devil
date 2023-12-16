@@ -273,6 +273,12 @@ impl UserManager {
     }
 
     pub fn insert(&self, username: String, password: String, role: UserRole) -> bool {
+        // Note: This code might look like it has a race condition, as two threads could simultaneously
+        // see the entry as vacant and then both try to insert the key. However, upon further examination,
+        // the Entry<...> type actually holds a lock underneath, which lasts until the variable is
+        // dropped! This is why the documentation for the entry function states:
+        // "Locking behaviour: May deadlock if called when holding any sort of reference into the map."
+
         let entry = self.users.entry(username);
         if let Entry::Occupied(_) = entry {
             return false;
@@ -280,5 +286,9 @@ impl UserManager {
 
         entry.insert(UserData { password, role });
         true
+    }
+
+    pub fn count(&self) -> usize {
+        return self.users.len();
     }
 }
