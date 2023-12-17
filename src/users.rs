@@ -49,10 +49,10 @@ use tokio::{
 
 use crate::utils::{self, process_lines::ProcessFileLinesError};
 
-const COMMENT_PREFIX_CHAR: char = '!';
-const ADMIN_PREFIX_CHAR: char = '@';
-const USER_PREFIX_CHAR: char = '#';
-const ESCAPE_CHAR: char = '\\';
+pub const COMMENT_PREFIX_CHAR: char = '!';
+pub const ADMIN_PREFIX_CHAR: char = '@';
+pub const USER_PREFIX_CHAR: char = '#';
+pub const ESCAPE_CHAR: char = '\\';
 
 #[derive(Debug)]
 pub struct UserManager {
@@ -123,7 +123,7 @@ impl fmt::Display for UserManagerCreationError {
     }
 }
 
-fn parse_line_into_user(s: &str, line_number: u32) -> Result<Option<(String, UserData)>, UserManagerCreationError> {
+pub fn parse_line_into_user(s: &str, line_number: u32) -> Result<Option<(String, UserData)>, UserManagerCreationError> {
     let mut chars = s.chars();
     let mut char_at = 1;
     let role_char = chars
