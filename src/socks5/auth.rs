@@ -2,7 +2,7 @@ use std::io;
 
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
-use crate::ServerState;
+use crate::server::ServerState;
 
 use super::chunk_reader::read_chunked_utf8_string;
 
@@ -21,7 +21,7 @@ where
         let username = read_chunked_utf8_string(reader).await?;
         let password = read_chunked_utf8_string(reader).await?;
 
-        status = state.users.get(&username).filter(|u| u.password() == &password).is_some();
+        status = state.users.get(&username).filter(|u| u.password == password).is_some();
 
         println!(
             "Client {client_id} authenticated {}successfully with username \"{}\" and password \"{}\"",

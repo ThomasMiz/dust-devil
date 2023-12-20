@@ -7,34 +7,10 @@
 use tokio::io::{AsyncBufRead, AsyncWrite};
 
 use std::{
-    future::Future,
     io,
     pin::Pin,
-    task::{ready, Context, Poll},
+    task::{ready, Context, Poll}, future::poll_fn,
 };
-
-struct PollFn<F> {
-    f: F,
-}
-
-fn poll_fn<T, F>(f: F) -> PollFn<F>
-where
-    F: FnMut(&mut Context<'_>) -> Poll<T>,
-{
-    PollFn { f }
-}
-
-impl<T, F> Future for PollFn<F>
-where
-    F: FnMut(&mut Context<'_>) -> Poll<T>,
-{
-    type Output = T;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<T> {
-        let me = unsafe { Pin::into_inner_unchecked(self) };
-        (me.f)(cx)
-    }
-}
 
 enum TransferState {
     Running(u64),

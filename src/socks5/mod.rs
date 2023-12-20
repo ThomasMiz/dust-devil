@@ -9,13 +9,10 @@ use tokio::{
     net::{TcpSocket, TcpStream},
 };
 
-use crate::{
-    socks5::{
-        parsers::{parse_handshake, parse_request, SocksRequestAddress},
-        responses::{send_handshake_response, send_request_response},
-    },
-    ServerState,
-};
+use crate::{socks5::{
+    parsers::{parse_handshake, parse_request, SocksRequestAddress},
+    responses::{send_handshake_response, send_request_response},
+}, server::ServerState};
 
 mod auth;
 mod chunk_reader;

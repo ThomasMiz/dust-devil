@@ -2,7 +2,7 @@ use std::{
     collections::HashMap,
     fmt,
     io::ErrorKind,
-    net::{Ipv6Addr, SocketAddr, SocketAddrV6, ToSocketAddrs},
+    net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6, ToSocketAddrs},
 };
 
 use crate::users::{self, UserData};

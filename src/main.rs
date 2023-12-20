@@ -1,74 +1,40 @@
-use std::sync::Arc;
+use std::{env, process::exit};
 
-use tokio::{net::TcpListener, select};
-
+mod args;
+mod server;
 mod socks5;
 mod users;
 mod utils;
 
-use users::UserManager;
+use args::*;
 
-struct ServerState {
-    users: UserManager,
-}
-
-const USERS_FILE: &str = "users.txt";
-
-#[tokio::main(flavor = "current_thread")]
-async fn main() {
-    println!("Loading users from {}...", USERS_FILE);
-
-    let users = match users::UserManager::from_file(USERS_FILE).await {
-        Ok(users) => {
-            println!("Loaded {} users from file", users.count());
-            users
-        }
+fn main() {
+    let arguments = match args::parse_arguments(env::args()) {
         Err(err) => {
-            println!("Error while loading users file: {}", err);
-            println!("WARNING: Starting up with a single admin:admin user");
-            let users = UserManager::new();
-            users.insert(String::from("admin"), String::from("admin"), users::UserRole::Admin);
-            users
+            eprintln!("{}", err);
+            exit(1);
         }
+        Ok(arguments) => arguments,
     };
 
-    let state = ServerState { users };
-    let state = Arc::new(state);
-
-    let bind_address = "localhost:1080";
-
-    let listener = match TcpListener::bind(bind_address).await {
-        Ok(result) => result,
-        Err(_) => {
-            println!("Failed to set up socket at {bind_address}");
+    let startup_args = match arguments {
+        ArgumentsRequest::Version => {
+            println!("{}", get_version_string());
+            println!("Your mother's favorite socks5 proxy server");
             return;
         }
+        ArgumentsRequest::Help => {
+            println!("{}", get_help_string());
+            return;
+        }
+        ArgumentsRequest::Run(startup_args) => startup_args,
     };
 
-    let mut client_id_counter: u64 = 1;
+    println!("Startup args: {startup_args:?}");
 
-    loop {
-        select! {
-            accept_result = listener.accept() => {
-                match accept_result {
-                    Ok((socket, address)) => {
-                        println!("Accepted new connection from {}", address);
-                        let client_id = client_id_counter;
-                        client_id_counter += 1;
-                        let state1 = Arc::clone(&state);
-                        tokio::spawn(async move {
-                            socks5::handle_socks5(socket, client_id, state1).await;
-                        });
-                    },
-                    Err(err) => {
-                        println!("Error while accepting new connection: {}", err);
-                    },
-                }
-            }
-            _ = tokio::signal::ctrl_c() => {
-                println!("Goodbye");
-                break;
-            },
-        }
-    }
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(server::run_server(startup_args));
 }

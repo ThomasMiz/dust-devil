@@ -67,18 +67,8 @@ pub enum UserRole {
 
 #[derive(Debug)]
 pub struct UserData {
-    password: String,
-    role: UserRole,
-}
-
-impl UserData {
-    pub fn password(&self) -> &String {
-        &self.password
-    }
-
-    pub fn role(&self) -> UserRole {
-        self.role
-    }
+    pub password: String,
+    pub role: UserRole,
 }
 
 #[derive(Debug)]
@@ -288,7 +278,15 @@ impl UserManager {
         true
     }
 
+    pub fn insert_or_update(&self, username: String, password: String, role: UserRole) -> bool {
+        self.users.insert(username, UserData { password, role }).is_some()
+    }
+
     pub fn count(&self) -> usize {
         self.users.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.users.is_empty()
     }
 }
