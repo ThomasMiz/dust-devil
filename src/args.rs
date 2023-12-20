@@ -19,8 +19,28 @@ pub fn get_version_string() -> String {
 }
 
 pub fn get_help_string() -> &'static str {
-    // TODO: Write a help menu
-    "Help? I need somebody."
+    concat!(
+        "Usage: dust-devil [options...]\n",
+        "Options:\n",
+        "  -h, --help                      Display this help menu and exit\n",
+        "  -V, --version                   Display the version number and exit\n",
+        "  -v, --verbose                   Display additional information while running\n",
+        "  -l, --listen <address>          Specify a socket address for listening\n",
+        "  -U, --users-file <path>         Load and save users to/from this file\n",
+        "  -u, --user <user>               Adds a new user\n",
+        "  -a, --auth-disable <auth_type>  Disables a type of authentication\n",
+        "  -A, --auth-enable <auth_type>   Enables a type of authentication\n",
+        "\n",
+        "Socket addresses may be specified as an IPv4 or IPv6 address, or a domainname, and may include a port number. ",
+        "The --listen parameter may be specified multiple times to listen on many addresses. If no port is specified, ",
+        "then the default port of 1080 will be used. If no --listen parameter is specified, then [::]:1080 will be used.\n",
+        "\n",
+        "Users are specified in the same format as each line on the users file, but for regular users you may drop the ",
+        "role character. For example, -u \"pedro:1234\" would have the same effect as --user \"#pedro:1234\", and admins ",
+        "may be added with, for example \"@admin:secret\".\n",
+        "\n",
+        "For enabling or disabling authentication, the available authentication types are \"noauth\" and \"userpass\".",
+    )
 }
 
 #[derive(Debug)]
