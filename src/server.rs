@@ -10,6 +10,8 @@ use crate::{
 
 pub struct ServerState {
     pub users: UserManager,
+    pub no_auth_enabled: bool,
+    pub userpass_auth_enabled: bool,
 }
 
 async fn accept_from_any(listeners: &Vec<TcpListener>) -> Result<(tokio::net::TcpStream, std::net::SocketAddr), std::io::Error> {
@@ -53,7 +55,12 @@ pub async fn run_server(mut startup_args: StartupArguments) {
         users.insert(String::from("admin"), String::from("admin"), UserRole::Admin);
     }
 
-    let state = ServerState { users };
+    let state = ServerState {
+        users,
+        no_auth_enabled: startup_args.no_auth_enabled,
+        userpass_auth_enabled: startup_args.userpass_auth_enabled,
+    };
+
     let state = Arc::new(state);
 
     let mut client_id_counter: u64 = 1;

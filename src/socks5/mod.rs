@@ -61,7 +61,7 @@ async fn handle_socks5_inner(mut stream: TcpStream, client_id: u64, state: Arc<S
 
     println!("Client {client_id} doing handshake...");
     let auth_method = match parse_handshake(&mut reader).await {
-        Ok(handshake) => select_auth_method(&handshake.methods),
+        Ok(handshake) => select_auth_method(&state, &handshake.methods),
         Err(SocksError::IO(error)) => return Err(error),
         Err(SocksError::InvalidVersion(ver)) => {
             println!("Client {client_id} requested unsupported socks version: {ver}");
@@ -149,11 +149,11 @@ async fn handle_socks5_inner(mut stream: TcpStream, client_id: u64, state: Arc<S
     Ok(())
 }
 
-fn select_auth_method(methods: &[u8]) -> AuthMethod {
-    if methods.contains(&(AuthMethod::UsernameAndPassword as u8)) {
-        AuthMethod::UsernameAndPassword
-    } else if methods.contains(&(AuthMethod::NoAuth as u8)) {
+fn select_auth_method(state: &Arc<ServerState>, methods: &[u8]) -> AuthMethod {
+    if state.no_auth_enabled && methods.contains(&(AuthMethod::NoAuth as u8)) {
         AuthMethod::NoAuth
+    } else if state.userpass_auth_enabled && methods.contains(&(AuthMethod::UsernameAndPassword as u8)) {
+        AuthMethod::UsernameAndPassword
     } else {
         AuthMethod::NoAcceptableMethod
     }

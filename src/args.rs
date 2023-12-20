@@ -2,7 +2,7 @@ use std::{
     collections::HashMap,
     fmt,
     io::ErrorKind,
-    net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6, ToSocketAddrs},
+    net::{Ipv6Addr, SocketAddr, SocketAddrV6, ToSocketAddrs},
 };
 
 use crate::users::{self, UserData};
@@ -29,6 +29,8 @@ pub struct StartupArguments {
     pub verbose: bool,
     pub users_file: String,
     pub users: HashMap<String, UserData>,
+    pub no_auth_enabled: bool,
+    pub userpass_auth_enabled: bool,
 }
 
 impl StartupArguments {
@@ -38,6 +40,8 @@ impl StartupArguments {
             verbose: false,
             users_file: String::new(),
             users: HashMap::new(),
+            no_auth_enabled: true,
+            userpass_auth_enabled: true,
         }
     }
 
@@ -66,6 +70,7 @@ pub enum ArgumentsError {
     ListenError(ListenErrorType),
     UsersFileError(UsersFileErrorType),
     NewUserError(NewUserErrorType),
+    AuthToggleError(AuthToggleErrorType),
 }
 
 impl fmt::Display for ArgumentsError {
@@ -75,6 +80,7 @@ impl fmt::Display for ArgumentsError {
             ArgumentsError::ListenError(listen_error) => listen_error.fmt(f),
             ArgumentsError::UsersFileError(users_file_error) => users_file_error.fmt(f),
             ArgumentsError::NewUserError(new_user_error) => new_user_error.fmt(f),
+            ArgumentsError::AuthToggleError(auth_toggle_error) => auth_toggle_error.fmt(f),
         }
     }
 }
@@ -190,6 +196,27 @@ impl From<NewUserErrorType> for ArgumentsError {
     }
 }
 
+#[derive(Debug)]
+pub enum AuthToggleErrorType {
+    UnexpectedEnd(String),
+    InvalidAuthType(String, String),
+}
+
+impl fmt::Display for AuthToggleErrorType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            AuthToggleErrorType::UnexpectedEnd(arg) => write!(f, "Expected auth type after {arg}"),
+            AuthToggleErrorType::InvalidAuthType(arg, arg2) => write!(f, "Invalid auth type at {arg} {arg2}"),
+        }
+    }
+}
+
+impl From<AuthToggleErrorType> for ArgumentsError {
+    fn from(value: AuthToggleErrorType) -> Self {
+        ArgumentsError::AuthToggleError(value)
+    }
+}
+
 fn parse_new_user_arg(result: &mut StartupArguments, arg: String, maybe_arg2: Option<String>) -> Result<(), NewUserErrorType> {
     let arg2 = match maybe_arg2 {
         Some(arg2) => arg2,
@@ -218,6 +245,23 @@ fn parse_new_user_arg(result: &mut StartupArguments, arg: String, maybe_arg2: Op
     Ok(())
 }
 
+fn parse_auth_arg(result: &mut StartupArguments, enable: bool, arg: String, maybe_arg2: Option<String>) -> Result<(), AuthToggleErrorType> {
+    let arg2 = match maybe_arg2 {
+        Some(arg2) => arg2,
+        None => return Err(AuthToggleErrorType::UnexpectedEnd(arg)),
+    };
+
+    if arg2.eq_ignore_ascii_case("noauth") {
+        result.no_auth_enabled = enable;
+    } else if arg2.eq_ignore_ascii_case("userpass") {
+        result.userpass_auth_enabled = enable;
+    } else {
+        return Err(AuthToggleErrorType::InvalidAuthType(arg, arg2));
+    }
+
+    Ok(())
+}
+
 pub fn parse_arguments<T>(mut args: T) -> Result<ArgumentsRequest, ArgumentsError>
 where
     T: Iterator<Item = String>,
@@ -240,6 +284,10 @@ where
             parse_users_file_arg(&mut result, arg, args.next())?;
         } else if arg.eq("-u") || arg.eq_ignore_ascii_case("--user") {
             parse_new_user_arg(&mut result, arg, args.next())?;
+        } else if arg.eq("-a") || arg.eq_ignore_ascii_case("--auth-disable") {
+            parse_auth_arg(&mut result, false, arg, args.next())?;
+        } else if arg.eq("-A") || arg.eq_ignore_ascii_case("--auth-enable") {
+            parse_auth_arg(&mut result, true, arg, args.next())?;
         } else {
             return Err(ArgumentsError::UknownArgument(arg));
         }
