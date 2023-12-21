@@ -86,6 +86,34 @@ pub enum UserManagerCreationError {
     NoUsers,
 }
 
+impl PartialEq for UserManagerCreationError {
+    fn eq(&self, other: &Self) -> bool {
+        match self {
+            Self::IO(io_err) => {
+                if let Self::IO(other_err) = other {
+                    io_err.kind() == other_err.kind()
+                } else {
+                    false
+                }
+            }
+            Self::InvalidUtf8 { line_number, byte_at } => {
+                matches!(other, Self::InvalidUtf8 { line_number: a2, byte_at: b2 } if (line_number, byte_at) == (a2, b2))
+            }
+            Self::LineTooLong { line_number, byte_at } => {
+                matches!(other, Self::LineTooLong { line_number: a2, byte_at: b2 } if (line_number, byte_at) == (a2, b2))
+            }
+            Self::ExpectedRoleCharGotEOF(a, b) => matches!(other, Self::ExpectedRoleCharGotEOF(a2, b2) if (a, b) == (a2, b2)),
+            Self::InvalidRoleChar(a, b, c) => matches!(other, Self::InvalidRoleChar(a2, b2, c2) if (a, b, c) == (a2, b2, c2)),
+            Self::ExpectedColonGotEOF(a, b) => matches!(other, Self::ExpectedColonGotEOF(a2, b2) if (a, b) == (a2, b2)),
+            Self::EmptyUsername(a, b) => matches!(other, Self::EmptyUsername(a2, b2) if (a, b) == (a2, b2)),
+            Self::UsernameTooLong(a, b) => matches!(other, Self::UsernameTooLong(a2, b2) if (a, b) == (a2, b2)),
+            Self::EmptyPassword(a, b) => matches!(other, Self::EmptyPassword(a2, b2) if (a, b) == (a2, b2)),
+            Self::PasswordTooLong(a, b) => matches!(other, Self::PasswordTooLong(a2, b2) if (a, b) == (a2, b2)),
+            Self::NoUsers => matches!(other, Self::NoUsers),
+        }
+    }
+}
+
 impl From<io::Error> for UserManagerCreationError {
     fn from(value: io::Error) -> Self {
         UserManagerCreationError::IO(value)
@@ -117,12 +145,12 @@ impl fmt::Display for UserManagerCreationError {
     }
 }
 
-pub fn parse_line_into_user(s: &str, line_number: u32) -> Result<Option<(String, UserData)>, UserManagerCreationError> {
+pub fn parse_line_into_user(s: &str, line_number: u32, mut char_at: u32) -> Result<Option<(String, UserData)>, UserManagerCreationError> {
     let mut chars = s.chars();
-    let mut char_at = 1;
     let role_char = chars
         .next()
         .ok_or(UserManagerCreationError::ExpectedRoleCharGotEOF(line_number, char_at))?;
+    char_at += 1;
     let role = match role_char {
         COMMENT_PREFIX_CHAR => return Ok(None),
         ADMIN_PREFIX_CHAR => UserRole::Admin,
@@ -195,10 +223,15 @@ impl UserManager {
     {
         let users = DashMap::new();
 
-        let result = utils::process_lines::process_lines_utf8(reader, |s, line_number| {
-            let s = s.trim_start();
+        let result = utils::process_lines::process_lines_utf8(reader, |mut s, line_number| {
+            let mut char_at = 0;
+            while s.chars().next().is_some_and(|c| c.is_whitespace()) {
+                s = &s[1..];
+                char_at += 1;
+            }
+
             if !s.is_empty() {
-                if let Some((username, user)) = parse_line_into_user(s, line_number)? {
+                if let Some((username, user)) = parse_line_into_user(s, line_number, char_at)? {
                     users.insert(username, user);
                 }
             }
@@ -301,5 +334,201 @@ impl UserManager {
 
     pub fn is_empty(&self) -> bool {
         self.users.is_empty()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use dashmap::DashMap;
+    use tokio::io::BufReader;
+
+    use crate::utils::process_lines;
+
+    use super::{UserData, UserManager, UserManagerCreationError, UserRole};
+
+    async fn from(s: &str) -> Result<UserManager, UserManagerCreationError> {
+        UserManager::from(&mut BufReader::new(s.as_bytes())).await
+    }
+
+    async fn from_bytes(s: &[u8]) -> Result<UserManager, UserManagerCreationError> {
+        UserManager::from(&mut BufReader::new(s)).await
+    }
+
+    fn usermap(s: &[(&str, &str, UserRole)]) -> DashMap<String, UserData> {
+        let h = DashMap::new();
+        for (username, password, role) in s {
+            let username = String::from(*username);
+            let password = String::from(*password);
+            h.insert(username, UserData { password, role: *role });
+        }
+
+        h
+    }
+
+    fn assert_ok_with(result: &Result<UserManager, UserManagerCreationError>, s: &[(&str, &str, UserRole)]) {
+        match result {
+            Ok(mgr) => {
+                let expected = usermap(s);
+                for ele in mgr.users.iter() {
+                    assert_eq!(expected.get(ele.key()).as_deref(), Some(ele.value()));
+                }
+
+                for (username, userdata) in expected {
+                    assert_eq!(mgr.users.get(&username).as_deref(), Some(&userdata));
+                }
+            }
+            Err(_) => panic!("Expected Ok but got Err!"),
+        }
+    }
+
+    fn assert_err_with(result: &Result<UserManager, UserManagerCreationError>, err: UserManagerCreationError) {
+        match result {
+            Ok(_) => panic!("Expected Err but got Ok!"),
+            Err(err2) => assert_eq!(err2, &err),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_no_users() {
+        let result = from("").await;
+        assert_err_with(&result, UserManagerCreationError::NoUsers);
+
+        let result = from("     ").await;
+        assert_err_with(&result, UserManagerCreationError::NoUsers);
+
+        let result = from("!hola").await;
+        assert_err_with(&result, UserManagerCreationError::NoUsers);
+
+        let result = from("        ! pedro 😎😎😎😎                      ").await;
+        assert_err_with(&result, UserManagerCreationError::NoUsers);
+    }
+
+    #[tokio::test]
+    async fn test_invalid_utf8() {
+        let valid = from_bytes("áeíoú💀😎🤩😪💀".as_bytes()).await;
+        assert!(valid.is_err_and(|e| !matches!(
+            e,
+            UserManagerCreationError::InvalidUtf8 {
+                line_number: _,
+                byte_at: _
+            }
+        )));
+
+        let invalid = from_bytes(&"áeíoú💀😎🤩😪💀".as_bytes()[0..22]).await;
+        assert_err_with(
+            &invalid,
+            UserManagerCreationError::InvalidUtf8 {
+                line_number: 1,
+                byte_at: 21,
+            },
+        )
+    }
+
+    #[tokio::test]
+    async fn test_line_too_long() {
+        let result = from(&format!(
+            "{}#pedro:pedro{}",
+            " ".repeat(process_lines::BUFFER_CAPACITY - 12 - 69 - 1),
+            " ".repeat(69)
+        ))
+        .await;
+        assert_ok_with(&result, &[("pedro", &format!("pedro{}", " ".repeat(69)), UserRole::User)]);
+
+        let result = from(&format!(
+            "{}#pedro:pedro{}",
+            " ".repeat(process_lines::BUFFER_CAPACITY - 12 - 69),
+            " ".repeat(69)
+        ))
+        .await;
+        assert_err_with(
+            &result,
+            UserManagerCreationError::LineTooLong {
+                line_number: 1,
+                byte_at: process_lines::BUFFER_CAPACITY,
+            },
+        );
+    }
+
+    #[tokio::test]
+    async fn test_invalid_rolechar() {
+        let result = from("$petre:griffon").await;
+        assert_err_with(&result, UserManagerCreationError::InvalidRoleChar(1, 1, '$'));
+
+        let result = from("   =").await;
+        assert_err_with(&result, UserManagerCreationError::InvalidRoleChar(1, 4, '='));
+    }
+
+    #[tokio::test]
+    async fn test_no_password() {
+        let result = from("#petre").await;
+        assert_err_with(&result, UserManagerCreationError::ExpectedColonGotEOF(1, 6));
+
+        let result = from("   @sus").await;
+        assert_err_with(&result, UserManagerCreationError::ExpectedColonGotEOF(1, 7));
+    }
+
+    #[tokio::test]
+    async fn test_empty_username() {
+        let result = from("#:marcos").await;
+        assert_err_with(&result, UserManagerCreationError::EmptyUsername(1, 2));
+
+        let result = from("      @:soco:troco").await;
+        assert_err_with(&result, UserManagerCreationError::EmptyUsername(1, 8));
+    }
+
+    #[tokio::test]
+    async fn test_username_too_long() {
+        let result = from(&format!(" #{}:password", "a".repeat(255))).await;
+        assert_ok_with(&result, &[(&"a".repeat(255), "password", UserRole::User)]);
+
+        let result = from(&format!("   #{}:password", "a".repeat(256))).await;
+        assert_err_with(&result, UserManagerCreationError::UsernameTooLong(1, 260));
+    }
+
+    #[tokio::test]
+    async fn test_empty_password() {
+        let result = from("#carmen:").await;
+        assert_err_with(&result, UserManagerCreationError::EmptyPassword(1, 8));
+
+        let result = from("@chí:").await;
+        assert_err_with(&result, UserManagerCreationError::EmptyPassword(1, 5));
+    }
+
+    #[tokio::test]
+    async fn test_password_too_long() {
+        let result = from(&format!(" #username:{}", "b".repeat(255))).await;
+        assert_ok_with(&result, &[("username", &"b".repeat(255), UserRole::User)]);
+
+        let result = from(&format!("   #username:{}", "b".repeat(256))).await;
+        assert_err_with(&result, UserManagerCreationError::PasswordTooLong(1, 269));
+    }
+
+    #[tokio::test]
+    async fn test_integration1() {
+        let result = from(concat!(
+            " ! This is a comment!\n",
+            "\n",
+            " ! Our admin Pedro, everybody loves him\n",
+            " @pedro:pedrito4321\n",
+            "\n",
+            " ! Our first user Carlos and his brother Felipe, fucken assholes\n",
+            " #carlos:carlitox@33\n",
+            " #felipe:mi_hermano_es_un_boludo\n",
+            "\n",
+            " ! My friend chi:chi, nobody knows why she put a ':' in her name:\n",
+            " #chi\\:chí:super:secret:password\n",
+            " ! Chi:chí's password is \"super:secret:password\"\n",
+        ))
+        .await;
+
+        assert_ok_with(
+            &result,
+            &[
+                ("pedro", "pedrito4321", UserRole::Admin),
+                ("carlos", "carlitox@33", UserRole::User),
+                ("felipe", "mi_hermano_es_un_boludo", UserRole::User),
+                ("chi:chí", "super:secret:password", UserRole::User),
+            ],
+        );
     }
 }

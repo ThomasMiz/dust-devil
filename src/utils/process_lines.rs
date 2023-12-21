@@ -2,7 +2,7 @@ use std::io;
 
 use tokio::io::{AsyncRead, AsyncReadExt};
 
-const BUFFER_CAPACITY: usize = 0x2000;
+pub const BUFFER_CAPACITY: usize = 0x2000;
 
 #[derive(Debug)]
 pub enum ProcessFileLinesError<T> {

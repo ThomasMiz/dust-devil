@@ -276,9 +276,9 @@ fn parse_new_user_arg(result: &mut StartupArguments, arg: String, maybe_arg2: Op
     let arg2_trimmed = arg2.trim();
     let starts_with_alphanumeric = arg2_trimmed.chars().next().filter(|c| c.is_alphanumeric()).is_some();
     let parse_result = if starts_with_alphanumeric {
-        users::parse_line_into_user(&format!("{}{arg2_trimmed}", users::USER_PREFIX_CHAR), 1)
+        users::parse_line_into_user(&format!("{}{arg2_trimmed}", users::USER_PREFIX_CHAR), 1, 1)
     } else {
-        users::parse_line_into_user(arg2_trimmed, 1)
+        users::parse_line_into_user(arg2_trimmed, 1, 0)
     };
 
     let user = match parse_result {
