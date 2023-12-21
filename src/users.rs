@@ -59,13 +59,13 @@ pub struct UserManager {
     users: DashMap<String, UserData>,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum UserRole {
     Admin,
     User,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct UserData {
     pub password: String,
     pub role: UserRole,
@@ -80,7 +80,9 @@ pub enum UserManagerCreationError {
     InvalidRoleChar(u32, u32, char),
     ExpectedColonGotEOF(u32, u32),
     EmptyUsername(u32, u32),
+    UsernameTooLong(u32, u32),
     EmptyPassword(u32, u32),
+    PasswordTooLong(u32, u32),
     NoUsers,
 }
 
@@ -107,7 +109,9 @@ impl fmt::Display for UserManagerCreationError {
                 write!(f, "Unexpected EOF (expected colon ':' after name) at {line_number}:{char_at}")
             }
             UserManagerCreationError::EmptyUsername(line_number, char_at) => write!(f, "Empty username field at {line_number}:{char_at}"),
+            UserManagerCreationError::UsernameTooLong(line_number, char_at) => write!(f, "Username too long at {line_number}:{char_at}"),
             UserManagerCreationError::EmptyPassword(line_number, char_at) => write!(f, "Empty password field at {line_number}:{char_at}"),
+            UserManagerCreationError::PasswordTooLong(line_number, char_at) => write!(f, "Password too long at {line_number}:{char_at}"),
             UserManagerCreationError::NoUsers => write!(f, "No users"),
         }
     }
@@ -126,7 +130,7 @@ pub fn parse_line_into_user(s: &str, line_number: u32) -> Result<Option<(String,
         _ => return Err(UserManagerCreationError::InvalidRoleChar(line_number, char_at, role_char)),
     };
 
-    let mut username = String::new();
+    let mut username = String::with_capacity(255);
     let mut escape_next = false;
     loop {
         let next_char = chars
@@ -134,15 +138,19 @@ pub fn parse_line_into_user(s: &str, line_number: u32) -> Result<Option<(String,
             .ok_or(UserManagerCreationError::ExpectedColonGotEOF(line_number, char_at))?;
         char_at += 1;
 
-        if escape_next {
+        if escape_next || (next_char != ESCAPE_CHAR && next_char != ':') {
+            if username.len() >= 255 {
+                return Err(UserManagerCreationError::UsernameTooLong(line_number, char_at));
+            }
             username.push(next_char);
+        }
+
+        if escape_next {
             escape_next = false;
         } else if next_char == ESCAPE_CHAR {
             escape_next = true;
         } else if next_char == ':' {
             break;
-        } else {
-            username.push(next_char);
         }
     }
 
@@ -150,17 +158,22 @@ pub fn parse_line_into_user(s: &str, line_number: u32) -> Result<Option<(String,
         return Err(UserManagerCreationError::EmptyUsername(line_number, char_at));
     }
 
-    let mut password = String::new();
+    let mut password = String::with_capacity(255);
     let mut escape_next = false;
     for next_char in chars {
         char_at += 1;
-        if escape_next {
+
+        if escape_next || next_char != ESCAPE_CHAR {
+            if password.len() >= 255 {
+                return Err(UserManagerCreationError::PasswordTooLong(line_number, char_at));
+            }
             password.push(next_char);
+        }
+
+        if escape_next {
             escape_next = false;
         } else if next_char == ESCAPE_CHAR {
             escape_next = true;
-        } else {
-            password.push(next_char);
         }
     }
 

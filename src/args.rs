@@ -1,3 +1,25 @@
+//! A parser for the command-line arguments dust-devil can receive. The parser is invoked with the
+//! `parse_arguments` function, which takes in an iterator of `String`s and returns a `Result` with
+//! either an `ArgumentsRequest` on success, or an `ArgumentsError` on error.
+//!
+//! `ArgumentsRequest` is an enum with three variants; `Help`, `Version`, and
+//! `Run(StartupArguments)`. This is to differentiate between when the user requests information to
+//! the program, such as version or the help menu (and after displaying it the program should
+//! close), or when the program should actually run a socks5 server, in which case that variant
+//! provides a `StartupArguments` with the arguments parsed into a struct, including things like
+//! the sockets to open, the path to the users file, which authentication methods are enabled, etc.
+//! The `StartupArguments` instance is filled with default values for those not specified via
+//! parameters.
+//!
+//! The `ArgumentsError` enum provides fine-detailed information on why the arguments are invalid.
+//! This can include an unknown argument, as well as improper use of a valid argument. That said,
+//! `ArgumentsError` as well as all subenums used within it implement the `fmt::Display` trait for
+//! easy printing, so in order to print a human-readable explanation of why the syntax is invalid
+//! a caller of `parse_arguments` may simply use `println!("{}", args_error);`.
+//!
+//! Additionally, the `get_version_string` and `get_help_string` functions provide human-readable
+//! strings intended to be printed for their respective purposes.
+
 use std::{
     collections::HashMap,
     fmt,
@@ -43,7 +65,14 @@ pub fn get_help_string() -> &'static str {
     )
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
+pub enum ArgumentsRequest {
+    Help,
+    Version,
+    Run(StartupArguments),
+}
+
+#[derive(Debug, PartialEq)]
 pub struct StartupArguments {
     pub socks5_bind_sockets: Vec<SocketAddr>,
     pub verbose: bool,
@@ -77,14 +106,15 @@ impl StartupArguments {
     }
 }
 
-#[derive(Debug)]
-pub enum ArgumentsRequest {
-    Help,
-    Version,
-    Run(StartupArguments),
+impl Default for StartupArguments {
+    fn default() -> Self {
+        let mut args = Self::empty();
+        args.fill_empty_fields_with_defaults();
+        args
+    }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum ArgumentsError {
     UknownArgument(String),
     ListenError(ListenErrorType),
@@ -105,7 +135,7 @@ impl fmt::Display for ArgumentsError {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum ListenErrorType {
     UnexpectedEnd(String),
     InvalidSocketAddress(String, String),
@@ -154,7 +184,7 @@ fn parse_listen_address_arg(result: &mut StartupArguments, arg: String, maybe_ar
     Ok(())
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum UsersFileErrorType {
     UnexpectedEnd(String),
     AlreadySpecified(String),
@@ -193,7 +223,7 @@ fn parse_users_file_arg(result: &mut StartupArguments, arg: String, maybe_arg2: 
     Ok(())
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum NewUserErrorType {
     UnexpectedEnd(String),
     DuplicateUsername(String, String),
@@ -216,7 +246,7 @@ impl From<NewUserErrorType> for ArgumentsError {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum AuthToggleErrorType {
     UnexpectedEnd(String),
     InvalidAuthType(String, String),
@@ -292,7 +322,9 @@ where
     args.next();
 
     while let Some(arg) = args.next() {
-        if arg.eq_ignore_ascii_case("-h") || arg.eq_ignore_ascii_case("--help") {
+        if arg.is_empty() {
+            continue;
+        } else if arg.eq_ignore_ascii_case("-h") || arg.eq_ignore_ascii_case("--help") {
             return Ok(ArgumentsRequest::Help);
         } else if arg.eq("-V") || arg.eq_ignore_ascii_case("--version") {
             return Ok(ArgumentsRequest::Version);
@@ -315,4 +347,569 @@ where
 
     result.fill_empty_fields_with_defaults();
     Ok(ArgumentsRequest::Run(result))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        collections::HashMap,
+        net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6},
+    };
+
+    use crate::users::{UserData, UserRole};
+
+    use super::{
+        parse_arguments, ArgumentsError, ArgumentsRequest, AuthToggleErrorType, ListenErrorType, NewUserErrorType, StartupArguments,
+        UsersFileErrorType, DEFAULT_PORT,
+    };
+
+    fn args(s: &str) -> Result<ArgumentsRequest, ArgumentsError> {
+        let iter = [String::from("./programname")]
+            .into_iter()
+            .chain(s.split_whitespace().map(String::from));
+        parse_arguments(iter)
+    }
+
+    fn args_vec(s: &[&str]) -> Result<ArgumentsRequest, ArgumentsError> {
+        let iter = [String::from("./programname")]
+            .into_iter()
+            .chain(s.iter().map(|&x| String::from(x)));
+        parse_arguments(iter)
+    }
+
+    fn usermap(s: &[(&str, &str, UserRole)]) -> HashMap<String, UserData> {
+        let mut h = HashMap::new();
+        for (username, password, role) in s {
+            let username = String::from(*username);
+            let password = String::from(*password);
+            h.insert(username, UserData { password, role: *role });
+        }
+
+        h
+    }
+
+    #[test]
+    fn test_default() {
+        let result = args("");
+        assert_eq!(result, Ok(ArgumentsRequest::Run(StartupArguments::default())));
+    }
+
+    #[test]
+    fn test_help_alone() {
+        let result = args("-h");
+        assert_eq!(result, Ok(ArgumentsRequest::Help));
+
+        let result = args("--help");
+        assert_eq!(result, Ok(ArgumentsRequest::Help));
+    }
+
+    #[test]
+    fn test_help_last() {
+        let result = args("-l localhost:1080 -u #user:pass -h");
+        assert_eq!(result, Ok(ArgumentsRequest::Help));
+
+        let result = args("-u #user:pass -v --help -l localhost:1080");
+        assert_eq!(result, Ok(ArgumentsRequest::Help));
+    }
+
+    #[test]
+    fn test_version_alone() {
+        let result = args("-V");
+        assert_eq!(result, Ok(ArgumentsRequest::Version));
+
+        let result = args("--version");
+        assert_eq!(result, Ok(ArgumentsRequest::Version));
+    }
+
+    #[test]
+    fn test_version_last() {
+        let result = args("-l localhost:1080 -u #user:pass -V");
+        assert_eq!(result, Ok(ArgumentsRequest::Version));
+
+        let result = args("--verbose -A noauth --version -u #petre:griffon");
+        assert_eq!(result, Ok(ArgumentsRequest::Version));
+    }
+
+    #[test]
+    fn test_verbose_alone() {
+        let result = args("-v");
+        assert_eq!(
+            result,
+            Ok(ArgumentsRequest::Run(StartupArguments {
+                verbose: true,
+                ..Default::default()
+            }))
+        );
+
+        let result = args("--verbose");
+        assert_eq!(
+            result,
+            Ok(ArgumentsRequest::Run(StartupArguments {
+                verbose: true,
+                ..Default::default()
+            }))
+        );
+    }
+
+    #[test]
+    fn test_listen_single() {
+        let result = args("-l 1.2.3.4:56789");
+        assert_eq!(
+            result,
+            Ok(ArgumentsRequest::Run(StartupArguments {
+                socks5_bind_sockets: vec![SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(1, 2, 3, 4), 56789))],
+                ..Default::default()
+            }))
+        );
+    }
+
+    #[test]
+    fn test_listen_default_port() {
+        let result = args("-l 1.2.3.4");
+        assert_eq!(
+            result,
+            Ok(ArgumentsRequest::Run(StartupArguments {
+                socks5_bind_sockets: vec![SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(1, 2, 3, 4), DEFAULT_PORT))],
+                ..Default::default()
+            }))
+        );
+
+        let result = args("-l 127.0.4.20 -l [fefe::afaf%69420]");
+        assert_eq!(
+            result,
+            Ok(ArgumentsRequest::Run(StartupArguments {
+                socks5_bind_sockets: vec![
+                    SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(127, 0, 4, 20), DEFAULT_PORT)),
+                    SocketAddr::V6(SocketAddrV6::new(
+                        Ipv6Addr::new(0xfefe, 0, 0, 0, 0, 0, 0, 0xafaf),
+                        DEFAULT_PORT,
+                        0,
+                        69420
+                    )),
+                ],
+                ..Default::default()
+            }))
+        );
+    }
+
+    #[test]
+    fn test_listen_multiple() {
+        let result = args("-l [abcd::4f5:2e2e:4321:3ac3%69]:7164 -l 1.2.3.4:56789");
+        assert_eq!(
+            result,
+            Ok(ArgumentsRequest::Run(StartupArguments {
+                socks5_bind_sockets: vec![
+                    SocketAddr::V6(SocketAddrV6::new(
+                        Ipv6Addr::new(0xabcd, 0, 0, 0, 0x04f5, 0x2e2e, 0x4321, 0x3ac3),
+                        7164,
+                        0,
+                        69
+                    )),
+                    SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(1, 2, 3, 4), 56789)),
+                ],
+                ..Default::default()
+            }))
+        );
+    }
+
+    #[test]
+    fn test_listen_unexpected_end() {
+        let result = args("-l");
+        assert_eq!(
+            result,
+            Err(ArgumentsError::ListenError(ListenErrorType::UnexpectedEnd("-l".to_string())))
+        );
+
+        let result = args("--listen");
+        assert_eq!(
+            result,
+            Err(ArgumentsError::ListenError(ListenErrorType::UnexpectedEnd("--listen".to_string())))
+        );
+    }
+
+    #[test]
+    fn test_listen_bad_format() {
+        let result = args("-l 127.420.666.0");
+        assert_eq!(
+            result,
+            Err(ArgumentsError::ListenError(ListenErrorType::InvalidSocketAddress(
+                "-l".to_string(),
+                "127.420.666.0".to_string()
+            )))
+        );
+
+        let result = args("--listen [fafa::fefe:fifi:fofo:fufu]");
+        assert_eq!(
+            result,
+            Err(ArgumentsError::ListenError(ListenErrorType::InvalidSocketAddress(
+                "--listen".to_string(),
+                "[fafa::fefe:fifi:fofo:fufu]".to_string()
+            )))
+        );
+
+        let result = args_vec(&["--listen", "alto chori ameo 🤩🤩"]);
+        assert_eq!(
+            result,
+            Err(ArgumentsError::ListenError(ListenErrorType::InvalidSocketAddress(
+                "--listen".to_string(),
+                "alto chori ameo 🤩🤩".to_string()
+            )))
+        );
+    }
+
+    #[test]
+    fn test_users_file() {
+        let result = args("-U ./some/dir/file.txt");
+        assert_eq!(
+            result,
+            Ok(ArgumentsRequest::Run(StartupArguments {
+                users_file: "./some/dir/file.txt".to_string(),
+                ..Default::default()
+            }))
+        );
+
+        let result = args("--users-file ./some/dir/file.txt");
+        assert_eq!(
+            result,
+            Ok(ArgumentsRequest::Run(StartupArguments {
+                users_file: "./some/dir/file.txt".to_string(),
+                ..Default::default()
+            }))
+        );
+    }
+
+    #[test]
+    fn test_users_file_empty() {
+        let result = args_vec(&["-U", ""]);
+        assert_eq!(
+            result,
+            Err(ArgumentsError::UsersFileError(UsersFileErrorType::EmptyPath("-U".to_string())))
+        );
+
+        let result = args_vec(&["--users-file", ""]);
+        assert_eq!(
+            result,
+            Err(ArgumentsError::UsersFileError(UsersFileErrorType::EmptyPath(
+                "--users-file".to_string()
+            )))
+        );
+    }
+
+    #[test]
+    fn test_users_file_unexpected_end() {
+        let result = args("-U");
+        assert_eq!(
+            result,
+            Err(ArgumentsError::UsersFileError(UsersFileErrorType::UnexpectedEnd("-U".to_string())))
+        );
+
+        let result = args("--users-file");
+        assert_eq!(
+            result,
+            Err(ArgumentsError::UsersFileError(UsersFileErrorType::UnexpectedEnd(
+                "--users-file".to_string()
+            )))
+        );
+    }
+
+    #[test]
+    fn test_users_file_specified_twice() {
+        let result = args("-U ./my_users -v --users-file againnnn");
+        assert_eq!(
+            result,
+            Err(ArgumentsError::UsersFileError(UsersFileErrorType::AlreadySpecified(
+                "--users-file".to_string()
+            )))
+        );
+
+        let result = args("--users-file ./my_users -v -U againnnn");
+        assert_eq!(
+            result,
+            Err(ArgumentsError::UsersFileError(UsersFileErrorType::AlreadySpecified(
+                "-U".to_string()
+            )))
+        );
+    }
+
+    #[test]
+    fn test_user_single_regular() {
+        let result = args("-u petre:griffon");
+        assert_eq!(
+            result,
+            Ok(ArgumentsRequest::Run(StartupArguments {
+                users: usermap(&[("petre", "griffon", UserRole::User)]),
+                ..Default::default()
+            }))
+        );
+
+        let result = args("-u #petre:griffon");
+        assert_eq!(
+            result,
+            Ok(ArgumentsRequest::Run(StartupArguments {
+                users: usermap(&[("petre", "griffon", UserRole::User)]),
+                ..Default::default()
+            }))
+        );
+
+        let result = args("--user per$te:groff:ofo");
+        assert_eq!(
+            result,
+            Ok(ArgumentsRequest::Run(StartupArguments {
+                users: usermap(&[("per$te", "groff:ofo", UserRole::User)]),
+                ..Default::default()
+            }))
+        );
+
+        let result = args("--user #perte:groffofo");
+        assert_eq!(
+            result,
+            Ok(ArgumentsRequest::Run(StartupArguments {
+                users: usermap(&[("perte", "groffofo", UserRole::User)]),
+                ..Default::default()
+            }))
+        );
+    }
+
+    #[test]
+    fn test_user_single_admin() {
+        let result = args("--user @pe#rper:gor=fon");
+        assert_eq!(
+            result,
+            Ok(ArgumentsRequest::Run(StartupArguments {
+                users: usermap(&[("pe#rper", "gor=fon", UserRole::Admin)]),
+                ..Default::default()
+            }))
+        );
+
+        let result = args("--user @PeréPe:GoroFoFo");
+        assert_eq!(
+            result,
+            Ok(ArgumentsRequest::Run(StartupArguments {
+                users: usermap(&[("PeréPe", "GoroFoFo", UserRole::Admin)]),
+                ..Default::default()
+            }))
+        );
+    }
+
+    #[test]
+    fn test_user_multiple_complex_names() {
+        let result = args("-u ##pé\\:çá\\:'h\\\\**\\:\\::@=:::\\\\NíÇ --user @👋h\\:e\\:llo\\\\_wÚrl?d:@@👍👍ÁÇçE💀fórgôr💀💀");
+        assert_eq!(
+            result,
+            Ok(ArgumentsRequest::Run(StartupArguments {
+                users: usermap(&[
+                    ("#pé:çá:'h\\**::", "@=:::\\NíÇ", UserRole::User),
+                    ("👋h:e:llo\\_wÚrl?d", "@@👍👍ÁÇçE💀fórgôr💀💀", UserRole::Admin),
+                ]),
+                ..Default::default()
+            }))
+        );
+    }
+
+    #[test]
+    fn test_user_unexpected_end() {
+        let result = args("-u");
+        assert_eq!(
+            result,
+            Err(ArgumentsError::NewUserError(NewUserErrorType::UnexpectedEnd("-u".to_string())))
+        );
+    }
+
+    #[test]
+    fn test_user_duplicate_username() {
+        let result = args("-u #pedro:pedro -u pedró:pedro --user @pedro:pedro");
+        assert_eq!(
+            result,
+            Err(ArgumentsError::NewUserError(NewUserErrorType::DuplicateUsername(
+                "--user".to_string(),
+                "@pedro:pedro".to_string()
+            )))
+        );
+    }
+
+    #[test]
+    fn test_user_field_too_long() {
+        let arg = "-u #".to_string() + &"a".repeat(255) + ":" + &"b".repeat(255);
+        let result = args(&arg);
+        assert_eq!(
+            result,
+            Ok(ArgumentsRequest::Run(StartupArguments {
+                users: usermap(&[(&"a".repeat(255), &"b".repeat(255), UserRole::User)]),
+                ..Default::default()
+            }))
+        );
+
+        let arg = "--user #".to_string() + &"a".repeat(256) + ":" + &"b".repeat(255);
+        let result = args(&arg);
+        assert_eq!(
+            result,
+            Err(ArgumentsError::NewUserError(NewUserErrorType::InvalidUserSpecification(
+                "--user".to_string(),
+                arg[7..].to_string()
+            )))
+        );
+
+        let arg = "-u #".to_string() + &"a".repeat(255) + ":" + &"b".repeat(256);
+        let result = args(&arg);
+        assert_eq!(
+            result,
+            Err(ArgumentsError::NewUserError(NewUserErrorType::InvalidUserSpecification(
+                "-u".to_string(),
+                arg[3..].to_string()
+            )))
+        );
+    }
+
+    #[test]
+    fn test_auth_disable() {
+        let result = args("-a noauth");
+        assert_eq!(
+            result,
+            Ok(ArgumentsRequest::Run(StartupArguments {
+                no_auth_enabled: false,
+                ..Default::default()
+            }))
+        );
+
+        let result = args("--auth-disable noauth -a userpass");
+        assert_eq!(
+            result,
+            Ok(ArgumentsRequest::Run(StartupArguments {
+                no_auth_enabled: false,
+                userpass_auth_enabled: false,
+                ..Default::default()
+            }))
+        );
+    }
+
+    #[test]
+    fn test_auth_enable() {
+        let result = args("-A noauth");
+        assert_eq!(
+            result,
+            Ok(ArgumentsRequest::Run(StartupArguments {
+                no_auth_enabled: true,
+                ..Default::default()
+            }))
+        );
+
+        let result = args("--auth-enable noauth -A userpass");
+        assert_eq!(
+            result,
+            Ok(ArgumentsRequest::Run(StartupArguments {
+                no_auth_enabled: true,
+                userpass_auth_enabled: true,
+                ..Default::default()
+            }))
+        );
+    }
+
+    #[test]
+    fn test_auth_unexpected_end() {
+        let result = args("-a");
+        assert_eq!(
+            result,
+            Err(ArgumentsError::AuthToggleError(AuthToggleErrorType::UnexpectedEnd(
+                "-a".to_string()
+            )))
+        );
+
+        let result = args("--auth-disable");
+        assert_eq!(
+            result,
+            Err(ArgumentsError::AuthToggleError(AuthToggleErrorType::UnexpectedEnd(
+                "--auth-disable".to_string()
+            )))
+        );
+
+        let result = args("-A");
+        assert_eq!(
+            result,
+            Err(ArgumentsError::AuthToggleError(AuthToggleErrorType::UnexpectedEnd(
+                "-A".to_string()
+            )))
+        );
+
+        let result = args("--auth-enable");
+        assert_eq!(
+            result,
+            Err(ArgumentsError::AuthToggleError(AuthToggleErrorType::UnexpectedEnd(
+                "--auth-enable".to_string()
+            )))
+        );
+    }
+
+    #[test]
+    fn test_auth_invalid_types() {
+        let result = args("-a noauthh");
+        assert_eq!(
+            result,
+            Err(ArgumentsError::AuthToggleError(AuthToggleErrorType::InvalidAuthType(
+                "-a".to_string(),
+                "noauthh".to_string()
+            )))
+        );
+
+        let result = args("-A usempass");
+        assert_eq!(
+            result,
+            Err(ArgumentsError::AuthToggleError(AuthToggleErrorType::InvalidAuthType(
+                "-A".to_string(),
+                "usempass".to_string()
+            )))
+        );
+
+        let result = args("--auth-disable marcos");
+        assert_eq!(
+            result,
+            Err(ArgumentsError::AuthToggleError(AuthToggleErrorType::InvalidAuthType(
+                "--auth-disable".to_string(),
+                "marcos".to_string()
+            )))
+        );
+
+        let result = args("--auth-enable cucurucho");
+        assert_eq!(
+            result,
+            Err(ArgumentsError::AuthToggleError(AuthToggleErrorType::InvalidAuthType(
+                "--auth-enable".to_string(),
+                "cucurucho".to_string()
+            )))
+        );
+    }
+
+    #[test]
+    fn test_integration1() {
+        let result = args("-l 0.0.0.0 -v -u #pedro:pedro -l [::1%6969]:6060 -U myfile.txt --auth-disable noauth -u @\\\\so\\:co:tr\\\\oco");
+        assert_eq!(
+            result,
+            Ok(ArgumentsRequest::Run(StartupArguments {
+                socks5_bind_sockets: vec![
+                    SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, DEFAULT_PORT)),
+                    SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::LOCALHOST, 6060, 0, 6969)),
+                ],
+                verbose: true,
+                users: usermap(&[("pedro", "pedro", UserRole::User), ("\\so:co", "tr\\oco", UserRole::Admin),]),
+                users_file: "myfile.txt".to_string(),
+                no_auth_enabled: false,
+                ..Default::default()
+            }))
+        );
+    }
+
+    #[test]
+    fn test_integration2() {
+        let result = args("-U picante.txt --auth-enable noauth -u juan:carlos -v -u #carlos:juan --auth-disable userpass -l 1.2.3.4:5678");
+        assert_eq!(
+            result,
+            Ok(ArgumentsRequest::Run(StartupArguments {
+                users_file: "picante.txt".to_string(),
+                no_auth_enabled: true,
+                userpass_auth_enabled: false,
+                users: usermap(&[("juan", "carlos", UserRole::User), ("carlos", "juan", UserRole::User),]),
+                verbose: true,
+                socks5_bind_sockets: vec![SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(1, 2, 3, 4), 5678))],
+            }))
+        );
+    }
 }
