@@ -4,15 +4,10 @@ use tokio::{net::TcpListener, select};
 
 use crate::{
     args::StartupArguments,
+    context::{ClientContext, ServerState},
     socks5,
     users::{UserManager, UserRole},
 };
-
-pub struct ServerState {
-    pub users: UserManager,
-    pub no_auth_enabled: bool,
-    pub userpass_auth_enabled: bool,
-}
 
 async fn accept_from_any(listeners: &Vec<TcpListener>) -> Result<(tokio::net::TcpStream, std::net::SocketAddr), std::io::Error> {
     poll_fn(|cx| {
@@ -55,16 +50,6 @@ pub async fn run_server(mut startup_args: StartupArguments) {
         users.insert(String::from("admin"), String::from("admin"), UserRole::Admin);
     }
 
-    let state = ServerState {
-        users,
-        no_auth_enabled: startup_args.no_auth_enabled,
-        userpass_auth_enabled: startup_args.userpass_auth_enabled,
-    };
-
-    let state = Arc::new(state);
-
-    let mut client_id_counter: u64 = 1;
-
     let mut listeners = Vec::new();
     for bind_address in startup_args.socks5_bind_sockets {
         match TcpListener::bind(bind_address).await {
@@ -78,17 +63,21 @@ pub async fn run_server(mut startup_args: StartupArguments) {
         return;
     }
 
+    let state = ServerState::new(users, startup_args.no_auth_enabled, startup_args.userpass_auth_enabled);
+    let state = Arc::new(state);
+
+    let mut client_id_counter: u64 = 1;
+
     loop {
         select! {
             accept_result = accept_from_any(&listeners) => {
                 match accept_result {
                     Ok((socket, address)) => {
                         println!("Accepted new connection from {}", address);
-                        let client_id = client_id_counter;
+                        let client_context = ClientContext::create(client_id_counter, &state);
                         client_id_counter += 1;
-                        let state1 = Arc::clone(&state);
                         tokio::spawn(async move {
-                            socks5::handle_socks5(socket, client_id, state1).await;
+                            socks5::handle_socks5(socket, client_context).await;
                         });
                     },
                     Err(err) => {
@@ -100,7 +89,7 @@ pub async fn run_server(mut startup_args: StartupArguments) {
         }
     }
     println!("Saving users...");
-    if let Err(err) = state.users.save_to_file(&startup_args.users_file).await {
+    if let Err(err) = state.users().save_to_file(&startup_args.users_file).await {
         println!("ERROR: Failed to save users file! {err:?}");
     }
 

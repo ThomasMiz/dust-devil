@@ -7,10 +7,13 @@
 use tokio::io::{AsyncBufRead, AsyncWrite};
 
 use std::{
+    future::poll_fn,
     io,
     pin::Pin,
-    task::{ready, Context, Poll}, future::poll_fn,
+    task::{ready, Context, Poll},
 };
+
+use crate::context::ClientContext;
 
 enum TransferState {
     Running(u64),
@@ -23,7 +26,7 @@ fn transfer_one_direction<R, W>(
     state: &mut TransferState,
     reader: &mut R,
     writer: &mut W,
-    client_id: u64,
+    context: &ClientContext,
     is_src_to_dst: bool,
 ) -> Poll<io::Result<u64>>
 where
@@ -51,11 +54,19 @@ where
                     continue;
                 }
                 *amt += i as u64;
+
                 println!(
                     "Client {} {} {i} bytes",
-                    client_id,
+                    context.client_id(),
                     if is_src_to_dst { "sending" } else { "receiving" }
                 );
+
+                if is_src_to_dst {
+                    context.register_bytes_sent(i as u64);
+                } else {
+                    context.register_bytes_received(i as u64);
+                }
+
                 reader.as_mut().consume(i);
             }
             TransferState::ShuttingDown(count) => {
@@ -79,14 +90,14 @@ pub async fn copy_bidirectional<
     src_writer: &'a mut W1,
     dst_reader: &'a mut R2,
     dst_writer: &'a mut W2,
-    client_id: u64,
+    context: &ClientContext,
 ) -> Result<(u64, u64), io::Error> {
     let mut src_to_dst = TransferState::Running(0);
     let mut dst_to_src = TransferState::Running(0);
 
     poll_fn(|cx| {
-        let src_to_dst = transfer_one_direction(cx, &mut src_to_dst, src_reader, dst_writer, client_id, true)?;
-        let dst_to_src = transfer_one_direction(cx, &mut dst_to_src, dst_reader, src_writer, client_id, false)?;
+        let src_to_dst = transfer_one_direction(cx, &mut src_to_dst, src_reader, dst_writer, context, true)?;
+        let dst_to_src = transfer_one_direction(cx, &mut dst_to_src, dst_reader, src_writer, context, false)?;
 
         // It is not a problem if ready! returns early because transfer_one_direction for the
         // other direction will keep returning TransferState::Done(count) in future calls to poll

@@ -1,7 +1,6 @@
 use std::{
     io::{self, ErrorKind},
     net::{SocketAddr, SocketAddrV4, SocketAddrV6},
-    sync::Arc,
 };
 
 use tokio::{
@@ -9,10 +8,13 @@ use tokio::{
     net::{TcpSocket, TcpStream},
 };
 
-use crate::{socks5::{
-    parsers::{parse_handshake, parse_request, SocksRequestAddress},
-    responses::{send_handshake_response, send_request_response},
-}, server::ServerState};
+use crate::{
+    context::ClientContext,
+    socks5::{
+        parsers::{parse_handshake, parse_request, SocksRequestAddress},
+        responses::{send_handshake_response, send_request_response},
+    },
+};
 
 mod auth;
 mod chunk_reader;
@@ -48,20 +50,21 @@ impl From<SocksError> for SocksStatus {
     }
 }
 
-pub async fn handle_socks5(stream: TcpStream, client_id: u64, state: Arc<ServerState>) {
-    match handle_socks5_inner(stream, client_id, state).await {
-        Ok(()) => println!("Client {client_id} connection closed"),
-        Err(error) => println!("Client {client_id} closed with IO error: {error}"),
+pub async fn handle_socks5(stream: TcpStream, context: ClientContext) {
+    match handle_socks5_inner(stream, &context).await {
+        Ok(()) => println!("Client {} connection closed", context.client_id()),
+        Err(error) => println!("Client {} closed with IO error: {error}", context.client_id()),
     }
 }
 
-async fn handle_socks5_inner(mut stream: TcpStream, client_id: u64, state: Arc<ServerState>) -> Result<(), io::Error> {
+async fn handle_socks5_inner(mut stream: TcpStream, context: &ClientContext) -> Result<(), io::Error> {
     let (reader, mut writer) = stream.split();
     let mut reader = BufReader::new(reader);
+    let client_id = context.client_id();
 
     println!("Client {client_id} doing handshake...");
     let auth_method = match parse_handshake(&mut reader).await {
-        Ok(handshake) => select_auth_method(&state, &handshake.methods),
+        Ok(handshake) => select_auth_method(context, &handshake.methods),
         Err(SocksError::IO(error)) => return Err(error),
         Err(SocksError::InvalidVersion(ver)) => {
             println!("Client {client_id} requested unsupported socks version: {ver}");
@@ -83,7 +86,7 @@ async fn handle_socks5_inner(mut stream: TcpStream, client_id: u64, state: Arc<S
 
     let auth_status = match auth_method {
         AuthMethod::NoAuth => true,
-        AuthMethod::UsernameAndPassword => handle_userpass_auth(&mut reader, &mut writer, &state, client_id).await?,
+        AuthMethod::UsernameAndPassword => handle_userpass_auth(&mut reader, &mut writer, context, client_id).await?,
         _ => false,
     };
 
@@ -136,7 +139,7 @@ async fn handle_socks5_inner(mut stream: TcpStream, client_id: u64, state: Arc<S
     let (dst_reader, mut dst_writer) = destination_stream.split();
     let mut dst_reader = BufReader::new(dst_reader);
 
-    let result = copy::copy_bidirectional(&mut reader, &mut writer, &mut dst_reader, &mut dst_writer, client_id).await;
+    let result = copy::copy_bidirectional(&mut reader, &mut writer, &mut dst_reader, &mut dst_writer, context).await;
     match result {
         Ok((client_to_remote, remote_to_client)) => {
             println!("Client {client_id} finished after {client_to_remote} bytes sent and {remote_to_client} bytes received");
@@ -149,10 +152,10 @@ async fn handle_socks5_inner(mut stream: TcpStream, client_id: u64, state: Arc<S
     Ok(())
 }
 
-fn select_auth_method(state: &Arc<ServerState>, methods: &[u8]) -> AuthMethod {
-    if state.no_auth_enabled && methods.contains(&(AuthMethod::NoAuth as u8)) {
+fn select_auth_method(state: &ClientContext, methods: &[u8]) -> AuthMethod {
+    if state.is_noauth_enabled() && methods.contains(&(AuthMethod::NoAuth as u8)) {
         AuthMethod::NoAuth
-    } else if state.userpass_auth_enabled && methods.contains(&(AuthMethod::UsernameAndPassword as u8)) {
+    } else if state.is_userpass_enabled() && methods.contains(&(AuthMethod::UsernameAndPassword as u8)) {
         AuthMethod::UsernameAndPassword
     } else {
         AuthMethod::NoAcceptableMethod

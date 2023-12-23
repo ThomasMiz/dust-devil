@@ -335,6 +335,10 @@ impl UserManager {
     pub fn is_empty(&self) -> bool {
         self.users.is_empty()
     }
+
+    pub fn try_login(&self, username: &str, password: &str) -> Option<UserRole> {
+        self.users.get(username).filter(|u| u.password == password).map(|u| u.role)
+    }
 }
 
 #[cfg(test)]
