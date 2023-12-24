@@ -38,10 +38,7 @@
 
 use std::{fmt, io, path::Path};
 
-use dashmap::{
-    mapref::{entry::Entry, one::Ref},
-    DashMap,
-};
+use dashmap::{mapref::entry::Entry, DashMap};
 use tokio::{
     fs::File,
     io::{AsyncRead, AsyncWrite, AsyncWriteExt, BufWriter},
@@ -302,10 +299,6 @@ impl UserManager {
         let mut writer = BufWriter::new(file);
         self.save_to(&mut writer).await?;
         writer.flush().await
-    }
-
-    pub fn get(&self, username: &str) -> Option<Ref<'_, String, UserData>> {
-        self.users.get(username)
     }
 
     pub fn insert(&self, username: String, password: String, role: UserRole) -> bool {

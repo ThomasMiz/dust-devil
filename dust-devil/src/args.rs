@@ -24,7 +24,7 @@ use std::{
     collections::HashMap,
     fmt,
     io::ErrorKind,
-    net::{Ipv6Addr, SocketAddr, SocketAddrV6, ToSocketAddrs},
+    net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6, ToSocketAddrs},
 };
 
 use crate::users::{self, UserData};
@@ -98,6 +98,8 @@ impl StartupArguments {
         if self.socks5_bind_sockets.is_empty() {
             self.socks5_bind_sockets
                 .push(SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::UNSPECIFIED, DEFAULT_PORT, 0, 0)));
+            self.socks5_bind_sockets
+                .push(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, DEFAULT_PORT)));
         }
 
         if self.users_file.is_empty() {

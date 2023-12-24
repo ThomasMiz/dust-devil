@@ -60,33 +60,31 @@ pub async fn handle_socks5(stream: TcpStream, context: ClientContext) {
 async fn handle_socks5_inner(mut stream: TcpStream, context: &ClientContext) -> Result<(), io::Error> {
     let (reader, mut writer) = stream.split();
     let mut reader = BufReader::new(reader);
-    let client_id = context.client_id();
-
-    println!("Client {client_id} doing handshake...");
+    println!("Client {} doing handshake...", context.client_id());
     let auth_method = match parse_handshake(&mut reader).await {
         Ok(handshake) => select_auth_method(context, &handshake.methods),
         Err(SocksError::IO(error)) => return Err(error),
         Err(SocksError::InvalidVersion(ver)) => {
-            println!("Client {client_id} requested unsupported socks version: {ver}");
+            println!("Client {} requested unsupported socks version: {ver}", context.client_id());
             send_handshake_response(&mut writer, AuthMethod::NoAcceptableMethod).await?;
             return Ok(());
         }
         Err(error) => {
-            println!("Client {client_id} error during handshake: {error:?}");
+            println!("Client {} error during handshake: {error:?}", context.client_id());
             return Ok(());
         }
     };
 
     if auth_method == AuthMethod::NoAcceptableMethod {
-        println!("Client {client_id} no acceptable authentication method found");
+        println!("Client {} no acceptable authentication method found", context.client_id());
     } else {
-        println!("Client {client_id} will use auth method: {auth_method:?}");
+        println!("Client {} will use auth method: {auth_method:?}", context.client_id());
     }
     send_handshake_response(&mut writer, auth_method).await?;
 
     let auth_status = match auth_method {
         AuthMethod::NoAuth => true,
-        AuthMethod::UsernameAndPassword => handle_userpass_auth(&mut reader, &mut writer, context, client_id).await?,
+        AuthMethod::UsernameAndPassword => handle_userpass_auth(&mut reader, &mut writer, context).await?,
         _ => false,
     };
 
@@ -94,7 +92,7 @@ async fn handle_socks5_inner(mut stream: TcpStream, context: &ClientContext) -> 
         return Ok(());
     }
 
-    println!("Client {client_id} doing request...");
+    println!("Client {} doing request...", context.client_id());
     let request_addresses = match parse_request(&mut reader).await {
         Ok(request) => match request.destination {
             SocksRequestAddress::IPv4(ipv4) => {
@@ -104,7 +102,7 @@ async fn handle_socks5_inner(mut stream: TcpStream, context: &ClientContext) -> 
                 vec![SocketAddr::V6(SocketAddrV6::new(ipv6, request.port, 0, 0))]
             }
             SocksRequestAddress::Domainname(mut domain) => {
-                println!("Client {client_id} looking up DNS resolution for {domain}");
+                println!("Client {} looking up DNS resolution for {domain}", context.client_id());
                 domain.push_str(":0");
 
                 tokio::net::lookup_host(domain)
@@ -118,16 +116,16 @@ async fn handle_socks5_inner(mut stream: TcpStream, context: &ClientContext) -> 
         },
         Err(SocksError::IO(error)) => return Err(error),
         Err(error) => {
-            println!("Client {client_id} error during request: {error:?}");
+            println!("Client {} error during request: {error:?}", context.client_id());
             send_request_response(&mut writer, error.into(), None).await?;
             return Ok(());
         }
     };
 
-    let mut destination_stream = match connect_socket(request_addresses, client_id).await {
+    let mut destination_stream = match connect_socket(request_addresses, context).await {
         Ok(stream) => stream,
         Err(status) => {
-            println!("Client {client_id} failed to connect to remote");
+            println!("Client {} failed to connect to remote", context.client_id());
             send_request_response(&mut writer, status, None).await?;
             return Ok(());
         }
@@ -135,17 +133,17 @@ async fn handle_socks5_inner(mut stream: TcpStream, context: &ClientContext) -> 
 
     send_request_response(&mut writer, SocksStatus::Success, destination_stream.local_addr().ok()).await?;
 
-    println!("Client {client_id} doing the copy thingy...");
+    println!("Client {} doing the copy thingy...", context.client_id());
     let (dst_reader, mut dst_writer) = destination_stream.split();
     let mut dst_reader = BufReader::new(dst_reader);
 
     let result = copy::copy_bidirectional(&mut reader, &mut writer, &mut dst_reader, &mut dst_writer, context).await;
     match result {
         Ok((client_to_remote, remote_to_client)) => {
-            println!("Client {client_id} finished after {client_to_remote} bytes sent and {remote_to_client} bytes received");
+            println!("Client {} finished after {client_to_remote} bytes sent and {remote_to_client} bytes received", context.client_id());
         }
         Err(error) => {
-            println!("Client {client_id} post-socks error: {error:?}");
+            println!("Client {} post-socks error: {error:?}", context.client_id());
         }
     }
 
@@ -162,11 +160,11 @@ fn select_auth_method(state: &ClientContext, methods: &[u8]) -> AuthMethod {
     }
 }
 
-async fn connect_socket(request_addresses: Vec<SocketAddr>, client_id: u64) -> Result<TcpStream, SocksStatus> {
+async fn connect_socket(request_addresses: Vec<SocketAddr>, context: &ClientContext) -> Result<TcpStream, SocksStatus> {
     let mut last_error = None;
 
     for address in request_addresses {
-        println!("Client {client_id} connecting to destination {address}");
+        println!("Client {} connecting to destination {address}", context.client_id());
         let destination_socket = if address.is_ipv4() {
             TcpSocket::new_v4()
         } else if address.is_ipv6() {
@@ -178,7 +176,7 @@ async fn connect_socket(request_addresses: Vec<SocketAddr>, client_id: u64) -> R
         let destination_socket = match destination_socket {
             Ok(dst_socket) => dst_socket,
             Err(error) => {
-                println!("Client {client_id} failed to bind local socket: {error:?}");
+                println!("Client {} failed to bind local socket: {error:?}", context.client_id());
                 continue;
             }
         };
@@ -186,13 +184,13 @@ async fn connect_socket(request_addresses: Vec<SocketAddr>, client_id: u64) -> R
         let destination_stream = match destination_socket.connect(address).await {
             Ok(dst_stream) => dst_stream,
             Err(error) => {
-                println!("Client {client_id} failed to connect to remote: {error:?}");
+                println!("Client {} failed to connect to remote: {error:?}", context.client_id());
                 last_error = Some(error);
                 continue;
             }
         };
 
-        println!("Client {client_id} connection established to {}", address);
+        println!("Client {} connection established to {}", context.client_id(), address);
         return Ok(destination_stream);
     }
 

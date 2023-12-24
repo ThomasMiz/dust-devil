@@ -41,16 +41,24 @@ where
             TransferState::Running(amt) => {
                 let buffer = ready!(reader.as_mut().poll_fill_buf(cx))?;
                 if buffer.is_empty() {
+                    println!(
+                        "Client {} {} shutdown",
+                        context.client_id(),
+                        if is_src_to_dst { "source" } else { "destination" }
+                    );
                     ready!(writer.as_mut().poll_flush(cx))?;
-                    let amt = *amt;
-                    *state = TransferState::ShuttingDown(amt);
+                    *state = TransferState::ShuttingDown(*amt);
                     continue;
                 }
 
                 let i = ready!(writer.as_mut().poll_write(cx, buffer))?;
                 if i == 0 {
-                    let amt = *amt;
-                    *state = TransferState::ShuttingDown(amt);
+                    println!(
+                        "Client {} {} shutdown",
+                        context.client_id(),
+                        if is_src_to_dst { "source" } else { "destination" }
+                    );
+                    *state = TransferState::ShuttingDown(*amt);
                     continue;
                 }
                 *amt += i as u64;

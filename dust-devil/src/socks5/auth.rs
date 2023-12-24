@@ -6,7 +6,7 @@ use crate::context::ClientContext;
 
 use super::chunk_reader::read_chunked_utf8_string;
 
-pub async fn handle_userpass_auth<R, W>(reader: &mut R, writer: &mut W, state: &ClientContext, client_id: u64) -> Result<bool, io::Error>
+pub async fn handle_userpass_auth<R, W>(reader: &mut R, writer: &mut W, context: &ClientContext) -> Result<bool, io::Error>
 where
     R: AsyncRead + Unpin + ?Sized,
     W: AsyncWrite + Unpin + ?Sized,
@@ -15,16 +15,17 @@ where
 
     let status;
     if ver != 1 {
-        println!("Client {client_id} requested unsupported userpass auth version: {ver}");
+        println!("Client {} requested unsupported userpass auth version: {ver}", context.client_id());
         status = false;
     } else {
         let username = read_chunked_utf8_string(reader).await?;
         let password = read_chunked_utf8_string(reader).await?;
 
-        status = state.try_login(&username, &password);
+        status = context.try_login(&username, &password);
 
         println!(
-            "Client {client_id} authenticated {}successfully with username \"{}\" and password \"{}\"",
+            "Client {} authenticated {}successfully with username \"{}\" and password \"{}\"",
+            context.client_id(),
             if status { "" } else { "un" },
             username.replace('\\', "\\\\").replace('\"', "\\\""),
             password.replace('\\', "\\\\").replace('\"', "\\\""),

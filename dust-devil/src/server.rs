@@ -1,6 +1,9 @@
-use std::{future::poll_fn, sync::Arc};
+use std::{future::poll_fn, io, net::SocketAddr, sync::Arc};
 
-use tokio::{net::TcpListener, select};
+use tokio::{
+    net::{TcpListener, TcpStream},
+    select,
+};
 
 use crate::{
     args::StartupArguments,
@@ -9,12 +12,15 @@ use crate::{
     users::{UserManager, UserRole},
 };
 
-async fn accept_from_any(listeners: &Vec<TcpListener>) -> Result<(tokio::net::TcpStream, std::net::SocketAddr), std::io::Error> {
+async fn accept_from_any(listeners: &Vec<TcpListener>) -> Result<(TcpStream, SocketAddr), (&TcpListener, io::Error)> {
     poll_fn(|cx| {
         for l in listeners {
             let poll_status = l.poll_accept(cx);
             if let std::task::Poll::Ready(result) = poll_status {
-                return std::task::Poll::Ready(result);
+                return std::task::Poll::Ready(match result {
+                    Ok(result_ok) => Ok(result_ok),
+                    Err(result_err) => Err((l, result_err)),
+                });
             }
         }
 
@@ -73,15 +79,15 @@ pub async fn run_server(mut startup_args: StartupArguments) {
             accept_result = accept_from_any(&listeners) => {
                 match accept_result {
                     Ok((socket, address)) => {
-                        println!("Accepted new connection from {}", address);
+                        println!("Accepted new connection from {address}");
                         let client_context = ClientContext::create(client_id_counter, &state);
                         client_id_counter += 1;
                         tokio::spawn(async move {
                             socks5::handle_socks5(socket, client_context).await;
                         });
                     },
-                    Err(err) => {
-                        println!("Error while accepting new connection: {}", err);
+                    Err((listener, err)) => {
+                        println!("Error while accepting new connection from socket {:?}: {err}", listener.local_addr().ok());
                     },
                 }
             },
