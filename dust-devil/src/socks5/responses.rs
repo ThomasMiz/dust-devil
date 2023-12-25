@@ -1,5 +1,6 @@
 use std::{io, net::SocketAddr};
 
+use dust_devil_core::socks5::AuthMethod;
 use tokio::io::{AsyncWrite, AsyncWriteExt};
 
 #[repr(u8)]
@@ -13,15 +14,6 @@ pub enum SocksStatus {
     // TTLExpired = 6,
     CommandNotSupported = 7,
     AddressTypeNotSupported = 8,
-}
-
-#[repr(u8)]
-#[derive(Debug, PartialEq, Clone, Copy)]
-pub enum AuthMethod {
-    NoAuth = 0x00,
-    // GSSAPI = 0x01,
-    UsernameAndPassword = 0x02,
-    NoAcceptableMethod = 0xFF,
 }
 
 pub async fn send_handshake_response<W>(writer: &mut W, method: AuthMethod) -> Result<(), io::Error>

@@ -1,3 +1,7 @@
+pub mod logging;
+pub mod socks5;
+pub mod users;
+
 pub fn add(left: usize, right: usize) -> usize {
     left + right
 }

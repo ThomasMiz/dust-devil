@@ -3,6 +3,7 @@ use std::{
     net::{SocketAddr, SocketAddrV4, SocketAddrV6},
 };
 
+use dust_devil_core::socks5::{AuthMethod, SocksRequestAddress};
 use tokio::{
     io::BufReader,
     net::{TcpSocket, TcpStream},
@@ -11,7 +12,7 @@ use tokio::{
 use crate::{
     context::ClientContext,
     socks5::{
-        parsers::{parse_handshake, parse_request, SocksRequestAddress},
+        parsers::{parse_handshake, parse_request},
         responses::{send_handshake_response, send_request_response},
     },
 };
@@ -140,7 +141,10 @@ async fn handle_socks5_inner(mut stream: TcpStream, context: &ClientContext) -> 
     let result = copy::copy_bidirectional(&mut reader, &mut writer, &mut dst_reader, &mut dst_writer, context).await;
     match result {
         Ok((client_to_remote, remote_to_client)) => {
-            println!("Client {} finished after {client_to_remote} bytes sent and {remote_to_client} bytes received", context.client_id());
+            println!(
+                "Client {} finished after {client_to_remote} bytes sent and {remote_to_client} bytes received",
+                context.client_id()
+            );
         }
         Err(error) => {
             println!("Client {} post-socks error: {error:?}", context.client_id());

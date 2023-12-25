@@ -27,6 +27,8 @@ use std::{
     net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6, ToSocketAddrs},
 };
 
+use dust_devil_core::users::REGULAR_PREFIX_CHAR;
+
 use crate::users::{self, UserData};
 
 const DEFAULT_PORT: u16 = 1080;
@@ -278,7 +280,7 @@ fn parse_new_user_arg(result: &mut StartupArguments, arg: String, maybe_arg2: Op
     let arg2_trimmed = arg2.trim();
     let starts_with_alphanumeric = arg2_trimmed.chars().next().filter(|c| c.is_alphanumeric()).is_some();
     let parse_result = if starts_with_alphanumeric {
-        users::parse_line_into_user(&format!("{}{arg2_trimmed}", users::USER_PREFIX_CHAR), 1, 1)
+        users::parse_line_into_user(&format!("{}{arg2_trimmed}", REGULAR_PREFIX_CHAR), 1, 1)
     } else {
         users::parse_line_into_user(arg2_trimmed, 1, 0)
     };
@@ -358,7 +360,9 @@ mod tests {
         net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6},
     };
 
-    use crate::users::{UserData, UserRole};
+    use dust_devil_core::users::UserRole;
+
+    use crate::users::UserData;
 
     use super::{
         parse_arguments, ArgumentsError, ArgumentsRequest, AuthToggleErrorType, ListenErrorType, NewUserErrorType, StartupArguments,
@@ -639,7 +643,7 @@ mod tests {
         assert_eq!(
             result,
             Ok(ArgumentsRequest::Run(StartupArguments {
-                users: usermap(&[("petre", "griffon", UserRole::User)]),
+                users: usermap(&[("petre", "griffon", UserRole::Regular)]),
                 ..Default::default()
             }))
         );
@@ -648,7 +652,7 @@ mod tests {
         assert_eq!(
             result,
             Ok(ArgumentsRequest::Run(StartupArguments {
-                users: usermap(&[("petre", "griffon", UserRole::User)]),
+                users: usermap(&[("petre", "griffon", UserRole::Regular)]),
                 ..Default::default()
             }))
         );
@@ -657,7 +661,7 @@ mod tests {
         assert_eq!(
             result,
             Ok(ArgumentsRequest::Run(StartupArguments {
-                users: usermap(&[("per$te", "groff:ofo", UserRole::User)]),
+                users: usermap(&[("per$te", "groff:ofo", UserRole::Regular)]),
                 ..Default::default()
             }))
         );
@@ -666,7 +670,7 @@ mod tests {
         assert_eq!(
             result,
             Ok(ArgumentsRequest::Run(StartupArguments {
-                users: usermap(&[("perte", "groffofo", UserRole::User)]),
+                users: usermap(&[("perte", "groffofo", UserRole::Regular)]),
                 ..Default::default()
             }))
         );
@@ -700,7 +704,7 @@ mod tests {
             result,
             Ok(ArgumentsRequest::Run(StartupArguments {
                 users: usermap(&[
-                    ("#pé:çá:'h\\**::", "@=:::\\NíÇ", UserRole::User),
+                    ("#pé:çá:'h\\**::", "@=:::\\NíÇ", UserRole::Regular),
                     ("👋h:e:llo\\_wÚrl?d", "@@👍👍ÁÇçE💀fórgôr💀💀", UserRole::Admin),
                 ]),
                 ..Default::default()
@@ -736,7 +740,7 @@ mod tests {
         assert_eq!(
             result,
             Ok(ArgumentsRequest::Run(StartupArguments {
-                users: usermap(&[(&"a".repeat(255), &"b".repeat(255), UserRole::User)]),
+                users: usermap(&[(&"a".repeat(255), &"b".repeat(255), UserRole::Regular)]),
                 ..Default::default()
             }))
         );
@@ -891,7 +895,7 @@ mod tests {
                     SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::LOCALHOST, 6060, 0, 6969)),
                 ],
                 verbose: true,
-                users: usermap(&[("pedro", "pedro", UserRole::User), ("\\so:co", "tr\\oco", UserRole::Admin),]),
+                users: usermap(&[("pedro", "pedro", UserRole::Regular), ("\\so:co", "tr\\oco", UserRole::Admin),]),
                 users_file: "myfile.txt".to_string(),
                 no_auth_enabled: false,
                 ..Default::default()
@@ -908,7 +912,7 @@ mod tests {
                 users_file: "picante.txt".to_string(),
                 no_auth_enabled: true,
                 userpass_auth_enabled: false,
-                users: usermap(&[("juan", "carlos", UserRole::User), ("carlos", "juan", UserRole::User),]),
+                users: usermap(&[("juan", "carlos", UserRole::Regular), ("carlos", "juan", UserRole::Regular),]),
                 verbose: true,
                 socks5_bind_sockets: vec![SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(1, 2, 3, 4), 5678))],
             }))

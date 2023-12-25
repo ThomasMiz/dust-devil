@@ -83,6 +83,7 @@ name = "dust-devil"
 version = "0.1.0"
 dependencies = [
  "dashmap",
+ "dust-devil-core",
  "tokio",
 ]
 

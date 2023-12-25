@@ -1,8 +1,10 @@
-use std::net::{Ipv4Addr, Ipv6Addr};
+use std::{
+    io,
+    net::{Ipv4Addr, Ipv6Addr},
+};
 
+use dust_devil_core::socks5::SocksRequest;
 use tokio::io::{AsyncRead, AsyncReadExt};
-
-use crate::socks5::*;
 
 use super::chunk_reader::read_domainname;
 
@@ -40,17 +42,6 @@ where
     Ok(SocksHandshake { methods })
 }
 
-pub enum SocksRequestAddress {
-    IPv4(Ipv4Addr),
-    IPv6(Ipv6Addr),
-    Domainname(String),
-}
-
-pub struct SocksRequest {
-    pub destination: SocksRequestAddress,
-    pub port: u16,
-}
-
 pub async fn parse_request<R>(reader: &mut R) -> Result<SocksRequest, SocksError>
 where
     R: AsyncRead + Unpin + ?Sized,
@@ -74,10 +65,7 @@ where
             reader.read_exact(&mut octets).await?;
             let port = reader.read_u16().await?;
 
-            SocksRequest {
-                destination: SocksRequestAddress::IPv4(Ipv4Addr::from(octets)),
-                port,
-            }
+            SocksRequest::from_ipv4(Ipv4Addr::from(octets), port)
         }
         3 => {
             // Note: The "+ 2" is because a later function will append a ":0" to this string, as the function for
@@ -85,20 +73,14 @@ where
             let domainname = read_domainname(reader, 2).await?;
             let port = reader.read_u16().await?;
 
-            SocksRequest {
-                destination: SocksRequestAddress::Domainname(domainname),
-                port,
-            }
+            SocksRequest::from_domainname(domainname, port)
         }
         4 => {
             let mut octets = [0u8; 16];
             reader.read_exact(&mut octets).await?;
             let port = reader.read_u16().await?;
 
-            SocksRequest {
-                destination: SocksRequestAddress::IPv6(Ipv6Addr::from(octets)),
-                port,
-            }
+            SocksRequest::from_ipv6(Ipv6Addr::from(octets), port)
         }
         _ => {
             return Err(SocksError::InvalidATYP);

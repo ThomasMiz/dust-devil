@@ -1,5 +1,6 @@
 use std::{future::poll_fn, io, net::SocketAddr, sync::Arc};
 
+use dust_devil_core::users::{UserRole, DEFAULT_USER_PASSWORD, DEFAULT_USER_USERNAME};
 use tokio::{
     net::{TcpListener, TcpStream},
     select,
@@ -9,7 +10,7 @@ use crate::{
     args::StartupArguments,
     context::{ClientContext, ServerState},
     socks5,
-    users::{UserManager, UserRole},
+    users::UserManager,
 };
 
 async fn accept_from_any(listeners: &Vec<TcpListener>) -> Result<(TcpStream, SocketAddr), (&TcpListener, io::Error)> {
@@ -38,7 +39,7 @@ pub async fn run_server(mut startup_args: StartupArguments) {
             users
         }
         Err(err) => {
-            println!("Error while loading users file: {}", err);
+            println!("Error while loading users file: {err}");
             UserManager::new()
         }
     };
@@ -53,7 +54,11 @@ pub async fn run_server(mut startup_args: StartupArguments) {
 
     if users.is_empty() {
         println!("WARNING: Starting up with a single admin:admin user");
-        users.insert(String::from("admin"), String::from("admin"), UserRole::Admin);
+        users.insert(
+            String::from(DEFAULT_USER_USERNAME),
+            String::from(DEFAULT_USER_PASSWORD),
+            UserRole::Admin,
+        );
     }
 
     let mut listeners = Vec::new();
