@@ -64,10 +64,6 @@ impl ClientContext {
         context
     }
 
-    pub fn client_id(&self) -> u64 {
-        self.client_id
-    }
-
     pub fn is_noauth_enabled(&self) -> bool {
         self.state.no_auth_enabled.load(Ordering::Relaxed)
     }

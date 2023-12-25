@@ -7,7 +7,9 @@ use dust_devil_core::socks5::{AuthMethod, SocksRequestAddress};
 use tokio::{
     io::BufReader,
     net::{TcpSocket, TcpStream},
+    select,
 };
+use tokio_util::sync::CancellationToken;
 
 use crate::{
     context::ClientContext,
@@ -51,9 +53,11 @@ impl From<ParseRequestError> for SocksStatus {
     }
 }
 
-pub async fn handle_socks5(stream: TcpStream, mut context: ClientContext) {
-    let result = handle_socks5_inner(stream, &mut context).await;
-    context.log_finished(result).await;
+pub async fn handle_socks5(stream: TcpStream, mut context: ClientContext, cancel_token: CancellationToken) {
+    select! {
+        result = handle_socks5_inner(stream, &mut context) => context.log_finished(result).await,
+        _ = cancel_token.cancelled() => {}
+    }
 }
 
 async fn handle_socks5_inner(mut stream: TcpStream, context: &mut ClientContext) -> Result<(), io::Error> {

@@ -2,6 +2,7 @@ use std::{env, process::exit};
 
 mod args;
 mod context;
+mod logger;
 mod server;
 mod socks5;
 mod users;

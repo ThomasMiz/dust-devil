@@ -1,53 +1,24 @@
-use std::{future::poll_fn, io, net::SocketAddr, sync::Arc};
+use std::sync::Arc;
 
 use dust_devil_core::{
     logging::LogEvent,
     users::{UserRole, DEFAULT_USER_PASSWORD, DEFAULT_USER_USERNAME},
 };
-use tokio::{
-    net::{TcpListener, TcpStream},
-    select,
-    sync::mpsc,
-};
+use tokio::{net::TcpListener, select};
+use tokio_util::sync::CancellationToken;
 
 use crate::{
     args::StartupArguments,
     context::{ClientContext, ServerState},
+    logger::LogManager,
     socks5,
     users::UserManager,
+    utils::accept_from_any::accept_from_any,
 };
 
-async fn accept_from_any(listeners: &Vec<TcpListener>) -> Result<(TcpStream, SocketAddr), (&TcpListener, io::Error)> {
-    poll_fn(|cx| {
-        for l in listeners {
-            let poll_status = l.poll_accept(cx);
-            if let std::task::Poll::Ready(result) = poll_status {
-                return std::task::Poll::Ready(match result {
-                    Ok(result_ok) => Ok(result_ok),
-                    Err(result_err) => Err((l, result_err)),
-                });
-            }
-        }
-
-        std::task::Poll::Pending
-    })
-    .await
-}
-
 pub async fn run_server(mut startup_args: StartupArguments) {
-    let (tx, mut rx) = mpsc::channel(1024);
-
-    let logger_task = tokio::spawn(async move {
-        let mut recv_vec = Vec::with_capacity(16);
-        let limit = recv_vec.capacity();
-        while rx.recv_many(&mut recv_vec, limit).await != 0 {
-            for event in recv_vec.iter() {
-                println!("{}", event);
-            }
-
-            recv_vec.clear();
-        }
-    });
+    let logger = LogManager::new();
+    let tx = logger.new_tx();
 
     let _ = tx.send(LogEvent::LoadingUsersFromFile(startup_args.users_file.clone())).await;
 
@@ -109,6 +80,8 @@ pub async fn run_server(mut startup_args: StartupArguments) {
 
     let mut client_id_counter: u64 = 1;
 
+    let client_cancel_token = CancellationToken::new();
+
     loop {
         select! {
             accept_result = accept_from_any(&listeners) => {
@@ -117,8 +90,9 @@ pub async fn run_server(mut startup_args: StartupArguments) {
                         let _ = tx.send(LogEvent::NewClientConnectionAccepted(client_id_counter, address)).await;
                         let client_context = ClientContext::create(client_id_counter, &state, &tx);
                         client_id_counter += 1;
+                        let cancel_token1 = client_cancel_token.clone();
                         tokio::spawn(async move {
-                            socks5::handle_socks5(socket, client_context).await;
+                            socks5::handle_socks5(socket, client_context, cancel_token1).await;
                         });
                     },
                     Err((listener, err)) => {
@@ -126,9 +100,14 @@ pub async fn run_server(mut startup_args: StartupArguments) {
                     },
                 }
             },
-            _ = tokio::signal::ctrl_c() => break,
+            _ = tokio::signal::ctrl_c() => {
+                eprintln!("Received shutdown signal, shutting down gracefully. Signal again to shut down ungracefully.");
+                break
+            },
         }
     }
+
+    client_cancel_token.cancel();
 
     let _ = tx.send(LogEvent::SavingUsersToFile(startup_args.users_file.clone())).await;
     let save_to_file_result = state.users().save_to_file(&startup_args.users_file).await;
@@ -137,7 +116,7 @@ pub async fn run_server(mut startup_args: StartupArguments) {
         .await;
 
     drop(tx);
-    if let Err(je) = logger_task.await {
+    if let Err(je) = logger.join().await {
         eprintln!("Error while joining logger task: {je}");
     }
     println!("Goodbye!");

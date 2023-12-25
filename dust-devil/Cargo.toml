@@ -8,4 +8,5 @@ edition = "2021"
 [dependencies]
 dust-devil-core = { path = "../dust-devil-core" }
 tokio = { version = "1", features = ["full"] }
+tokio-util = { version = "0", features = ["full"]}
 dashmap = "5"
