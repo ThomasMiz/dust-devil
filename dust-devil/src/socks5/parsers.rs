@@ -9,16 +9,14 @@ use tokio::io::{AsyncRead, AsyncReadExt};
 use super::chunk_reader::read_domainname;
 
 #[derive(Debug)]
-pub enum SocksError {
+pub enum ParseHandshakeError {
     InvalidVersion(u8),
-    CommandNotSupported,
-    InvalidATYP,
     IO(io::Error),
 }
 
-impl From<io::Error> for SocksError {
+impl From<io::Error> for ParseHandshakeError {
     fn from(value: io::Error) -> Self {
-        SocksError::IO(value)
+        ParseHandshakeError::IO(value)
     }
 }
 
@@ -26,13 +24,13 @@ pub struct SocksHandshake {
     pub methods: Vec<u8>,
 }
 
-pub async fn parse_handshake<R>(reader: &mut R) -> Result<SocksHandshake, SocksError>
+pub async fn parse_handshake<R>(reader: &mut R) -> Result<SocksHandshake, ParseHandshakeError>
 where
     R: AsyncRead + Unpin + ?Sized,
 {
     let ver = reader.read_u8().await?;
     if ver != 5 {
-        return Err(SocksError::InvalidVersion(ver));
+        return Err(ParseHandshakeError::InvalidVersion(ver));
     }
 
     let nmethods = reader.read_u8().await? as usize;
@@ -42,18 +40,32 @@ where
     Ok(SocksHandshake { methods })
 }
 
-pub async fn parse_request<R>(reader: &mut R) -> Result<SocksRequest, SocksError>
+#[derive(Debug)]
+pub enum ParseRequestError {
+    InvalidVersion(u8),
+    CommandNotSupported(u8),
+    InvalidATYP(u8),
+    IO(io::Error),
+}
+
+impl From<io::Error> for ParseRequestError {
+    fn from(value: io::Error) -> Self {
+        ParseRequestError::IO(value)
+    }
+}
+
+pub async fn parse_request<R>(reader: &mut R) -> Result<SocksRequest, ParseRequestError>
 where
     R: AsyncRead + Unpin + ?Sized,
 {
     let ver = reader.read_u8().await?;
     if ver != 5 {
-        return Err(SocksError::InvalidVersion(ver));
+        return Err(ParseRequestError::InvalidVersion(ver));
     }
 
     let cmd = reader.read_u8().await?;
     if cmd != 1 {
-        return Err(SocksError::CommandNotSupported);
+        return Err(ParseRequestError::CommandNotSupported(cmd));
     }
 
     let _rsv = reader.read_u8().await?;
@@ -82,8 +94,8 @@ where
 
             SocksRequest::from_ipv6(Ipv6Addr::from(octets), port)
         }
-        _ => {
-            return Err(SocksError::InvalidATYP);
+        other => {
+            return Err(ParseRequestError::InvalidATYP(other));
         }
     };
 

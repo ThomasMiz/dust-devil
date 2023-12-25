@@ -12,7 +12,7 @@ use args::*;
 fn main() {
     let arguments = match args::parse_arguments(env::args()) {
         Err(err) => {
-            eprintln!("{}", err);
+            eprintln!("{}\n\nType 'dust-devil --help' for a help menu", err);
             exit(1);
         }
         Ok(arguments) => arguments,
@@ -31,9 +31,7 @@ fn main() {
         ArgumentsRequest::Run(startup_args) => startup_args,
     };
 
-    println!("Startup args: {startup_args:?}");
-
-    let start_result = tokio::runtime::Builder::new_current_thread().enable_all().build();
+    let start_result = tokio::runtime::Builder::new_multi_thread().enable_all().build();
 
     match start_result {
         Ok(runtime) => runtime.block_on(server::run_server(startup_args)),

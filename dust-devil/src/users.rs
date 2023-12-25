@@ -172,11 +172,12 @@ impl UserManager {
         UserManager::from(&mut file).await
     }
 
-    pub async fn save_to<T>(&self, writer: &mut T) -> Result<(), io::Error>
+    pub async fn save_to<T>(&self, writer: &mut T) -> Result<u64, io::Error>
     where
         T: AsyncWrite + Unpin + ?Sized,
     {
         let mut is_first = true;
+        let mut count = 0u64;
         for ele in self.users.iter() {
             if !is_first {
                 writer.write_u8(b'\n').await?;
@@ -199,16 +200,19 @@ impl UserManager {
 
             writer.write_u8(b':').await?;
             writer.write_all(ele.password.as_bytes()).await?;
+            count += 1;
         }
 
-        Ok(())
+        Ok(count)
     }
 
-    pub async fn save_to_file<F: AsRef<Path>>(&self, filename: F) -> Result<(), io::Error> {
+    pub async fn save_to_file<F: AsRef<Path>>(&self, filename: F) -> Result<u64, io::Error> {
         let file = File::create(filename).await?;
         let mut writer = BufWriter::new(file);
-        self.save_to(&mut writer).await?;
-        writer.flush().await
+        let count = self.save_to(&mut writer).await?;
+        writer.flush().await?;
+
+        Ok(count)
     }
 
     pub fn insert(&self, username: String, password: String, role: UserRole) -> bool {

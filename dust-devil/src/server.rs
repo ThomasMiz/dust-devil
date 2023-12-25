@@ -1,9 +1,13 @@
 use std::{future::poll_fn, io, net::SocketAddr, sync::Arc};
 
-use dust_devil_core::users::{UserRole, DEFAULT_USER_PASSWORD, DEFAULT_USER_USERNAME};
+use dust_devil_core::{
+    logging::LogEvent,
+    users::{UserRole, DEFAULT_USER_PASSWORD, DEFAULT_USER_USERNAME},
+};
 use tokio::{
     net::{TcpListener, TcpStream},
     select,
+    sync::mpsc,
 };
 
 use crate::{
@@ -31,29 +35,50 @@ async fn accept_from_any(listeners: &Vec<TcpListener>) -> Result<(TcpStream, Soc
 }
 
 pub async fn run_server(mut startup_args: StartupArguments) {
-    println!("Loading users from {}...", startup_args.users_file);
+    let (tx, mut rx) = mpsc::channel(1024);
+
+    let logger_task = tokio::spawn(async move {
+        let mut recv_vec = Vec::with_capacity(16);
+        let limit = recv_vec.capacity();
+        while rx.recv_many(&mut recv_vec, limit).await != 0 {
+            for event in recv_vec.iter() {
+                println!("{}", event);
+            }
+
+            recv_vec.clear();
+        }
+    });
+
+    let _ = tx.send(LogEvent::LoadingUsersFromFile(startup_args.users_file.clone())).await;
 
     let users = match UserManager::from_file(&startup_args.users_file).await {
         Ok(users) => {
-            println!("Loaded {} users from file", users.count());
+            let _ = tx
+                .send(LogEvent::UsersLoadedFromFile(
+                    startup_args.users_file.clone(),
+                    Ok(users.count() as u64),
+                ))
+                .await;
             users
         }
         Err(err) => {
-            println!("Error while loading users file: {err}");
+            let _ = tx
+                .send(LogEvent::UsersLoadedFromFile(startup_args.users_file.clone(), Err(err)))
+                .await;
             UserManager::new()
         }
     };
 
     for (username, userdata) in startup_args.users.drain() {
         if users.insert_or_update(username.clone(), userdata.password, userdata.role) {
-            println!("WARNING: Replaced user loaded from file {username} with user specified via argument");
+            let _ = tx.send(LogEvent::UserReplacedByArgs(username.clone(), userdata.role)).await;
         } else {
-            println!("Registered user {username}");
+            let _ = tx.send(LogEvent::UserRegistered(username, userdata.role)).await;
         }
     }
 
     if users.is_empty() {
-        println!("WARNING: Starting up with a single admin:admin user");
+        let _ = tx.send(LogEvent::StartingUpWithSingleDefaultUser).await;
         users.insert(
             String::from(DEFAULT_USER_USERNAME),
             String::from(DEFAULT_USER_PASSWORD),
@@ -64,13 +89,18 @@ pub async fn run_server(mut startup_args: StartupArguments) {
     let mut listeners = Vec::new();
     for bind_address in startup_args.socks5_bind_sockets {
         match TcpListener::bind(bind_address).await {
-            Ok(result) => listeners.push(result),
-            Err(err) => println!("Failed to set up socket at {bind_address}: {err:?}"),
+            Ok(result) => {
+                listeners.push(result);
+                let _ = tx.send(LogEvent::NewListeningSocket(bind_address)).await;
+            }
+            Err(err) => {
+                let _ = tx.send(LogEvent::FailedBindListeningSocket(bind_address, err)).await;
+            }
         }
     }
 
     if listeners.is_empty() {
-        println!("Failed to bind any socket, aborting");
+        let _ = tx.send(LogEvent::FailedBindAnySocketAborting).await;
         return;
     }
 
@@ -84,25 +114,31 @@ pub async fn run_server(mut startup_args: StartupArguments) {
             accept_result = accept_from_any(&listeners) => {
                 match accept_result {
                     Ok((socket, address)) => {
-                        println!("Accepted new connection from {address}");
-                        let client_context = ClientContext::create(client_id_counter, &state);
+                        let _ = tx.send(LogEvent::NewClientConnectionAccepted(client_id_counter, address)).await;
+                        let client_context = ClientContext::create(client_id_counter, &state, &tx);
                         client_id_counter += 1;
                         tokio::spawn(async move {
                             socks5::handle_socks5(socket, client_context).await;
                         });
                     },
                     Err((listener, err)) => {
-                        println!("Error while accepting new connection from socket {:?}: {err}", listener.local_addr().ok());
+                        let _ = tx.send(LogEvent::ClientConnectionAcceptFailed(listener.local_addr().ok(), err)).await;
                     },
                 }
             },
             _ = tokio::signal::ctrl_c() => break,
         }
     }
-    println!("Saving users...");
-    if let Err(err) = state.users().save_to_file(&startup_args.users_file).await {
-        println!("ERROR: Failed to save users file! {err:?}");
-    }
 
+    let _ = tx.send(LogEvent::SavingUsersToFile(startup_args.users_file.clone())).await;
+    let save_to_file_result = state.users().save_to_file(&startup_args.users_file).await;
+    let _ = tx
+        .send(LogEvent::UsersSavedToFile(startup_args.users_file, save_to_file_result))
+        .await;
+
+    drop(tx);
+    if let Err(je) = logger_task.await {
+        eprintln!("Error while joining logger task: {je}");
+    }
     println!("Goodbye!");
 }

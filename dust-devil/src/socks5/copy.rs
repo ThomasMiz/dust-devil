@@ -16,9 +16,9 @@ use std::{
 use crate::context::ClientContext;
 
 enum TransferState {
-    Running(u64),
-    ShuttingDown(u64),
-    Done(u64),
+    Running,
+    ShuttingDown,
+    Done,
 }
 
 fn transfer_one_direction<R, W>(
@@ -26,9 +26,9 @@ fn transfer_one_direction<R, W>(
     state: &mut TransferState,
     reader: &mut R,
     writer: &mut W,
-    context: &ClientContext,
+    context: &mut ClientContext,
     is_src_to_dst: bool,
-) -> Poll<io::Result<u64>>
+) -> Poll<io::Result<()>>
 where
     R: AsyncBufRead + Unpin + ?Sized,
     W: AsyncWrite + Unpin + ?Sized,
@@ -38,36 +38,29 @@ where
 
     loop {
         match state {
-            TransferState::Running(amt) => {
+            TransferState::Running => {
                 let buffer = ready!(reader.as_mut().poll_fill_buf(cx))?;
                 if buffer.is_empty() {
-                    println!(
-                        "Client {} {} shutdown",
-                        context.client_id(),
-                        if is_src_to_dst { "source" } else { "destination" }
-                    );
+                    if is_src_to_dst {
+                        context.log_source_shutdown();
+                    } else {
+                        context.log_destination_shutdown();
+                    }
                     ready!(writer.as_mut().poll_flush(cx))?;
-                    *state = TransferState::ShuttingDown(*amt);
+                    *state = TransferState::ShuttingDown;
                     continue;
                 }
 
                 let i = ready!(writer.as_mut().poll_write(cx, buffer))?;
                 if i == 0 {
-                    println!(
-                        "Client {} {} shutdown",
-                        context.client_id(),
-                        if is_src_to_dst { "source" } else { "destination" }
-                    );
-                    *state = TransferState::ShuttingDown(*amt);
+                    if is_src_to_dst {
+                        context.log_source_shutdown();
+                    } else {
+                        context.log_destination_shutdown();
+                    }
+                    *state = TransferState::ShuttingDown;
                     continue;
                 }
-                *amt += i as u64;
-
-                println!(
-                    "Client {} {} {i} bytes",
-                    context.client_id(),
-                    if is_src_to_dst { "sending" } else { "receiving" }
-                );
 
                 if is_src_to_dst {
                     context.register_bytes_sent(i as u64);
@@ -77,12 +70,11 @@ where
 
                 reader.as_mut().consume(i);
             }
-            TransferState::ShuttingDown(count) => {
+            TransferState::ShuttingDown => {
                 ready!(writer.as_mut().poll_shutdown(cx))?;
-
-                *state = TransferState::Done(*count);
+                *state = TransferState::Done;
             }
-            TransferState::Done(count) => return Poll::Ready(Ok(*count)),
+            TransferState::Done => return Poll::Ready(Ok(())),
         }
     }
 }
@@ -98,10 +90,10 @@ pub async fn copy_bidirectional<
     src_writer: &'a mut W1,
     dst_reader: &'a mut R2,
     dst_writer: &'a mut W2,
-    context: &ClientContext,
-) -> Result<(u64, u64), io::Error> {
-    let mut src_to_dst = TransferState::Running(0);
-    let mut dst_to_src = TransferState::Running(0);
+    context: &mut ClientContext,
+) -> Result<(), io::Error> {
+    let mut src_to_dst = TransferState::Running;
+    let mut dst_to_src = TransferState::Running;
 
     poll_fn(|cx| {
         let src_to_dst = transfer_one_direction(cx, &mut src_to_dst, src_reader, dst_writer, context, true)?;
@@ -109,10 +101,10 @@ pub async fn copy_bidirectional<
 
         // It is not a problem if ready! returns early because transfer_one_direction for the
         // other direction will keep returning TransferState::Done(count) in future calls to poll
-        let src_to_dst = ready!(src_to_dst);
-        let dst_to_src = ready!(dst_to_src);
+        ready!(src_to_dst);
+        ready!(dst_to_src);
 
-        Poll::Ready(Ok((src_to_dst, dst_to_src)))
+        Poll::Ready(Ok(()))
     })
     .await
 }

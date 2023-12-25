@@ -15,21 +15,14 @@ where
 
     let status;
     if ver != 1 {
-        println!("Client {} requested unsupported userpass auth version: {ver}", context.client_id());
+        context.log_unsupported_userpass_version(ver).await;
         status = false;
     } else {
         let username = read_chunked_utf8_string(reader).await?;
         let password = read_chunked_utf8_string(reader).await?;
 
         status = context.try_login(&username, &password);
-
-        println!(
-            "Client {} authenticated {}successfully with username \"{}\" and password \"{}\"",
-            context.client_id(),
-            if status { "" } else { "un" },
-            username.replace('\\', "\\\\").replace('\"', "\\\""),
-            password.replace('\\', "\\\\").replace('\"', "\\\""),
-        );
+        context.log_authenticated_with_userpass(username, status).await;
     }
 
     let buf = [1u8, !status as u8];
