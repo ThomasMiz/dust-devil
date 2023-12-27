@@ -31,7 +31,6 @@ use dust_devil_core::users::REGULAR_PREFIX_CHAR;
 
 use crate::users::{self, UserData};
 
-const DEFAULT_LOG_FILE: &str = "logs.txt";
 const DEFAULT_USERS_FILE: &str = "users.txt";
 const DEFAULT_PORT: u16 = 1080;
 
@@ -58,6 +57,9 @@ pub fn get_help_string() -> &'static str {
         "  -a, --auth-disable <auth_type>  Disables a type of authentication\n",
         "  -A, --auth-enable <auth_type>   Enables a type of authentication\n",
         "\n",
+        "By default, the server will print logs to stdout, but not to any file. Logging may be enabled to both stdout and",
+        "to file at the same time, but keep in mind that if any of those slows down, that will slow down the server.\n",
+        "\n",
         "Socket addresses may be specified as an IPv4 or IPv6 address, or a domainname, and may include a port number. ",
         "The --listen parameter may be specified multiple times to listen on many addresses. If no port is specified, ",
         "then the default port of 1080 will be used. If no --listen parameter is specified, then [::]:1080 will be used.\n",
@@ -82,7 +84,7 @@ pub struct StartupArguments {
     pub socks5_bind_sockets: Vec<SocketAddr>,
     pub verbose: bool,
     pub silent: bool,
-    pub log_file: String,
+    pub log_file: Option<String>,
     pub users_file: String,
     pub users: HashMap<String, UserData>,
     pub no_auth_enabled: bool,
@@ -95,7 +97,7 @@ impl StartupArguments {
             socks5_bind_sockets: Vec::new(),
             verbose: false,
             silent: false,
-            log_file: String::new(),
+            log_file: None,
             users_file: String::new(),
             users: HashMap::new(),
             no_auth_enabled: true,
@@ -104,10 +106,6 @@ impl StartupArguments {
     }
 
     pub fn fill_empty_fields_with_defaults(&mut self) {
-        if self.log_file.is_empty() {
-            self.log_file.push_str(DEFAULT_LOG_FILE);
-        }
-
         if self.socks5_bind_sockets.is_empty() {
             self.socks5_bind_sockets
                 .push(SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::UNSPECIFIED, DEFAULT_PORT, 0, 0)));
@@ -183,11 +181,11 @@ fn parse_log_file_arg(result: &mut StartupArguments, arg: String, maybe_arg2: Op
 
     if arg2.is_empty() {
         return Err(LogFileErrorType::EmptyPath(arg));
-    } else if !result.log_file.is_empty() {
+    } else if result.log_file.is_some() {
         return Err(LogFileErrorType::AlreadySpecified(arg));
     }
 
-    result.log_file = arg2;
+    result.log_file = Some(arg2);
     Ok(())
 }
 
@@ -540,7 +538,7 @@ mod tests {
         assert_eq!(
             result,
             Ok(ArgumentsRequest::Run(StartupArguments {
-                log_file: "./some/dir/file.txt".to_string(),
+                log_file: Some("./some/dir/file.txt".to_string()),
                 ..Default::default()
             }))
         );
@@ -549,7 +547,7 @@ mod tests {
         assert_eq!(
             result,
             Ok(ArgumentsRequest::Run(StartupArguments {
-                log_file: "./some/dir/file.txt".to_string(),
+                log_file: Some("./some/dir/file.txt".to_string()),
                 ..Default::default()
             }))
         );
@@ -1074,7 +1072,7 @@ mod tests {
                 no_auth_enabled: true,
                 userpass_auth_enabled: false,
                 users: usermap(&[("juan", "carlos", UserRole::Regular), ("carlos", "juan", UserRole::Regular),]),
-                log_file: "myfile.txt".to_string(),
+                log_file: Some("myfile.txt".to_string()),
                 verbose: true,
                 socks5_bind_sockets: vec![SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(1, 2, 3, 4), 5678))],
                 ..Default::default()

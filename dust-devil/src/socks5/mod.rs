@@ -29,6 +29,8 @@ use auth::*;
 use parsers::*;
 use responses::*;
 
+const SOCKS_BUFFER_SIZE: usize = 0x2000;
+
 impl From<&io::Error> for responses::SocksStatus {
     fn from(value: &io::Error) -> Self {
         match value.kind() {
@@ -62,7 +64,7 @@ pub async fn handle_socks5(stream: TcpStream, mut context: ClientContext, cancel
 
 async fn handle_socks5_inner(mut stream: TcpStream, context: &mut ClientContext) -> Result<(), io::Error> {
     let (reader, mut writer) = stream.split();
-    let mut reader = BufReader::new(reader);
+    let mut reader = BufReader::with_capacity(SOCKS_BUFFER_SIZE, reader);
     let auth_method = match parse_handshake(&mut reader).await {
         Ok(handshake) => select_auth_method(context, &handshake.methods),
         Err(ParseHandshakeError::IO(error)) => return Err(error),
@@ -133,7 +135,7 @@ async fn handle_socks5_inner(mut stream: TcpStream, context: &mut ClientContext)
     send_request_response(&mut writer, SocksStatus::Success, destination_stream.local_addr().ok()).await?;
 
     let (dst_reader, mut dst_writer) = destination_stream.split();
-    let mut dst_reader = BufReader::new(dst_reader);
+    let mut dst_reader = BufReader::with_capacity(SOCKS_BUFFER_SIZE, dst_reader);
 
     copy::copy_bidirectional(&mut reader, &mut writer, &mut dst_reader, &mut dst_writer, context).await
 }

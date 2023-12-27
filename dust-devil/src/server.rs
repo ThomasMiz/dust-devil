@@ -19,7 +19,11 @@ use crate::{
 pub async fn run_server(startup_args: StartupArguments) {
     let verbose = startup_args.verbose;
     printlnif!(verbose, "Starting up logger");
-    let logger = LogManager::new();
+    let (logger, log_file_result) = LogManager::new(verbose, !startup_args.silent, startup_args.log_file.as_deref()).await;
+
+    if let Err(log_file_error) = log_file_result {
+        eprintln!("Error: Failed to open log file: {log_file_error}");
+    }
 
     run_server_inner(startup_args, &logger).await;
 
