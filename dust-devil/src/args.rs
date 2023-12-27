@@ -31,8 +31,9 @@ use dust_devil_core::users::REGULAR_PREFIX_CHAR;
 
 use crate::users::{self, UserData};
 
-const DEFAULT_PORT: u16 = 1080;
+const DEFAULT_LOG_FILE: &str = "logs.txt";
 const DEFAULT_USERS_FILE: &str = "users.txt";
+const DEFAULT_PORT: u16 = 1080;
 
 pub fn get_version_string() -> String {
     format!(
@@ -49,6 +50,8 @@ pub fn get_help_string() -> &'static str {
         "  -h, --help                      Display this help menu and exit\n",
         "  -V, --version                   Display the version number and exit\n",
         "  -v, --verbose                   Display additional information while running\n",
+        "  -s, --silent                    Do not print logs to stdout\n",
+        "  -o, --log-file <path>           Append logs to the specified file\n",
         "  -l, --listen <address>          Specify a socket address for listening\n",
         "  -U, --users-file <path>         Load and save users to/from this file\n",
         "  -u, --user <user>               Adds a new user\n",
@@ -78,6 +81,8 @@ pub enum ArgumentsRequest {
 pub struct StartupArguments {
     pub socks5_bind_sockets: Vec<SocketAddr>,
     pub verbose: bool,
+    pub silent: bool,
+    pub log_file: String,
     pub users_file: String,
     pub users: HashMap<String, UserData>,
     pub no_auth_enabled: bool,
@@ -89,6 +94,8 @@ impl StartupArguments {
         StartupArguments {
             socks5_bind_sockets: Vec::new(),
             verbose: false,
+            silent: false,
+            log_file: String::new(),
             users_file: String::new(),
             users: HashMap::new(),
             no_auth_enabled: true,
@@ -97,6 +104,10 @@ impl StartupArguments {
     }
 
     pub fn fill_empty_fields_with_defaults(&mut self) {
+        if self.log_file.is_empty() {
+            self.log_file.push_str(DEFAULT_LOG_FILE);
+        }
+
         if self.socks5_bind_sockets.is_empty() {
             self.socks5_bind_sockets
                 .push(SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::UNSPECIFIED, DEFAULT_PORT, 0, 0)));
@@ -120,7 +131,8 @@ impl Default for StartupArguments {
 
 #[derive(Debug, PartialEq)]
 pub enum ArgumentsError {
-    UknownArgument(String),
+    UnknownArgument(String),
+    LogFileError(LogFileErrorType),
     ListenError(ListenErrorType),
     UsersFileError(UsersFileErrorType),
     NewUserError(NewUserErrorType),
@@ -130,13 +142,53 @@ pub enum ArgumentsError {
 impl fmt::Display for ArgumentsError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            ArgumentsError::UknownArgument(arg) => write!(f, "Unknown argument: {arg}"),
+            ArgumentsError::UnknownArgument(arg) => write!(f, "Unknown argument: {arg}"),
+            ArgumentsError::LogFileError(log_file_error) => log_file_error.fmt(f),
             ArgumentsError::ListenError(listen_error) => listen_error.fmt(f),
             ArgumentsError::UsersFileError(users_file_error) => users_file_error.fmt(f),
             ArgumentsError::NewUserError(new_user_error) => new_user_error.fmt(f),
             ArgumentsError::AuthToggleError(auth_toggle_error) => auth_toggle_error.fmt(f),
         }
     }
+}
+
+#[derive(Debug, PartialEq)]
+pub enum LogFileErrorType {
+    UnexpectedEnd(String),
+    AlreadySpecified(String),
+    EmptyPath(String),
+}
+
+impl fmt::Display for LogFileErrorType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            LogFileErrorType::UnexpectedEnd(arg) => write!(f, "Expected path to log file after {arg}"),
+            LogFileErrorType::AlreadySpecified(_) => write!(f, "Only one log file may be specified"),
+            LogFileErrorType::EmptyPath(arg) => write!(f, "Empty file name after {arg}"),
+        }
+    }
+}
+
+impl From<LogFileErrorType> for ArgumentsError {
+    fn from(value: LogFileErrorType) -> Self {
+        ArgumentsError::LogFileError(value)
+    }
+}
+
+fn parse_log_file_arg(result: &mut StartupArguments, arg: String, maybe_arg2: Option<String>) -> Result<(), LogFileErrorType> {
+    let arg2 = match maybe_arg2 {
+        Some(arg2) => arg2,
+        None => return Err(LogFileErrorType::UnexpectedEnd(arg)),
+    };
+
+    if arg2.is_empty() {
+        return Err(LogFileErrorType::EmptyPath(arg));
+    } else if !result.log_file.is_empty() {
+        return Err(LogFileErrorType::AlreadySpecified(arg));
+    }
+
+    result.log_file = arg2;
+    Ok(())
 }
 
 #[derive(Debug, PartialEq)]
@@ -334,6 +386,10 @@ where
             return Ok(ArgumentsRequest::Version);
         } else if arg.eq("-v") || arg.eq_ignore_ascii_case("--verbose") {
             result.verbose = true;
+        } else if arg.eq("-s") || arg.eq_ignore_ascii_case("--silent") {
+            result.silent = true;
+        } else if arg.eq("-o") || arg.eq_ignore_ascii_case("--log-file") {
+            parse_log_file_arg(&mut result, arg, args.next())?;
         } else if arg.eq("-l") || arg.eq_ignore_ascii_case("--listen") {
             parse_listen_address_arg(&mut result, arg, args.next())?;
         } else if arg.eq("-U") || arg.eq_ignore_ascii_case("--users-file") {
@@ -345,7 +401,7 @@ where
         } else if arg.eq("-A") || arg.eq_ignore_ascii_case("--auth-enable") {
             parse_auth_arg(&mut result, true, arg, args.next())?;
         } else {
-            return Err(ArgumentsError::UknownArgument(arg));
+            return Err(ArgumentsError::UnknownArgument(arg));
         }
     }
 
@@ -365,8 +421,8 @@ mod tests {
     use crate::users::UserData;
 
     use super::{
-        parse_arguments, ArgumentsError, ArgumentsRequest, AuthToggleErrorType, ListenErrorType, NewUserErrorType, StartupArguments,
-        UsersFileErrorType, DEFAULT_PORT,
+        parse_arguments, ArgumentsError, ArgumentsRequest, AuthToggleErrorType, ListenErrorType, LogFileErrorType, NewUserErrorType,
+        StartupArguments, UsersFileErrorType, DEFAULT_PORT,
     };
 
     fn args(s: &str) -> Result<ArgumentsRequest, ArgumentsError> {
@@ -437,7 +493,7 @@ mod tests {
     }
 
     #[test]
-    fn test_verbose_alone() {
+    fn test_verbose() {
         let result = args("-v");
         assert_eq!(
             result,
@@ -454,6 +510,97 @@ mod tests {
                 verbose: true,
                 ..Default::default()
             }))
+        );
+    }
+
+    #[test]
+    fn test_silent() {
+        let result = args("-s");
+        assert_eq!(
+            result,
+            Ok(ArgumentsRequest::Run(StartupArguments {
+                silent: true,
+                ..Default::default()
+            }))
+        );
+
+        let result = args("--silent");
+        assert_eq!(
+            result,
+            Ok(ArgumentsRequest::Run(StartupArguments {
+                silent: true,
+                ..Default::default()
+            }))
+        );
+    }
+
+    #[test]
+    fn test_log_file() {
+        let result = args("-o ./some/dir/file.txt");
+        assert_eq!(
+            result,
+            Ok(ArgumentsRequest::Run(StartupArguments {
+                log_file: "./some/dir/file.txt".to_string(),
+                ..Default::default()
+            }))
+        );
+
+        let result = args("--log-file ./some/dir/file.txt");
+        assert_eq!(
+            result,
+            Ok(ArgumentsRequest::Run(StartupArguments {
+                log_file: "./some/dir/file.txt".to_string(),
+                ..Default::default()
+            }))
+        );
+    }
+
+    #[test]
+    fn test_log_file_empty() {
+        let result = args_vec(&["-o", ""]);
+        assert_eq!(
+            result,
+            Err(ArgumentsError::LogFileError(LogFileErrorType::EmptyPath("-o".to_string())))
+        );
+
+        let result = args_vec(&["--log-file", ""]);
+        assert_eq!(
+            result,
+            Err(ArgumentsError::LogFileError(LogFileErrorType::EmptyPath("--log-file".to_string())))
+        );
+    }
+
+    #[test]
+    fn test_log_file_unexpected_end() {
+        let result = args("-o");
+        assert_eq!(
+            result,
+            Err(ArgumentsError::LogFileError(LogFileErrorType::UnexpectedEnd("-o".to_string())))
+        );
+
+        let result = args("--log-file");
+        assert_eq!(
+            result,
+            Err(ArgumentsError::LogFileError(LogFileErrorType::UnexpectedEnd(
+                "--log-file".to_string()
+            )))
+        );
+    }
+
+    #[test]
+    fn test_log_file_specified_twice() {
+        let result = args("-o ./my_log -v --log-file againnnn");
+        assert_eq!(
+            result,
+            Err(ArgumentsError::LogFileError(LogFileErrorType::AlreadySpecified(
+                "--log-file".to_string()
+            )))
+        );
+
+        let result = args("--log-file ./my_log -v -o againnnn");
+        assert_eq!(
+            result,
+            Err(ArgumentsError::LogFileError(LogFileErrorType::AlreadySpecified("-o".to_string())))
         );
     }
 
@@ -885,8 +1032,21 @@ mod tests {
     }
 
     #[test]
+    fn test_unknowon_argument() {
+        let result = args("-b");
+        assert_eq!(result, Err(ArgumentsError::UnknownArgument("-b".to_string())));
+
+        let result = args("croquetas");
+        assert_eq!(result, Err(ArgumentsError::UnknownArgument("croquetas".to_string())));
+
+        let result = args("--sacacorchos");
+        assert_eq!(result, Err(ArgumentsError::UnknownArgument("--sacacorchos".to_string())));
+    }
+
+    #[test]
     fn test_integration1() {
-        let result = args("-l 0.0.0.0 -v -u #pedro:pedro -l [::1%6969]:6060 -U myfile.txt --auth-disable noauth -u @\\\\so\\:co:tr\\\\oco");
+        let result =
+            args("-l 0.0.0.0 -v -u #pedro:pedro -l [::1%6969]:6060 -U myfile.txt --silent --auth-disable noauth -u @\\\\so\\:co:tr\\\\oco");
         assert_eq!(
             result,
             Ok(ArgumentsRequest::Run(StartupArguments {
@@ -895,6 +1055,7 @@ mod tests {
                     SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::LOCALHOST, 6060, 0, 6969)),
                 ],
                 verbose: true,
+                silent: true,
                 users: usermap(&[("pedro", "pedro", UserRole::Regular), ("\\so:co", "tr\\oco", UserRole::Admin),]),
                 users_file: "myfile.txt".to_string(),
                 no_auth_enabled: false,
@@ -905,7 +1066,7 @@ mod tests {
 
     #[test]
     fn test_integration2() {
-        let result = args("-U picante.txt --auth-enable noauth -u juan:carlos -v -u #carlos:juan --auth-disable userpass -l 1.2.3.4:5678");
+        let result = args("-U picante.txt --auth-enable noauth -u juan:carlos -v -u #carlos:juan --log-file myfile.txt --auth-disable userpass -l 1.2.3.4:5678");
         assert_eq!(
             result,
             Ok(ArgumentsRequest::Run(StartupArguments {
@@ -913,8 +1074,10 @@ mod tests {
                 no_auth_enabled: true,
                 userpass_auth_enabled: false,
                 users: usermap(&[("juan", "carlos", UserRole::Regular), ("carlos", "juan", UserRole::Regular),]),
+                log_file: "myfile.txt".to_string(),
                 verbose: true,
                 socks5_bind_sockets: vec![SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(1, 2, 3, 4), 5678))],
+                ..Default::default()
             }))
         );
     }

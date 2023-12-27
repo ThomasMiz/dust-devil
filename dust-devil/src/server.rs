@@ -11,15 +11,28 @@ use crate::{
     args::StartupArguments,
     context::{ClientContext, ServerState},
     logger::LogManager,
-    socks5,
+    printlnif, socks5,
     users::UserManager,
     utils::accept_from_any::accept_from_any,
 };
 
-pub async fn run_server(mut startup_args: StartupArguments) {
+pub async fn run_server(startup_args: StartupArguments) {
+    let verbose = startup_args.verbose;
+    printlnif!(verbose, "Starting up logger");
     let logger = LogManager::new();
-    let tx = logger.new_tx();
 
+    run_server_inner(startup_args, &logger).await;
+
+    printlnif!(verbose, "Waiting for logger to shut down");
+    if let Err(je) = logger.join().await {
+        eprintln!("Error while joining logger task: {je}");
+    }
+
+    printlnif!(verbose, "Goodbye!");
+}
+
+async fn run_server_inner(mut startup_args: StartupArguments, logger: &LogManager) {
+    let tx = logger.new_tx();
     let _ = tx.send(LogEvent::LoadingUsersFromFile(startup_args.users_file.clone())).await;
 
     let users = match UserManager::from_file(&startup_args.users_file).await {
@@ -58,7 +71,9 @@ pub async fn run_server(mut startup_args: StartupArguments) {
     }
 
     let mut listeners = Vec::new();
+    printlnif!(startup_args.verbose, "Binding listener sockets");
     for bind_address in startup_args.socks5_bind_sockets {
+        printlnif!(startup_args.verbose, "Binding listening socket at {bind_address}");
         match TcpListener::bind(bind_address).await {
             Ok(result) => {
                 listeners.push(result);
@@ -75,6 +90,7 @@ pub async fn run_server(mut startup_args: StartupArguments) {
         return;
     }
 
+    printlnif!(startup_args.verbose, "Constructing server state");
     let state = ServerState::new(users, startup_args.no_auth_enabled, startup_args.userpass_auth_enabled);
     let state = Arc::new(state);
 
@@ -82,6 +98,7 @@ pub async fn run_server(mut startup_args: StartupArguments) {
 
     let client_cancel_token = CancellationToken::new();
 
+    printlnif!(startup_args.verbose, "Entering main loop");
     loop {
         select! {
             accept_result = accept_from_any(&listeners) => {
@@ -107,6 +124,9 @@ pub async fn run_server(mut startup_args: StartupArguments) {
         }
     }
 
+    printlnif!(startup_args.verbose, "Exited main loop");
+
+    drop(listeners);
     client_cancel_token.cancel();
 
     let _ = tx.send(LogEvent::SavingUsersToFile(startup_args.users_file.clone())).await;
@@ -114,10 +134,4 @@ pub async fn run_server(mut startup_args: StartupArguments) {
     let _ = tx
         .send(LogEvent::UsersSavedToFile(startup_args.users_file, save_to_file_result))
         .await;
-
-    drop(tx);
-    if let Err(je) = logger.join().await {
-        eprintln!("Error while joining logger task: {je}");
-    }
-    println!("Goodbye!");
 }
