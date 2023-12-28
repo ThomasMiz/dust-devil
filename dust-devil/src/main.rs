@@ -10,6 +10,9 @@ mod utils;
 
 use args::*;
 
+#[cfg(test)]
+mod tests;
+
 fn main() {
     let arguments = match args::parse_arguments(env::args()) {
         Err(err) => {
