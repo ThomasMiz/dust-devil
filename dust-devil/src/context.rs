@@ -7,12 +7,13 @@ use std::{
     },
 };
 
-use dust_devil_core::{logging::LogEvent, socks5::AuthMethod};
-use tokio::sync::mpsc::Sender;
+use dust_devil_core::{logging::LogEventType, socks5::AuthMethod};
+use tokio::sync::mpsc::error::TrySendError;
 
-use crate::users::UserManager;
+use crate::{logger::LogSender, printlnif, users::UserManager};
 
 pub struct ServerState {
+    verbose: bool,
     users: UserManager,
     no_auth_enabled: AtomicBool,
     userpass_auth_enabled: AtomicBool,
@@ -23,8 +24,9 @@ pub struct ServerState {
 }
 
 impl ServerState {
-    pub fn new(users: UserManager, no_auth_enabled: bool, userpass_auth_enabled: bool) -> Self {
+    pub fn new(verbose: bool, users: UserManager, no_auth_enabled: bool, userpass_auth_enabled: bool) -> Self {
         ServerState {
+            verbose,
             users,
             no_auth_enabled: AtomicBool::new(no_auth_enabled),
             userpass_auth_enabled: AtomicBool::new(userpass_auth_enabled),
@@ -45,17 +47,17 @@ pub struct ClientContext {
     bytes_sent: u64,
     bytes_received: u64,
     state: Arc<ServerState>,
-    log_sender: Sender<LogEvent>,
+    log_sender: LogSender,
 }
 
 impl ClientContext {
-    pub fn create(client_id: u64, state: &Arc<ServerState>, log_sender: &Sender<LogEvent>) -> Self {
+    pub fn create(client_id: u64, state: &Arc<ServerState>, log_sender: LogSender) -> Self {
         let context = ClientContext {
             client_id,
             bytes_sent: 0,
             bytes_received: 0,
             state: Arc::clone(state),
-            log_sender: log_sender.clone(),
+            log_sender,
         };
 
         context.state.current_client_connections.fetch_add(1, Ordering::Relaxed);
@@ -79,13 +81,13 @@ impl ClientContext {
     pub fn register_bytes_sent(&mut self, count: u64) {
         self.bytes_sent += count;
         self.state.client_bytes_sent.fetch_add(count, Ordering::Relaxed);
-        let _ = self.log_sender.try_send(LogEvent::ClientBytesSent(self.client_id, count));
+        let _ = self.log_sender.try_send(LogEventType::ClientBytesSent(self.client_id, count));
     }
 
     pub fn register_bytes_received(&mut self, count: u64) {
         self.bytes_received += count;
         self.state.client_bytes_received.fetch_add(count, Ordering::Relaxed);
-        let _ = self.log_sender.try_send(LogEvent::ClientBytesReceived(self.client_id, count));
+        let _ = self.log_sender.try_send(LogEventType::ClientBytesReceived(self.client_id, count));
     }
 }
 
@@ -93,7 +95,7 @@ impl ClientContext {
     pub async fn log_finished(&self, result: Result<(), io::Error>) {
         let _ = self
             .log_sender
-            .send(LogEvent::ClientConnectionFinished(
+            .send(LogEventType::ClientConnectionFinished(
                 self.client_id,
                 self.bytes_sent,
                 self.bytes_received,
@@ -105,90 +107,97 @@ impl ClientContext {
     pub async fn log_unsupported_socks_version(&self, version: u8) {
         let _ = self
             .log_sender
-            .send(LogEvent::ClientRequestedUnsupportedVersion(self.client_id, version))
+            .send(LogEventType::ClientRequestedUnsupportedVersion(self.client_id, version))
             .await;
     }
 
     pub async fn log_unsupported_atyp(&self, atyp: u8) {
         let _ = self
             .log_sender
-            .send(LogEvent::ClientRequestedUnsupportedAtyp(self.client_id, atyp))
+            .send(LogEventType::ClientRequestedUnsupportedAtyp(self.client_id, atyp))
             .await;
     }
 
     pub async fn log_unsupported_socks_command(&self, cmd: u8) {
         let _ = self
             .log_sender
-            .send(LogEvent::ClientRequestedUnsupportedCommand(self.client_id, cmd))
+            .send(LogEventType::ClientRequestedUnsupportedCommand(self.client_id, cmd))
             .await;
     }
 
     pub async fn log_selected_auth(&self, auth_method: AuthMethod) {
         let _ = self
             .log_sender
-            .send(LogEvent::ClientSelectedAuthMethod(self.client_id, auth_method))
+            .send(LogEventType::ClientSelectedAuthMethod(self.client_id, auth_method))
             .await;
     }
 
     pub async fn log_unsupported_userpass_version(&self, version: u8) {
         let _ = self
             .log_sender
-            .send(LogEvent::ClientRequestedUnsupportedUserpassVersion(self.client_id, version))
+            .send(LogEventType::ClientRequestedUnsupportedUserpassVersion(self.client_id, version))
             .await;
     }
 
     pub async fn log_authenticated_with_userpass(&self, username: String, success: bool) {
         let _ = self
             .log_sender
-            .send(LogEvent::ClientAuthenticatedWithUserpass(self.client_id, username, success))
+            .send(LogEventType::ClientAuthenticatedWithUserpass(self.client_id, username, success))
             .await;
     }
 
     pub async fn log_dns_lookup(&self, domainname: String) {
-        let _ = self.log_sender.send(LogEvent::ClientDnsLookup(self.client_id, domainname)).await;
+        let _ = self
+            .log_sender
+            .send(LogEventType::ClientDnsLookup(self.client_id, domainname))
+            .await;
     }
 
     pub async fn log_connection_attempt(&self, address: SocketAddr) {
         let _ = self
             .log_sender
-            .send(LogEvent::ClientAttemptingConnect(self.client_id, address))
+            .send(LogEventType::ClientAttemptingConnect(self.client_id, address))
             .await;
     }
 
     pub async fn log_connection_attempt_bind_failed(&self, error: io::Error) {
         let _ = self
             .log_sender
-            .send(LogEvent::ClientConnectionAttemptBindFailed(self.client_id, error))
+            .send(LogEventType::ClientConnectionAttemptBindFailed(self.client_id, error))
             .await;
     }
 
     pub async fn log_connection_attempt_connect_failed(&self, error: io::Error) {
         let _ = self
             .log_sender
-            .send(LogEvent::ClientConnectionAttemptConnectFailed(self.client_id, error))
+            .send(LogEventType::ClientConnectionAttemptConnectFailed(self.client_id, error))
             .await;
     }
 
     pub async fn log_connect_to_destination_failed(&self) {
         let _ = self
             .log_sender
-            .send(LogEvent::ClientFailedToConnectToDestination(self.client_id))
+            .send(LogEventType::ClientFailedToConnectToDestination(self.client_id))
             .await;
     }
 
     pub async fn log_connected_to_destination(&self, address: SocketAddr) {
         let _ = self
             .log_sender
-            .send(LogEvent::ClientConnectedToDestination(self.client_id, address))
+            .send(LogEventType::ClientConnectedToDestination(self.client_id, address))
             .await;
     }
 
     pub fn log_source_shutdown(&self) {
-        let _ = self.log_sender.try_send(LogEvent::ClientSourceShutdown(self.client_id));
+        if let Err(TrySendError::Full(e)) = self.log_sender.try_send(LogEventType::ClientSourceShutdown(self.client_id)) {
+            printlnif!(self.state.verbose, "Verbose warning, log event lost: {}", e.data);
+        }
     }
 
     pub fn log_destination_shutdown(&self) {
-        let _ = self.log_sender.try_send(LogEvent::ClientDestinationShutdown(self.client_id));
+        if let Err(TrySendError::Full(e)) = self.log_sender.try_send(LogEventType::ClientDestinationShutdown(self.client_id)) {
+            printlnif!(self.state.verbose, "Verbose warning, log event lost: {}", e.data);
+        }
     }
 }
 

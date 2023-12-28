@@ -6,7 +6,18 @@ use crate::{
     users::{UserRole, UsersLoadingError, DEFAULT_USER_PASSWORD, DEFAULT_USER_USERNAME},
 };
 
-pub enum LogEvent {
+pub struct LogEvent {
+    pub timestamp: i64,
+    pub data: LogEventType,
+}
+
+impl LogEvent {
+    pub fn new(timestamp: i64, data: LogEventType) -> Self {
+        LogEvent { timestamp, data }
+    }
+}
+
+pub enum LogEventType {
     NewListeningSocket(SocketAddr),
     FailedBindListeningSocket(SocketAddr, io::Error),
     FailedBindAnySocketAborting,
@@ -42,7 +53,7 @@ pub enum LogEvent {
     ClientConnectionFinished(u64, u64, u64, Result<(), io::Error>),
 }
 
-impl fmt::Display for LogEvent {
+impl fmt::Display for LogEventType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::NewListeningSocket(socket_address) => write!(f, "Listening for client connections at {socket_address}"),

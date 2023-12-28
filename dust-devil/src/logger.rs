@@ -1,11 +1,16 @@
 use std::io;
 
-use dust_devil_core::logging::LogEvent;
+use dust_devil_core::logging::{LogEvent, LogEventType};
+use time::{OffsetDateTime, UtcOffset};
 use tokio::{
     fs::File,
     io::{stdout, AsyncWrite, AsyncWriteExt, BufWriter},
     join,
-    sync::mpsc::{self, Receiver, Sender},
+    sync::mpsc::{
+        self,
+        error::{SendError, TrySendError},
+        Receiver, Sender,
+    },
     task::{JoinError, JoinHandle},
 };
 
@@ -22,6 +27,10 @@ const PARSE_VEC_SIZE: usize = 0x100;
 pub struct LogManager {
     log_sender: Sender<LogEvent>,
     log_task_handle: JoinHandle<()>,
+}
+
+pub struct LogSender {
+    log_sender: Sender<LogEvent>,
 }
 
 async fn write_if_some<W: AsyncWrite + Unpin>(writer_name: &str, maybe_writer: &mut Option<W>, buf: &[u8]) {
@@ -53,6 +62,18 @@ async fn shutdown_if_some<W: AsyncWrite + Unpin>(writer_name: &str, maybe_writer
 
 async fn logger_task(verbose: bool, mut log_receiver: Receiver<LogEvent>, log_to_stdout: bool, file: Option<File>) {
     printlnif!(verbose, "Logger task started");
+
+    let local_utc_offset = match UtcOffset::current_local_offset() {
+        Ok(offset) => {
+            printlnif!(verbose, "Local UTC offset determined to be at {offset}");
+            offset
+        }
+        Err(_) => {
+            eprintln!("Could not determine system's UTC offset, defaulting to 00:00:00");
+            UtcOffset::UTC
+        }
+    };
+
     // Note: `Stdout` is already buffered, as it's wrapped in a `LineWriter` that internally uses a `BufWriter`
     // (not the tokio one, the std one). However, this buffer is (currently) only 1024 bytes.
     let mut maybe_stdout = if log_to_stdout {
@@ -71,7 +92,21 @@ async fn logger_task(verbose: bool, mut log_receiver: Receiver<LogEvent>, log_to
 
     while log_receiver.recv_many(&mut recv_vec, limit).await != 0 {
         for event in recv_vec.iter() {
-            let _ = writeln!(parse_vec, "{event}");
+            let t = OffsetDateTime::from_unix_timestamp(event.timestamp)
+                .map(|t| t.to_offset(local_utc_offset))
+                .unwrap_or(OffsetDateTime::UNIX_EPOCH);
+
+            let _ = writeln!(
+                parse_vec,
+                "[{:04}-{:02}-{:02} {:02}:{:02}:{:02}] {}",
+                t.year(),
+                t.month() as u8,
+                t.day(),
+                t.hour(),
+                t.minute(),
+                t.second(),
+                event.data
+            );
 
             join!(
                 write_if_some("stdout", &mut maybe_stdout, &parse_vec),
@@ -134,12 +169,38 @@ impl LogManager {
         (logger, file_result)
     }
 
-    pub fn new_tx(&self) -> Sender<LogEvent> {
-        self.log_sender.clone()
+    pub fn new_sender(&self) -> LogSender {
+        LogSender::new(self.log_sender.clone())
     }
 
     pub async fn join(self) -> Result<(), JoinError> {
         drop(self.log_sender);
         self.log_task_handle.await
     }
+}
+
+impl LogSender {
+    fn new(log_sender: Sender<LogEvent>) -> Self {
+        LogSender { log_sender }
+    }
+
+    pub async fn send(&self, data: LogEventType) -> Result<(), SendError<LogEvent>> {
+        let timestamp = time::OffsetDateTime::now_utc().unix_timestamp();
+        self.log_sender.send(LogEvent::new(timestamp, data)).await
+    }
+
+    /*pub async fn send_timeout(&self, data: LogEventType, timeout: Duration) -> Result<(), SendTimeoutError<LogEvent>> {
+        let timestamp = time::OffsetDateTime::now_utc().unix_timestamp();
+        self.log_sender.send_timeout(LogEvent::new(timestamp, data), timeout).await
+    }*/
+
+    pub fn try_send(&self, data: LogEventType) -> Result<(), TrySendError<LogEvent>> {
+        let timestamp = time::OffsetDateTime::now_utc().unix_timestamp();
+        self.log_sender.try_send(LogEvent::new(timestamp, data))
+    }
+
+    /*pub fn blocking_send(&self, data: LogEventType) -> Result<(), SendError<LogEvent>> {
+        let timestamp = time::OffsetDateTime::now_utc().unix_timestamp();
+        self.log_sender.blocking_send(LogEvent::new(timestamp, data))
+    }*/
 }

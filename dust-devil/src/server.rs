@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use dust_devil_core::{
-    logging::LogEvent,
+    logging::LogEventType,
     users::{UserRole, DEFAULT_USER_PASSWORD, DEFAULT_USER_USERNAME},
 };
 use tokio::{net::TcpListener, select};
@@ -36,13 +36,15 @@ pub async fn run_server(startup_args: StartupArguments) {
 }
 
 async fn run_server_inner(mut startup_args: StartupArguments, logger: &LogManager) {
-    let tx = logger.new_tx();
-    let _ = tx.send(LogEvent::LoadingUsersFromFile(startup_args.users_file.clone())).await;
+    let log_sender = logger.new_sender();
+    let _ = log_sender
+        .send(LogEventType::LoadingUsersFromFile(startup_args.users_file.clone()))
+        .await;
 
     let users = match UserManager::from_file(&startup_args.users_file).await {
         Ok(users) => {
-            let _ = tx
-                .send(LogEvent::UsersLoadedFromFile(
+            let _ = log_sender
+                .send(LogEventType::UsersLoadedFromFile(
                     startup_args.users_file.clone(),
                     Ok(users.count() as u64),
                 ))
@@ -50,8 +52,8 @@ async fn run_server_inner(mut startup_args: StartupArguments, logger: &LogManage
             users
         }
         Err(err) => {
-            let _ = tx
-                .send(LogEvent::UsersLoadedFromFile(startup_args.users_file.clone(), Err(err)))
+            let _ = log_sender
+                .send(LogEventType::UsersLoadedFromFile(startup_args.users_file.clone(), Err(err)))
                 .await;
             UserManager::new()
         }
@@ -59,14 +61,16 @@ async fn run_server_inner(mut startup_args: StartupArguments, logger: &LogManage
 
     for (username, userdata) in startup_args.users.drain() {
         if users.insert_or_update(username.clone(), userdata.password, userdata.role) {
-            let _ = tx.send(LogEvent::UserReplacedByArgs(username.clone(), userdata.role)).await;
+            let _ = log_sender
+                .send(LogEventType::UserReplacedByArgs(username.clone(), userdata.role))
+                .await;
         } else {
-            let _ = tx.send(LogEvent::UserRegistered(username, userdata.role)).await;
+            let _ = log_sender.send(LogEventType::UserRegistered(username, userdata.role)).await;
         }
     }
 
     if users.is_empty() {
-        let _ = tx.send(LogEvent::StartingUpWithSingleDefaultUser).await;
+        let _ = log_sender.send(LogEventType::StartingUpWithSingleDefaultUser).await;
         users.insert(
             String::from(DEFAULT_USER_USERNAME),
             String::from(DEFAULT_USER_PASSWORD),
@@ -81,22 +85,26 @@ async fn run_server_inner(mut startup_args: StartupArguments, logger: &LogManage
         match TcpListener::bind(bind_address).await {
             Ok(result) => {
                 listeners.push(result);
-                let _ = tx.send(LogEvent::NewListeningSocket(bind_address)).await;
+                let _ = log_sender.send(LogEventType::NewListeningSocket(bind_address)).await;
             }
             Err(err) => {
-                let _ = tx.send(LogEvent::FailedBindListeningSocket(bind_address, err)).await;
+                let _ = log_sender.send(LogEventType::FailedBindListeningSocket(bind_address, err)).await;
             }
         }
     }
 
     if listeners.is_empty() {
-        let _ = tx.send(LogEvent::FailedBindAnySocketAborting).await;
+        let _ = log_sender.send(LogEventType::FailedBindAnySocketAborting).await;
         return;
     }
 
     printlnif!(startup_args.verbose, "Constructing server state");
-    let state = ServerState::new(users, startup_args.no_auth_enabled, startup_args.userpass_auth_enabled);
-    let state = Arc::new(state);
+    let state = Arc::new(ServerState::new(
+        startup_args.verbose,
+        users,
+        startup_args.no_auth_enabled,
+        startup_args.userpass_auth_enabled,
+    ));
 
     let mut client_id_counter: u64 = 1;
 
@@ -108,8 +116,8 @@ async fn run_server_inner(mut startup_args: StartupArguments, logger: &LogManage
             accept_result = accept_from_any(&listeners) => {
                 match accept_result {
                     Ok((socket, address)) => {
-                        let _ = tx.send(LogEvent::NewClientConnectionAccepted(client_id_counter, address)).await;
-                        let client_context = ClientContext::create(client_id_counter, &state, &tx);
+                        let _ = log_sender.send(LogEventType::NewClientConnectionAccepted(client_id_counter, address)).await;
+                        let client_context = ClientContext::create(client_id_counter, &state, logger.new_sender());
                         client_id_counter += 1;
                         let cancel_token1 = client_cancel_token.clone();
                         tokio::spawn(async move {
@@ -117,7 +125,7 @@ async fn run_server_inner(mut startup_args: StartupArguments, logger: &LogManage
                         });
                     },
                     Err((listener, err)) => {
-                        let _ = tx.send(LogEvent::ClientConnectionAcceptFailed(listener.local_addr().ok(), err)).await;
+                        let _ = log_sender.send(LogEventType::ClientConnectionAcceptFailed(listener.local_addr().ok(), err)).await;
                     },
                 }
             },
@@ -133,9 +141,11 @@ async fn run_server_inner(mut startup_args: StartupArguments, logger: &LogManage
     drop(listeners);
     client_cancel_token.cancel();
 
-    let _ = tx.send(LogEvent::SavingUsersToFile(startup_args.users_file.clone())).await;
+    let _ = log_sender
+        .send(LogEventType::SavingUsersToFile(startup_args.users_file.clone()))
+        .await;
     let save_to_file_result = state.users().save_to_file(&startup_args.users_file).await;
-    let _ = tx
-        .send(LogEvent::UsersSavedToFile(startup_args.users_file, save_to_file_result))
+    let _ = log_sender
+        .send(LogEventType::UsersSavedToFile(startup_args.users_file, save_to_file_result))
         .await;
 }
