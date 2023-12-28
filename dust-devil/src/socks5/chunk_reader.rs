@@ -40,17 +40,17 @@ where
         // SAFETY: We ensure the bytes read into the string are valid UTF-8 by checking that they
         // are graphical ASCII values, which are all valid UTF-8.
 
-        let mut total = 0;
-        while total < length {
-            let more = reader.read(&mut buf[total..(length - total)]).await?;
+        let mut count = 0;
+        while count < length {
+            let more = reader.read(&mut buf[count..length]).await?;
 
-            for c in &buf[total..(total + more)] {
+            for c in &buf[count..(count + more)] {
                 if !c.is_ascii_alphanumeric() && *c != b'-' && *c != b'.' {
                     return Err(ErrorKind::InvalidData.into());
                 }
             }
 
-            total += more;
+            count += more;
         }
     }
 

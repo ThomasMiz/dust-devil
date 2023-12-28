@@ -21,10 +21,11 @@ pub struct ServerState {
     historic_client_connections: AtomicU64,
     client_bytes_sent: AtomicU64,
     client_bytes_received: AtomicU64,
+    buffer_size: u32,
 }
 
 impl ServerState {
-    pub fn new(verbose: bool, users: UserManager, no_auth_enabled: bool, userpass_auth_enabled: bool) -> Self {
+    pub fn new(verbose: bool, users: UserManager, no_auth_enabled: bool, userpass_auth_enabled: bool, buffer_size: u32) -> Self {
         ServerState {
             verbose,
             users,
@@ -34,6 +35,7 @@ impl ServerState {
             client_bytes_sent: AtomicU64::new(0),
             current_client_connections: AtomicU32::new(0),
             client_bytes_received: AtomicU64::new(0),
+            buffer_size,
         }
     }
 
@@ -64,6 +66,10 @@ impl ClientContext {
         context.state.historic_client_connections.fetch_add(1, Ordering::Relaxed);
 
         context
+    }
+
+    pub fn buffer_size(&self) -> usize {
+        self.state.buffer_size as usize
     }
 
     pub fn is_noauth_enabled(&self) -> bool {

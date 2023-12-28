@@ -33,6 +33,7 @@ use crate::users::{self, UserData};
 
 const DEFAULT_USERS_FILE: &str = "users.txt";
 const DEFAULT_PORT: u16 = 1080;
+const DEFAULT_BUFFER_SIZE: u32 = 0x2000;
 
 pub fn get_version_string() -> String {
     format!(
@@ -56,6 +57,7 @@ pub fn get_help_string() -> &'static str {
         "  -u, --user <user>               Adds a new user\n",
         "  -a, --auth-disable <auth_type>  Disables a type of authentication\n",
         "  -A, --auth-enable <auth_type>   Enables a type of authentication\n",
+        "  -b, --buffer-size <size>        Sets the size of the buffer for client connections\n",
         "\n",
         "By default, the server will print logs to stdout, but not to any file. Logging may be enabled to both stdout and",
         "to file at the same time, but keep in mind that if any of those slows down, that will slow down the server.\n",
@@ -68,7 +70,11 @@ pub fn get_help_string() -> &'static str {
         "role character. For example, -u \"pedro:1234\" would have the same effect as --user \"#pedro:1234\", and admins ",
         "may be added with, for example \"@admin:secret\".\n",
         "\n",
-        "For enabling or disabling authentication, the available authentication types are \"noauth\" and \"userpass\".",
+        "For enabling or disabling authentication, the available authentication types are \"noauth\" and \"userpass\".\n",
+        "\n",
+        "The default buffer size is 8KBs. Buffer sizes may be specified in bytes ('-b 8192'), kilobytes ('-b 8K'), ",
+        "megabytes ('-b 1M') or gigabytes ('-b 1G' if you respect your computer, please don't) but may not be equal to ",
+        "or larger than 4GBs.\n",
     )
 }
 
@@ -89,6 +95,7 @@ pub struct StartupArguments {
     pub users: HashMap<String, UserData>,
     pub no_auth_enabled: bool,
     pub userpass_auth_enabled: bool,
+    pub buffer_size: u32,
 }
 
 impl StartupArguments {
@@ -102,6 +109,7 @@ impl StartupArguments {
             users: HashMap::new(),
             no_auth_enabled: true,
             userpass_auth_enabled: true,
+            buffer_size: 0,
         }
     }
 
@@ -115,6 +123,10 @@ impl StartupArguments {
 
         if self.users_file.is_empty() {
             self.users_file.push_str(DEFAULT_USERS_FILE);
+        }
+
+        if self.buffer_size == 0 {
+            self.buffer_size = DEFAULT_BUFFER_SIZE;
         }
     }
 }
@@ -135,6 +147,7 @@ pub enum ArgumentsError {
     UsersFileError(UsersFileErrorType),
     NewUserError(NewUserErrorType),
     AuthToggleError(AuthToggleErrorType),
+    BufferSizeError(BufferSizeErrorType),
 }
 
 impl fmt::Display for ArgumentsError {
@@ -146,6 +159,7 @@ impl fmt::Display for ArgumentsError {
             ArgumentsError::UsersFileError(users_file_error) => users_file_error.fmt(f),
             ArgumentsError::NewUserError(new_user_error) => new_user_error.fmt(f),
             ArgumentsError::AuthToggleError(auth_toggle_error) => auth_toggle_error.fmt(f),
+            ArgumentsError::BufferSizeError(buffer_size_error) => buffer_size_error.fmt(f),
         }
     }
 }
@@ -300,27 +314,6 @@ impl From<NewUserErrorType> for ArgumentsError {
     }
 }
 
-#[derive(Debug, PartialEq)]
-pub enum AuthToggleErrorType {
-    UnexpectedEnd(String),
-    InvalidAuthType(String, String),
-}
-
-impl fmt::Display for AuthToggleErrorType {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            AuthToggleErrorType::UnexpectedEnd(arg) => write!(f, "Expected auth type after {arg}"),
-            AuthToggleErrorType::InvalidAuthType(arg, arg2) => write!(f, "Invalid auth type at {arg} {arg2}"),
-        }
-    }
-}
-
-impl From<AuthToggleErrorType> for ArgumentsError {
-    fn from(value: AuthToggleErrorType) -> Self {
-        ArgumentsError::AuthToggleError(value)
-    }
-}
-
 fn parse_new_user_arg(result: &mut StartupArguments, arg: String, maybe_arg2: Option<String>) -> Result<(), NewUserErrorType> {
     let arg2 = match maybe_arg2 {
         Some(arg2) => arg2,
@@ -349,6 +342,27 @@ fn parse_new_user_arg(result: &mut StartupArguments, arg: String, maybe_arg2: Op
     Ok(())
 }
 
+#[derive(Debug, PartialEq)]
+pub enum AuthToggleErrorType {
+    UnexpectedEnd(String),
+    InvalidAuthType(String, String),
+}
+
+impl fmt::Display for AuthToggleErrorType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            AuthToggleErrorType::UnexpectedEnd(arg) => write!(f, "Expected auth type after {arg}"),
+            AuthToggleErrorType::InvalidAuthType(arg, arg2) => write!(f, "Invalid auth type at {arg} {arg2}"),
+        }
+    }
+}
+
+impl From<AuthToggleErrorType> for ArgumentsError {
+    fn from(value: AuthToggleErrorType) -> Self {
+        ArgumentsError::AuthToggleError(value)
+    }
+}
+
 fn parse_auth_arg(result: &mut StartupArguments, enable: bool, arg: String, maybe_arg2: Option<String>) -> Result<(), AuthToggleErrorType> {
     let arg2 = match maybe_arg2 {
         Some(arg2) => arg2,
@@ -363,6 +377,75 @@ fn parse_auth_arg(result: &mut StartupArguments, enable: bool, arg: String, mayb
         return Err(AuthToggleErrorType::InvalidAuthType(arg, arg2));
     }
 
+    Ok(())
+}
+
+#[derive(Debug, PartialEq)]
+pub enum BufferSizeErrorType {
+    UnexpectedEnd(String),
+    AlreadySpecified(String),
+    InvalidSize(String, String),
+}
+
+impl fmt::Display for BufferSizeErrorType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            BufferSizeErrorType::UnexpectedEnd(arg) => write!(f, "Expected buffer size after {arg}"),
+            BufferSizeErrorType::AlreadySpecified(arg) => write!(f, "Buffer size already specified at {arg}"),
+            BufferSizeErrorType::InvalidSize(arg, arg2) => write!(f, "Invalid buffer size at {arg} {arg2}"),
+        }
+    }
+}
+
+impl From<BufferSizeErrorType> for ArgumentsError {
+    fn from(value: BufferSizeErrorType) -> Self {
+        ArgumentsError::BufferSizeError(value)
+    }
+}
+
+fn parse_buffer_size_arg(result: &mut StartupArguments, arg: String, maybe_arg2: Option<String>) -> Result<(), BufferSizeErrorType> {
+    let arg2 = match maybe_arg2 {
+        Some(arg2) => arg2,
+        None => return Err(BufferSizeErrorType::UnexpectedEnd(arg)),
+    };
+
+    if result.buffer_size != 0 {
+        return Err(BufferSizeErrorType::AlreadySpecified(arg));
+    }
+
+    let arg2_trimmed = arg2.trim();
+
+    let mut iter = arg2_trimmed.chars();
+    let (s, radix) = match (iter.next(), iter.next().map(|c| c.to_ascii_lowercase())) {
+        (Some('0'), Some('x')) => (&arg2_trimmed[2..], 16),
+        (Some('0'), Some('o')) => (&arg2_trimmed[2..], 8),
+        (Some('0'), Some('b')) => (&arg2_trimmed[2..], 2),
+        _ => (arg2_trimmed, 10),
+    };
+
+    let (s, multiplier) = match s.chars().last().map(|c| c.to_ascii_lowercase()) {
+        Some('k') => (&s[..(s.len() - 1)], 1024),
+        Some('m') => (&s[..(s.len() - 1)], 1024 * 1024),
+        Some('g') => (&s[..(s.len() - 1)], 1024 * 1024 * 1024),
+        _ => (s, 1),
+    };
+
+    match s.chars().next() {
+        Some(c) if c.is_ascii_alphanumeric() => {}
+        _ => return Err(BufferSizeErrorType::InvalidSize(arg, arg2)),
+    }
+
+    let size = match u32::from_str_radix(s, radix) {
+        Ok(size) if size != 0 => size,
+        _ => return Err(BufferSizeErrorType::InvalidSize(arg, arg2)),
+    };
+
+    let size = match size.checked_mul(multiplier) {
+        Some(size) => size,
+        None => return Err(BufferSizeErrorType::InvalidSize(arg, arg2)),
+    };
+
+    result.buffer_size = size;
     Ok(())
 }
 
@@ -398,6 +481,8 @@ where
             parse_auth_arg(&mut result, false, arg, args.next())?;
         } else if arg.eq("-A") || arg.eq_ignore_ascii_case("--auth-enable") {
             parse_auth_arg(&mut result, true, arg, args.next())?;
+        } else if arg.eq("-b") || arg.eq_ignore_ascii_case("--buffer-size") {
+            parse_buffer_size_arg(&mut result, arg, args.next())?;
         } else {
             return Err(ArgumentsError::UnknownArgument(arg));
         }
@@ -1030,9 +1115,9 @@ mod tests {
     }
 
     #[test]
-    fn test_unknowon_argument() {
-        let result = args("-b");
-        assert_eq!(result, Err(ArgumentsError::UnknownArgument("-b".to_string())));
+    fn test_unknown_argument() {
+        let result = args("-q");
+        assert_eq!(result, Err(ArgumentsError::UnknownArgument("-q".to_string())));
 
         let result = args("croquetas");
         assert_eq!(result, Err(ArgumentsError::UnknownArgument("croquetas".to_string())));
@@ -1043,8 +1128,9 @@ mod tests {
 
     #[test]
     fn test_integration1() {
-        let result =
-            args("-l 0.0.0.0 -v -u #pedro:pedro -l [::1%6969]:6060 -U myfile.txt --silent --auth-disable noauth -u @\\\\so\\:co:tr\\\\oco");
+        let result = args(
+            "-l 0.0.0.0 -v -u #pedro:pedro -l [::1%6969]:6060 -b 1K -U myfile.txt --silent --auth-disable noauth -u @\\\\so\\:co:tr\\\\oco",
+        );
         assert_eq!(
             result,
             Ok(ArgumentsRequest::Run(StartupArguments {
@@ -1056,6 +1142,7 @@ mod tests {
                 silent: true,
                 users: usermap(&[("pedro", "pedro", UserRole::Regular), ("\\so:co", "tr\\oco", UserRole::Admin),]),
                 users_file: "myfile.txt".to_string(),
+                buffer_size: 1024,
                 no_auth_enabled: false,
                 ..Default::default()
             }))

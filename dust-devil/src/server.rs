@@ -104,6 +104,7 @@ async fn run_server_inner(mut startup_args: StartupArguments, logger: &LogManage
         users,
         startup_args.no_auth_enabled,
         startup_args.userpass_auth_enabled,
+        startup_args.buffer_size,
     ));
 
     let mut client_id_counter: u64 = 1;
