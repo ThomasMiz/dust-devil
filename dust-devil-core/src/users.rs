@@ -26,8 +26,8 @@ impl fmt::Display for UserRole {
 #[derive(Debug)]
 pub enum UsersLoadingError {
     IO(io::Error),
-    InvalidUtf8 { line_number: u32, byte_at: usize },
-    LineTooLong { line_number: u32, byte_at: usize },
+    InvalidUtf8 { line_number: u32, byte_at: u64 },
+    LineTooLong { line_number: u32, byte_at: u64 },
     ExpectedRoleCharGotEOF(u32, u32),
     InvalidRoleChar(u32, u32, char),
     ExpectedColonGotEOF(u32, u32),

@@ -154,8 +154,14 @@ impl UserManager {
         if let Err(error) = result {
             return Err(match error {
                 ProcessFileLinesError::IO(io_error) => UsersLoadingError::IO(io_error),
-                ProcessFileLinesError::InvalidUtf8 { line_number, byte_at } => UsersLoadingError::InvalidUtf8 { line_number, byte_at },
-                ProcessFileLinesError::LineTooLong { line_number, byte_at } => UsersLoadingError::LineTooLong { line_number, byte_at },
+                ProcessFileLinesError::InvalidUtf8 { line_number, byte_at } => UsersLoadingError::InvalidUtf8 {
+                    line_number,
+                    byte_at: byte_at as u64,
+                },
+                ProcessFileLinesError::LineTooLong { line_number, byte_at } => UsersLoadingError::LineTooLong {
+                    line_number,
+                    byte_at: byte_at as u64,
+                },
                 ProcessFileLinesError::Cancelled(_, internal_error) => internal_error,
             });
         }
