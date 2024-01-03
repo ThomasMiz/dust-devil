@@ -21,7 +21,7 @@ pub struct ServerState {
     historic_client_connections: AtomicU64,
     client_bytes_sent: AtomicU64,
     client_bytes_received: AtomicU64,
-    buffer_size: u32,
+    buffer_size: AtomicU32,
 }
 
 impl ServerState {
@@ -35,12 +35,20 @@ impl ServerState {
             client_bytes_sent: AtomicU64::new(0),
             current_client_connections: AtomicU32::new(0),
             client_bytes_received: AtomicU64::new(0),
-            buffer_size,
+            buffer_size: AtomicU32::new(buffer_size),
         }
     }
 
     pub fn users(&self) -> &UserManager {
         &self.users
+    }
+
+    pub fn get_buffer_size(&self) -> u32 {
+        self.buffer_size.load(Ordering::Relaxed)
+    }
+
+    pub fn set_buffer_size(&self, value: u32) {
+        self.buffer_size.store(value, Ordering::Relaxed);
     }
 }
 
@@ -69,7 +77,7 @@ impl ClientContext {
     }
 
     pub fn buffer_size(&self) -> usize {
-        self.state.buffer_size as usize
+        self.state.buffer_size.load(Ordering::Relaxed) as usize
     }
 
     pub fn is_noauth_enabled(&self) -> bool {

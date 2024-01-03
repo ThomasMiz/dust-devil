@@ -85,10 +85,10 @@ async fn run_server_inner(mut startup_args: StartupArguments, logger: &LogManage
         match TcpListener::bind(bind_address).await {
             Ok(result) => {
                 listeners.push(result);
-                let _ = log_sender.send(LogEventType::NewListeningSocket(bind_address)).await;
+                let _ = log_sender.send(LogEventType::NewSocks5Socket(bind_address)).await;
             }
             Err(err) => {
-                let _ = log_sender.send(LogEventType::FailedBindListeningSocket(bind_address, err)).await;
+                let _ = log_sender.send(LogEventType::FailedBindSocks5Socket(bind_address, err)).await;
             }
         }
     }
@@ -132,6 +132,7 @@ async fn run_server_inner(mut startup_args: StartupArguments, logger: &LogManage
             },
             _ = tokio::signal::ctrl_c() => {
                 eprintln!("Received shutdown signal, shutting down gracefully. Signal again to shut down ungracefully.");
+                let _ = log_sender.send(LogEventType::ShutdownSignalReceived).await;
                 break
             },
         }

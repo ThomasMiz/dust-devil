@@ -18,10 +18,13 @@ impl LogEvent {
 }
 
 pub enum LogEventType {
-    NewListeningSocket(SocketAddr),
-    FailedBindListeningSocket(SocketAddr, io::Error),
+    NewSocks5Socket(SocketAddr),
+    FailedBindSocks5Socket(SocketAddr, io::Error),
     FailedBindAnySocketAborting,
-    RemovedListeningSocket(SocketAddr),
+    RemovedSocks5Socket(SocketAddr),
+    NewSandstormSocket(SocketAddr),
+    FailedBindSandstormSocket(SocketAddr, io::Error),
+    RemovedSandstormSocket(SocketAddr),
     LoadingUsersFromFile(String),
     UsersLoadedFromFile(String, Result<u64, UsersLoadingError>),
     StartingUpWithSingleDefaultUser,
@@ -31,6 +34,8 @@ pub enum LogEventType {
     UserReplacedByArgs(String, UserRole),
     UserUpdated(String, UserRole, bool),
     UserDeleted(String, UserRole),
+    AuthMethodToggled(AuthMethod, bool),
+    BufferSizeChanged(u32),
     NewClientConnectionAccepted(u64, SocketAddr),
     ClientConnectionAcceptFailed(Option<SocketAddr>, io::Error),
     ClientRequestedUnsupportedVersion(u64, u8),
@@ -51,15 +56,20 @@ pub enum LogEventType {
     ClientSourceShutdown(u64),
     ClientDestinationShutdown(u64),
     ClientConnectionFinished(u64, u64, u64, Result<(), io::Error>),
+    ShutdownSignalReceived,
+    SandstormRequestedShutdown,
 }
 
 impl fmt::Display for LogEventType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::NewListeningSocket(socket_address) => write!(f, "Listening for client connections at {socket_address}"),
-            Self::FailedBindListeningSocket(socket_address, io_error) => write!(f, "Failed to set up listening socket at {socket_address}: {io_error}"),
-            Self::FailedBindAnySocketAborting => write!(f, "Failed to bind any socket! Aborting"),
-            Self::RemovedListeningSocket(socket_address) => write!(f, "Will no longer listen for client connections at {socket_address}"),
+            Self::NewSocks5Socket(socket_address) => write!(f, "Listening for socks5 client connections at {socket_address}"),
+            Self::FailedBindSocks5Socket(socket_address, io_error) => write!(f, "Failed to set up socks5 socket at {socket_address}: {io_error}"),
+            Self::FailedBindAnySocketAborting => write!(f, "Failed to bind any socks5 socket! Aborting"),
+            Self::RemovedSocks5Socket(socket_address) => write!(f, "Will no longer listen for socks5 client connections at {socket_address}"),
+            Self::NewSandstormSocket(socket_address) => write!(f, "Listening for Sandstorm connections at {socket_address}"),
+            Self::FailedBindSandstormSocket(socket_address, io_error) => write!(f, "Failed to set up Sandstorm socket at {socket_address}: {io_error}"),
+            Self::RemovedSandstormSocket(socket_address) => write!(f, "Will no longer listen for Sandstorm connections at {socket_address}"),
             Self::LoadingUsersFromFile(filename) => write!(f, "Loading users from file {filename}"),
             Self::UsersLoadedFromFile(filename, Ok(user_count)) => write!(f, "Loaded {user_count} users from file {filename}"),
             Self::UsersLoadedFromFile(filename, Err(load_users_error)) => write!(f, "Error while loading users from file {filename}: {load_users_error}"),
@@ -77,6 +87,8 @@ impl fmt::Display for LogEventType {
                 })
             },
             Self::UserDeleted(username, role) => write!(f, "Deleted {role} user {username}"),
+            Self::AuthMethodToggled(auth_method, enabled) => write!(f, "Authentication method {auth_method} is now {}abled", if *enabled {"en"} else {"dis"}),
+            Self::BufferSizeChanged(buffer_size) => write!(f, "Client buffer size is now {buffer_size}"),
             Self::NewClientConnectionAccepted(client_id, socket_address) => write!(f, "New client connection from {socket_address} assigned ID {client_id}"),
             Self::ClientConnectionAcceptFailed(Some(socket_address), io_error) => write!(f, "Failed to accept incoming connection from socket {socket_address}: {io_error}"),
             Self::ClientConnectionAcceptFailed(None, io_error) => write!(f, "Failed to accept incoming connection from unknown socket: {io_error}"),
@@ -108,6 +120,8 @@ impl fmt::Display for LogEventType {
             Self::ClientDestinationShutdown(client_id) => write!(f, "Client {client_id} destination socket shutdown"),
             Self::ClientConnectionFinished(client_id, total_bytes_sent, total_bytes_received,Ok(())) => write!(f, "Client {client_id} finished after {total_bytes_sent} bytes sent and {total_bytes_received} bytes received"),
             Self::ClientConnectionFinished(client_id, total_bytes_sent, total_bytes_received, Err(io_error)) => write!(f, "Client {client_id} closed with IO error after {total_bytes_sent} bytes sent and {total_bytes_received} bytes received: {io_error}"),
+            Self::ShutdownSignalReceived => write!(f, "Shutdown signal received"),
+            Self::SandstormRequestedShutdown => write!(f, "Sandstorm connection requested the server shuts down"),
         }
     }
 }
