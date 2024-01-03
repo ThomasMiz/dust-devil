@@ -104,7 +104,7 @@ async fn test_line_too_long() {
         &result,
         UsersLoadingError::LineTooLong {
             line_number: 1,
-            byte_at: process_lines::BUFFER_CAPACITY,
+            byte_at: process_lines::BUFFER_CAPACITY as u64,
         },
     );
 }

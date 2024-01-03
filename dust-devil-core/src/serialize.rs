@@ -338,7 +338,7 @@ impl ByteRead for io::Error {
     }
 }
 
-impl ByteWrite for String {
+impl ByteWrite for &str {
     async fn write<W: AsyncWrite + Unpin + ?Sized>(&self, writer: &mut W) -> Result<(), io::Error> {
         let bytes = self.as_bytes();
         let len = bytes.len();
@@ -349,6 +349,12 @@ impl ByteWrite for String {
         let len = len as u16;
         writer.write_u16(len).await?;
         writer.write_all(bytes).await
+    }
+}
+
+impl ByteWrite for String {
+    async fn write<W: AsyncWrite + Unpin + ?Sized>(&self, writer: &mut W) -> Result<(), io::Error> {
+        self.as_str().write(writer).await
     }
 }
 
@@ -368,6 +374,43 @@ impl ByteRead for String {
         }
 
         Ok(s)
+    }
+}
+
+struct SmallWriteString<'a>(&'a str);
+
+impl<'a> ByteWrite for SmallWriteString<'a> {
+    async fn write<W: AsyncWrite + Unpin + ?Sized>(&self, writer: &mut W) -> Result<(), io::Error> {
+        let bytes = self.0.as_bytes();
+        let len = bytes.len();
+        if len > u8::MAX as usize {
+            return Err(ErrorKind::InvalidData.into());
+        }
+
+        let len = len as u8;
+        writer.write_u8(len).await?;
+        writer.write_all(bytes).await
+    }
+}
+
+struct SmallReadString(String);
+
+impl ByteRead for SmallReadString {
+    async fn read<R: AsyncRead + Unpin + ?Sized>(reader: &mut R) -> Result<Self, io::Error> {
+        let len = reader.read_u8().await? as usize;
+
+        let mut s = String::with_capacity(len);
+        unsafe {
+            // SAFETY: The elements of `v` are initialized by `read_exact`, and then we ensure they are valid UTF-8.
+            let v = s.as_mut_vec();
+            v.set_len(len);
+            reader.read_exact(&mut v[0..len]).await?;
+            if std::str::from_utf8(v).is_err() {
+                return Err(ErrorKind::InvalidData.into());
+            }
+        }
+
+        Ok(SmallReadString(s))
     }
 }
 
@@ -477,7 +520,7 @@ impl ByteWrite for SocksRequestAddress {
         match self {
             Self::IPv4(v4) => (4u8, v4).write(writer).await,
             Self::IPv6(v6) => (6u8, v6).write(writer).await,
-            Self::Domainname(domainname) => (200u8, domainname).write(writer).await,
+            Self::Domainname(domainname) => (200u8, SmallWriteString(domainname)).write(writer).await,
         }
     }
 }
@@ -487,7 +530,7 @@ impl ByteRead for SocksRequestAddress {
         match reader.read_u8().await? {
             4 => Ok(SocksRequestAddress::IPv4(Ipv4Addr::read(reader).await?)),
             6 => Ok(SocksRequestAddress::IPv6(Ipv6Addr::read(reader).await?)),
-            200 => Ok(SocksRequestAddress::Domainname(String::read(reader).await?)),
+            200 => Ok(SocksRequestAddress::Domainname(SmallReadString::read(reader).await?.0)),
             _ => Err(ErrorKind::InvalidData.into()),
         }
     }
@@ -520,10 +563,12 @@ impl ByteWrite for LogEventType {
             Self::StartingUpWithSingleDefaultUser => 7u8.write(writer).await,
             Self::SavingUsersToFile(filename) => (8u8, filename).write(writer).await,
             Self::UsersSavedToFile(filename, result) => (9u8, filename, result).write(writer).await,
-            Self::UserRegistered(username, role) => (10u8, username, role).write(writer).await,
-            Self::UserReplacedByArgs(username, role) => (11u8, username, role).write(writer).await,
-            Self::UserUpdated(username, role, password_changed) => (12u8, username, role, password_changed).write(writer).await,
-            Self::UserDeleted(username, role) => (13u8, username, role).write(writer).await,
+            Self::UserRegistered(username, role) => (10u8, SmallWriteString(username), role).write(writer).await,
+            Self::UserReplacedByArgs(username, role) => (11u8, SmallWriteString(username), role).write(writer).await,
+            Self::UserUpdated(username, role, password_changed) => {
+                (12u8, SmallWriteString(username), role, password_changed).write(writer).await
+            }
+            Self::UserDeleted(username, role) => (13u8, SmallWriteString(username), role).write(writer).await,
             Self::NewClientConnectionAccepted(client_id, socket_address) => (14u8, client_id, socket_address).write(writer).await,
             Self::ClientConnectionAcceptFailed(maybe_socket_address, io_error) => {
                 (15u8, maybe_socket_address, io_error).write(writer).await
@@ -533,9 +578,11 @@ impl ByteWrite for LogEventType {
             Self::ClientRequestedUnsupportedAtyp(client_id, atyp) => (18u8, client_id, atyp).write(writer).await,
             Self::ClientSelectedAuthMethod(client_id, auth_method) => (19u8, client_id, auth_method).write(writer).await,
             Self::ClientRequestedUnsupportedUserpassVersion(client_id, ver) => (20u8, client_id, ver).write(writer).await,
-            Self::ClientAuthenticatedWithUserpass(client_id, username, success) => (21u8, client_id, username, success).write(writer).await,
+            Self::ClientAuthenticatedWithUserpass(client_id, username, success) => {
+                (21u8, client_id, SmallWriteString(username), success).write(writer).await
+            }
             Self::ClientSocksRequest(client_id, request) => (22u8, client_id, request).write(writer).await,
-            Self::ClientDnsLookup(client_id, domainname) => (23u8, client_id, domainname).write(writer).await,
+            Self::ClientDnsLookup(client_id, domainname) => (23u8, client_id, SmallWriteString(domainname)).write(writer).await,
             Self::ClientAttemptingConnect(client_id, socket_address) => (24u8, client_id, socket_address).write(writer).await,
             Self::ClientConnectionAttemptBindFailed(client_id, io_error) => (25u8, client_id, io_error).write(writer).await,
             Self::ClientConnectionAttemptConnectFailed(client_id, io_error) => (26u8, client_id, io_error).write(writer).await,
@@ -575,14 +622,23 @@ impl ByteRead for LogEventType {
                 String::read(reader).await?,
                 <Result<u64, io::Error> as ByteRead>::read(reader).await?,
             )),
-            10u8 => Ok(Self::UserRegistered(String::read(reader).await?, UserRole::read(reader).await?)),
-            11u8 => Ok(Self::UserReplacedByArgs(String::read(reader).await?, UserRole::read(reader).await?)),
+            10u8 => Ok(Self::UserRegistered(
+                SmallReadString::read(reader).await?.0,
+                UserRole::read(reader).await?,
+            )),
+            11u8 => Ok(Self::UserReplacedByArgs(
+                SmallReadString::read(reader).await?.0,
+                UserRole::read(reader).await?,
+            )),
             12u8 => Ok(Self::UserUpdated(
-                String::read(reader).await?,
+                SmallReadString::read(reader).await?.0,
                 UserRole::read(reader).await?,
                 bool::read(reader).await?,
             )),
-            13u8 => Ok(Self::UserDeleted(String::read(reader).await?, UserRole::read(reader).await?)),
+            13u8 => Ok(Self::UserDeleted(
+                SmallReadString::read(reader).await?.0,
+                UserRole::read(reader).await?,
+            )),
             14u8 => Ok(Self::NewClientConnectionAccepted(
                 reader.read_u64().await?,
                 SocketAddr::read(reader).await?,
@@ -620,7 +676,10 @@ impl ByteRead for LogEventType {
                 reader.read_u64().await?,
                 SocksRequest::read(reader).await?,
             )),
-            23u8 => Ok(Self::ClientDnsLookup(reader.read_u64().await?, String::read(reader).await?)),
+            23u8 => Ok(Self::ClientDnsLookup(
+                reader.read_u64().await?,
+                SmallReadString::read(reader).await?.0,
+            )),
             24u8 => Ok(Self::ClientAttemptingConnect(
                 reader.read_u64().await?,
                 SocketAddr::read(reader).await?,

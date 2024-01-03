@@ -59,7 +59,7 @@ pub fn get_help_string() -> &'static str {
         "  -A, --auth-enable <auth_type>   Enables a type of authentication\n",
         "  -b, --buffer-size <size>        Sets the size of the buffer for client connections\n",
         "\n",
-        "By default, the server will print logs to stdout, but not to any file. Logging may be enabled to both stdout and",
+        "By default, the server will print logs to stdout, but not to any file. Logging may be enabled to both stdout and ",
         "to file at the same time, but keep in mind that if any of those slows down, that will slow down the server.\n",
         "\n",
         "Socket addresses may be specified as an IPv4 or IPv6 address, or a domainname, and may include a port number. ",
