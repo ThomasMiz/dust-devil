@@ -1,0 +1,240 @@
+This file provides a description of the Sandstorm protocol, used by the dust-devil SOCKS5 proxy for
+remote management. Sandstorm is a TCP-based protocol and does not provide security features apart
+from login with username and password (even then, all traffic is sent in plaintext).
+
+A Sandstorm session starts when the client connects to the server, at which point the client is the
+first one to talk, sending an authorization header that looks like this:
+
+    +-----+------+------+------+-------+
+    | VER | ULEN | USER | PLEN | UPASS |
+    +-----+------+------+------+-------+
+    |  1  |  1   | ULEN |  1   | PLEN  |
+    +-----+------+------+------+-------+
+
+Where:
+- VER is the version of the protocol. Initially 1.
+- ULEN is the length of the username, must be greater than 0.
+- USER is the username, with a length of ULEN bytes, must be a valid UTF-8 string.
+- PLEN is the length of the password, must be greater than 0.
+- UPASS is the user's pasword, with a length of PLEN bytes, must be a valid UTF-8 string.
+
+The server will respond with a single status byte:
+
+    +--------+
+    | STATUS |
+    +--------+
+    |   1    |
+    +--------+
+
+The STATUS must be one of the following values:
+- 0x00: OK
+- 0x01: Unsupported version
+- 0x02: Invalid username or password
+- 0xFF: Unspecified error
+
+The server may respond with an unsupported version status code before it receives the username or
+password. If the status code is not 0x00 OK, the client must close the connection. The server may
+shutdown the socket to indicate it will not send any further data.
+
+If the status code is 0x00 OK, the connection proceeds to enter monitoring mode. In this mode, the
+client and server send asynchronous messages between each other. The client can send messages that
+request actions to the server, and the server will send messages with responses to said actions, as
+well as a real time stream of log events and metrics.
+
+The server's messages will follow the following format:
+
+    +-------+----------+
+    | MTYPE | MPAYLOAD |
+    +-------+----------+
+    |   1   | Variable |
+    +-------+----------+
+
+The client can request actions to the server by sending the following message:
+
+    +-------+----------+
+    | ATYPE | APAYLOAD |
+    +-------+----------+
+    |   1   | Variable |
+    +-------+----------+
+
+Since most of the protocol follows a request-response format, most valid values for ATYPE have a
+corresponding value for MTYPE indicating the server's response to that request. For convenience,
+these corresponding values will be equal (MTYPE = ATYPE). For better clarity, in this document I
+will organize these by value, indicating for each possible value what it means on each side and
+what payload it carries.
+
+Many of the payload specify serializing structs defined in the Rust programming language. Instead
+of describing how to serialize each of these structs, I will simply indicate that the format of
+how these structs are serialized is as indicated by the implementation in the file, which from now
+on I will refer to as the "serialization file", at "dust-devil-core/src/serialize.rs".
+
+I'm lazy, deal with it.
+
+The following ATYPE/MTYPE values are possible:
+- 0x00: Shutdown
+    - Client-sent: Requests the server shuts down gracefully.
+    - Server-sent: Indicates the server is shutting down and is about to close this connection.
+    Neither of these carries a payload.
+
+- 0x01: Monitoring Configuration
+    - Client-sent: Requests enabling or disabling streaming of log events. The payload consists of
+        a single byte, indicating 1 for enabling and 0 for disabling.
+    - Server-sent: Acknowledges the enabling or disabling of streaming of log events. The payload
+        consists of a single byte, 1 or 0 indicating the current (not previous) configuration.
+    At the start of the connection, log event streaming is disabled. To start, it must be
+    explicitly enabled by the client. The server can also refuse to enable log event streaming, for
+    example if it doesn't support it, by returning a 0 to a request of 1.
+
+- 0x02: Log Event Stream
+    - Client-sent: Invalid, the client should never send this ATYPE.
+    - Server-sent: Indicates a new log event. The payload contains the log event, serialized with
+        the variable-length format implemented in the serialization file for the `LogEvent` struct.
+    The log events must be sent in the order in which they ocurred. The server should not, for
+    example, indicate that a client X failed to connect to example.org before indicating that
+    client X requested to be connected to example.org.
+
+    The client can infer real-time metrics through log events, as this includes bytes sent and
+    received for each client, new connections, closed connections, etc.
+
+- 0x03: List SOCKS5 Sockets
+    - Client-sent: Requests the server sends a list of the addresses of all sockets listening for
+        incoming SOCKS5 client connections. No payload.
+    - Server-sent: Indicates the list of sockets. The payload starts with an u16 which indicates
+        the amount of socket addresses, followed by said amount of `SocketAddr` structs.
+
+- 0x04: Add SOCKS5 Socket
+    - Client-sent: Requests the server opens a new socket listening for incoming SOCKS5 clients at
+        a specified address. The payload contains said address as a `SocketAddr`.
+    - Server-sent: Indicates the status of the request. The payload consists of a single byte, a 1
+        if the socket was successfully opened and is now listening for incoming client connections,
+        or 0 if there was an error, followed by an `io::Error` representing the error.
+
+- 0x05: Remove SOCKS5 Socket
+    - Client-sent: Requests the server closes a socket that is currently listening for incoming
+        SOCKS5 clients. The payload contains said socket's address as a `SocketAddr`.
+    - Server-sent: Indicates the status of the request. Consists of a single u8 that specifies:
+        - 0x00: OK
+        - 0x01: Socket not found
+    Note: It is possible to disable all SOCKS5 sockets. Doing so will stop any new clients from
+    connecting (clients with already established connections will keep going).
+
+- 0x06: List Sandstorm Sockets
+    - Client-sent: Requests the server sends a list of the addresses of all sockets listening for
+        incoming Sandstorm client connections. No payload.
+    - Server-sent: Indicates the list of sockets. The payload starts with an u16 which indicates
+        the amount of socket addresses, followed by said amount of `SocketAddr` structs.
+
+- 0x07: Add Sandstorm Socket
+    - Client-sent: Requests the server opens a new socket listening for incoming Sandstorm clients
+        at a specified address. The payload contains said address as a `SocketAddr`.
+    - Server-sent: Indicates the status of the request. The payload consists of a single byte, a 1
+        if the socket was successfully opened and is now listening for incoming client connections,
+        or 0 if there was an error, followed by an `io::Error` representing the error.
+
+- 0x08: Remove Sandstorm Socket
+    - Client-sent: Requests the server closes a socket that is currently listening for incoming
+        Sandstorm clients. The payload contains said socket's address as a `SocketAddr`.
+    - Server-sent: Indicates the status of the request. Consists of a single u8 that specifies:
+        - 0x00: OK
+        - 0x01: Socket not found
+    Note: It is possible to disable all Sandstorm sockets. Doing so and closing any remaining
+    connection will result in not being able to access the server through Sandstorm anymore.
+
+- 0x09 List Users
+    - Client-sent: Requests the server sends a list of all users. No payload.
+    - Server-sent: Indicates the list of all users. The payload starts with an u16 which indicates
+        the amount of users, followed by said amount of `(String, UserRole)` tuples indicating the
+        username and role of each user. The users may be listed in any order.
+
+- 0x0A Add User
+    - Client-sent: Requests a new user to be added. The payload specifies the new user's username,
+        and password, which must be valid UTF-8 strings, as well as the role, as a `UserRole`:
+            +------+------+------+-------+------+
+            | ULEN | USER | PLEN | UPASS | ROLE |
+            +------+------+------+-------+------+
+            |  1   | ULEN |  1   | PLEN  |  1   |
+            +------+------+------+-------+------+
+    - Server-sent: Indicates the result of the operation. The payload contains a single byte which
+        specifies:
+            - 0x00: OK
+            - 0x01: Already exists
+            - 0x02: Invalid values
+
+- 0x0B Update User
+    - Client-sent: Requests updating the password and/or role of a user. The client sends the
+        following request, which may request updating the password, the role, both, or none:
+            +------+------+-------+           +------+-------+     +-------+           +------+
+            | ULEN | USER | HPASS | if        | PLEN | UPASS | end | HROLE | if        | ROLE | end
+            +------+------+-------+ HPASS==1: +------+-------+ if  +-------+ HROLE==1: +------+ if
+            |  1   | ULEN |   1   |           |  1   | PLEN  |     |   1   |           |  1   |
+            +------+------+-------+           +------+-------+     +-------+           +------+
+        The HPASS field indicates whether the request has a new password, in which case it is
+        followed by the password, which must be a valid UTF-8 string. The HROLE field indicates
+        whether the requets has a new role, in which case it is followed by the new `UserRole`.
+    - Server-sent: Indicates the result of the operation. The payload contains a single byte which
+        specifies:
+            - 0x00 OK
+            - 0x01 User not found
+            - 0x02 Cannot remove only admin
+            - 0x03 Nothing was requested (if neither a password nor a role is specified)
+
+- 0x0C Delete User
+    - Client-sent: Requests a user be deleted. The payload contains the requested username:
+            +------+------+
+            | ULEN | USER |
+            +------+------+
+            |  1   | ULEN |
+            +------+------+
+    - Server-sent: Indicates the result of the operation. The payload contains a single byte which
+        specifies:
+            - 0x00 OK
+            - 0x01 User not found
+            - 0x02 Cannot remove only admin
+
+- 0x0D List Authentication Methods
+TODO
+List supported authentication methods and whether each one is enabled/disabled
+
+- 0x0E Enable/Disable Authentication Method
+TODO
+Set whether an auth method is enabled/disabled
+
+- 0x0F Request Current Metrics
+    - Client-sent: Requests the server sends the current metrics. No payload.
+    - Server-sent: Indicates the result of the operation. The payload starts with an u8 which,
+        if 0, the server doesn't support metrics. If 1, then the rest payload is composed of:
+        (u32) current_client_connections, (u64) historic_client_connections,
+        (u64) client_bytes_sent, (u64) client_bytes_received, (u32) current_sandstorm_connections,
+        (u64) historic_sandstorm_connections. These values must be synchronized with the log event
+        stream, as in, these values must be the exact metric values the server had after the last
+        log event sent (when log event streaming is enabled).
+
+- 0x10 Get Buffer Size
+    - Client-sent: Requests the server sends the current buffer size used for clients. No payload.
+    - Server-sent: Indicates the current buffer size. The payload consists of a single u32 that
+        indicates the current buffer size.
+
+- 0x11 Set Buffer Size
+    - Client-sent: Requests the server sets the current buffer size used for clients. The payload
+        consists of a single u32, which indicates the requested new buffer size in bytes.
+    - Server-sent: Indicates the result of the operation. The payload starts with an u8 which is
+        0 for error (if the requested buffer size is invalid, such as 0) and 1 for ok.
+    Note: This must affect new connections established after the change, but may or may not affect
+    existing connections.
+
+- 0xFF: MEOW
+    - Client-sent: This is a simple ping. It has no payload.
+    - Server-sent: Must reply with a payload of four bytes, corresponding to the ASCII values of
+        the characters 'M', 'E', 'O', 'W'. If the chars don't match, the client MAY OPTIONALLY
+        choose to delete the entire local filesystem. Implementations are not encouraged to do
+        this, but neither they are discouraged from doing it.
+
+
+Pipelining
+
+The server must support "pipelining". That is, if the client sends multiple requests at once,
+without waiting for each response, the server must answer them all properly as if they had been
+sent separately. The response messages of each request don't need to be sent in the same order as
+requested, as the client will be able to tell them apart by their MTYPE, but multiple requests of
+the same ATYPE must be answered in order, as the client would otherwise be unable to distinguish
+which response corresponds to which request.
