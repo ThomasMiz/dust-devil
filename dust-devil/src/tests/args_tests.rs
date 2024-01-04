@@ -5,11 +5,14 @@ use std::{
 
 use dust_devil_core::users::UserRole;
 
-use crate::{args::BufferSizeErrorType, users::UserData};
+use crate::{
+    args::{BufferSizeErrorType, DEFAULT_SANDSTORM_PORT},
+    users::UserData,
+};
 
 use crate::args::{
-    parse_arguments, ArgumentsError, ArgumentsRequest, AuthToggleErrorType, ListenErrorType, LogFileErrorType, NewUserErrorType,
-    StartupArguments, UsersFileErrorType, DEFAULT_PORT,
+    parse_arguments, ArgumentsError, ArgumentsRequest, AuthToggleErrorType, FileErrorType, ListenErrorType, NewUserErrorType,
+    StartupArguments, DEFAULT_SOCKS5_PORT,
 };
 
 fn args(s: &str) -> Result<ArgumentsRequest, ArgumentsError> {
@@ -147,13 +150,13 @@ fn test_log_file_empty() {
     let result = args_vec(&["-o", ""]);
     assert_eq!(
         result,
-        Err(ArgumentsError::LogFileError(LogFileErrorType::EmptyPath("-o".to_string())))
+        Err(ArgumentsError::LogFileError(FileErrorType::EmptyPath("-o".to_string())))
     );
 
     let result = args_vec(&["--log-file", ""]);
     assert_eq!(
         result,
-        Err(ArgumentsError::LogFileError(LogFileErrorType::EmptyPath("--log-file".to_string())))
+        Err(ArgumentsError::LogFileError(FileErrorType::EmptyPath("--log-file".to_string())))
     );
 }
 
@@ -162,15 +165,13 @@ fn test_log_file_unexpected_end() {
     let result = args("-o");
     assert_eq!(
         result,
-        Err(ArgumentsError::LogFileError(LogFileErrorType::UnexpectedEnd("-o".to_string())))
+        Err(ArgumentsError::LogFileError(FileErrorType::UnexpectedEnd("-o".to_string())))
     );
 
     let result = args("--log-file");
     assert_eq!(
         result,
-        Err(ArgumentsError::LogFileError(LogFileErrorType::UnexpectedEnd(
-            "--log-file".to_string()
-        )))
+        Err(ArgumentsError::LogFileError(FileErrorType::UnexpectedEnd("--log-file".to_string())))
     );
 }
 
@@ -179,7 +180,7 @@ fn test_log_file_specified_twice() {
     let result = args("-o ./my_log -v --log-file againnnn");
     assert_eq!(
         result,
-        Err(ArgumentsError::LogFileError(LogFileErrorType::AlreadySpecified(
+        Err(ArgumentsError::LogFileError(FileErrorType::AlreadySpecified(
             "--log-file".to_string()
         )))
     );
@@ -187,7 +188,7 @@ fn test_log_file_specified_twice() {
     let result = args("--log-file ./my_log -v -o againnnn");
     assert_eq!(
         result,
-        Err(ArgumentsError::LogFileError(LogFileErrorType::AlreadySpecified("-o".to_string())))
+        Err(ArgumentsError::LogFileError(FileErrorType::AlreadySpecified("-o".to_string())))
     );
 }
 
@@ -209,7 +210,7 @@ fn test_listen_default_port() {
     assert_eq!(
         result,
         Ok(ArgumentsRequest::Run(StartupArguments {
-            socks5_bind_sockets: vec![SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(1, 2, 3, 4), DEFAULT_PORT))],
+            socks5_bind_sockets: vec![SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(1, 2, 3, 4), DEFAULT_SOCKS5_PORT))],
             ..Default::default()
         }))
     );
@@ -219,10 +220,10 @@ fn test_listen_default_port() {
         result,
         Ok(ArgumentsRequest::Run(StartupArguments {
             socks5_bind_sockets: vec![
-                SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(127, 0, 4, 20), DEFAULT_PORT)),
+                SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(127, 0, 4, 20), DEFAULT_SOCKS5_PORT)),
                 SocketAddr::V6(SocketAddrV6::new(
                     Ipv6Addr::new(0xfefe, 0, 0, 0, 0, 0, 0, 0xafaf),
-                    DEFAULT_PORT,
+                    DEFAULT_SOCKS5_PORT,
                     0,
                     69420
                 )),
@@ -257,13 +258,15 @@ fn test_listen_unexpected_end() {
     let result = args("-l");
     assert_eq!(
         result,
-        Err(ArgumentsError::ListenError(ListenErrorType::UnexpectedEnd("-l".to_string())))
+        Err(ArgumentsError::Socks5ListenError(ListenErrorType::UnexpectedEnd("-l".to_string())))
     );
 
     let result = args("--listen");
     assert_eq!(
         result,
-        Err(ArgumentsError::ListenError(ListenErrorType::UnexpectedEnd("--listen".to_string())))
+        Err(ArgumentsError::Socks5ListenError(ListenErrorType::UnexpectedEnd(
+            "--listen".to_string()
+        )))
     );
 }
 
@@ -272,7 +275,7 @@ fn test_listen_bad_format() {
     let result = args("-l 127.420.666.0");
     assert_eq!(
         result,
-        Err(ArgumentsError::ListenError(ListenErrorType::InvalidSocketAddress(
+        Err(ArgumentsError::Socks5ListenError(ListenErrorType::InvalidSocketAddress(
             "-l".to_string(),
             "127.420.666.0".to_string()
         )))
@@ -281,7 +284,7 @@ fn test_listen_bad_format() {
     let result = args("--listen [fafa::fefe:fifi:fofo:fufu]");
     assert_eq!(
         result,
-        Err(ArgumentsError::ListenError(ListenErrorType::InvalidSocketAddress(
+        Err(ArgumentsError::Socks5ListenError(ListenErrorType::InvalidSocketAddress(
             "--listen".to_string(),
             "[fafa::fefe:fifi:fofo:fufu]".to_string()
         )))
@@ -290,8 +293,118 @@ fn test_listen_bad_format() {
     let result = args_vec(&["--listen", "alto chori ameo 🤩🤩"]);
     assert_eq!(
         result,
-        Err(ArgumentsError::ListenError(ListenErrorType::InvalidSocketAddress(
+        Err(ArgumentsError::Socks5ListenError(ListenErrorType::InvalidSocketAddress(
             "--listen".to_string(),
+            "alto chori ameo 🤩🤩".to_string()
+        )))
+    );
+}
+
+#[test]
+fn test_listen_sandstorm_single() {
+    let result = args("-m 9.8.7.6:54321");
+    assert_eq!(
+        result,
+        Ok(ArgumentsRequest::Run(StartupArguments {
+            sandstorm_bind_sockets: vec![SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(9, 8, 7, 6), 54321))],
+            ..Default::default()
+        }))
+    );
+}
+
+#[test]
+fn test_listen_sandstorm_default_port() {
+    let result = args("-m 4.3.4.3");
+    assert_eq!(
+        result,
+        Ok(ArgumentsRequest::Run(StartupArguments {
+            sandstorm_bind_sockets: vec![SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(4, 3, 4, 3), DEFAULT_SANDSTORM_PORT))],
+            ..Default::default()
+        }))
+    );
+
+    let result = args("-m 69.6.4.20 -m [fefe::bebe%42069]");
+    assert_eq!(
+        result,
+        Ok(ArgumentsRequest::Run(StartupArguments {
+            sandstorm_bind_sockets: vec![
+                SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(69, 6, 4, 20), DEFAULT_SANDSTORM_PORT)),
+                SocketAddr::V6(SocketAddrV6::new(
+                    Ipv6Addr::new(0xfefe, 0, 0, 0, 0, 0, 0, 0xbebe),
+                    DEFAULT_SANDSTORM_PORT,
+                    0,
+                    42069
+                )),
+            ],
+            ..Default::default()
+        }))
+    );
+}
+
+#[test]
+fn test_listen_sandstorm_multiple() {
+    let result = args("-m [abcd::4f5:2e2e:4321:3ac3%69]:7164 -m 1.2.3.4:56789");
+    assert_eq!(
+        result,
+        Ok(ArgumentsRequest::Run(StartupArguments {
+            sandstorm_bind_sockets: vec![
+                SocketAddr::V6(SocketAddrV6::new(
+                    Ipv6Addr::new(0xabcd, 0, 0, 0, 0x04f5, 0x2e2e, 0x4321, 0x3ac3),
+                    7164,
+                    0,
+                    69
+                )),
+                SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(1, 2, 3, 4), 56789)),
+            ],
+            ..Default::default()
+        }))
+    );
+}
+
+#[test]
+fn test_listen_sandstorm_unexpected_end() {
+    let result = args("-m");
+    assert_eq!(
+        result,
+        Err(ArgumentsError::SandstormListenError(ListenErrorType::UnexpectedEnd(
+            "-m".to_string()
+        )))
+    );
+
+    let result = args("--management");
+    assert_eq!(
+        result,
+        Err(ArgumentsError::SandstormListenError(ListenErrorType::UnexpectedEnd(
+            "--management".to_string()
+        )))
+    );
+}
+
+#[test]
+fn test_listen_sandstorm_bad_format() {
+    let result = args("-m 127.420.666.0");
+    assert_eq!(
+        result,
+        Err(ArgumentsError::SandstormListenError(ListenErrorType::InvalidSocketAddress(
+            "-m".to_string(),
+            "127.420.666.0".to_string()
+        )))
+    );
+
+    let result = args("--management [fafa::fefe:fifi:fofo:fufu]");
+    assert_eq!(
+        result,
+        Err(ArgumentsError::SandstormListenError(ListenErrorType::InvalidSocketAddress(
+            "--management".to_string(),
+            "[fafa::fefe:fifi:fofo:fufu]".to_string()
+        )))
+    );
+
+    let result = args_vec(&["--management", "alto chori ameo 🤩🤩"]);
+    assert_eq!(
+        result,
+        Err(ArgumentsError::SandstormListenError(ListenErrorType::InvalidSocketAddress(
+            "--management".to_string(),
             "alto chori ameo 🤩🤩".to_string()
         )))
     );
@@ -323,15 +436,13 @@ fn test_users_file_empty() {
     let result = args_vec(&["-U", ""]);
     assert_eq!(
         result,
-        Err(ArgumentsError::UsersFileError(UsersFileErrorType::EmptyPath("-U".to_string())))
+        Err(ArgumentsError::UsersFileError(FileErrorType::EmptyPath("-U".to_string())))
     );
 
     let result = args_vec(&["--users-file", ""]);
     assert_eq!(
         result,
-        Err(ArgumentsError::UsersFileError(UsersFileErrorType::EmptyPath(
-            "--users-file".to_string()
-        )))
+        Err(ArgumentsError::UsersFileError(FileErrorType::EmptyPath("--users-file".to_string())))
     );
 }
 
@@ -340,13 +451,13 @@ fn test_users_file_unexpected_end() {
     let result = args("-U");
     assert_eq!(
         result,
-        Err(ArgumentsError::UsersFileError(UsersFileErrorType::UnexpectedEnd("-U".to_string())))
+        Err(ArgumentsError::UsersFileError(FileErrorType::UnexpectedEnd("-U".to_string())))
     );
 
     let result = args("--users-file");
     assert_eq!(
         result,
-        Err(ArgumentsError::UsersFileError(UsersFileErrorType::UnexpectedEnd(
+        Err(ArgumentsError::UsersFileError(FileErrorType::UnexpectedEnd(
             "--users-file".to_string()
         )))
     );
@@ -357,7 +468,7 @@ fn test_users_file_specified_twice() {
     let result = args("-U ./my_users -v --users-file againnnn");
     assert_eq!(
         result,
-        Err(ArgumentsError::UsersFileError(UsersFileErrorType::AlreadySpecified(
+        Err(ArgumentsError::UsersFileError(FileErrorType::AlreadySpecified(
             "--users-file".to_string()
         )))
     );
@@ -365,9 +476,7 @@ fn test_users_file_specified_twice() {
     let result = args("--users-file ./my_users -v -U againnnn");
     assert_eq!(
         result,
-        Err(ArgumentsError::UsersFileError(UsersFileErrorType::AlreadySpecified(
-            "-U".to_string()
-        )))
+        Err(ArgumentsError::UsersFileError(FileErrorType::AlreadySpecified("-U".to_string())))
     );
 }
 
@@ -943,7 +1052,7 @@ fn test_integration1() {
         result,
         Ok(ArgumentsRequest::Run(StartupArguments {
             socks5_bind_sockets: vec![
-                SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, DEFAULT_PORT)),
+                SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, DEFAULT_SOCKS5_PORT)),
                 SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::LOCALHOST, 6060, 0, 6969)),
             ],
             verbose: true,
@@ -959,11 +1068,12 @@ fn test_integration1() {
 
 #[test]
 fn test_integration2() {
-    let result = args("-U picante.txt --auth-enable noauth -u juan:carlos -v -u #carlos:juan --log-file myfile.txt --auth-disable userpass -l 1.2.3.4:5678");
+    let result = args("-U picante.txt -m 4.3.2.1 --auth-enable noauth -u juan:carlos -v -u #carlos:juan --log-file myfile.txt --auth-disable userpass -l 1.2.3.4:5678");
     assert_eq!(
         result,
         Ok(ArgumentsRequest::Run(StartupArguments {
             users_file: "picante.txt".to_string(),
+            sandstorm_bind_sockets: vec![SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(4, 3, 2, 1), DEFAULT_SANDSTORM_PORT))],
             no_auth_enabled: true,
             userpass_auth_enabled: false,
             users: usermap(&[("juan", "carlos", UserRole::Regular), ("carlos", "juan", UserRole::Regular),]),
