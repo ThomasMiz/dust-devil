@@ -7,7 +7,7 @@ use std::{
     },
 };
 
-use dust_devil_core::{logging::LogEventType, socks5::AuthMethod};
+use dust_devil_core::{logging::LogEventType, socks5::AuthMethod, users::UserRole};
 use tokio::sync::mpsc::error::TrySendError;
 
 use crate::{logger::LogSender, printlnif, users::UserManager};
@@ -21,6 +21,8 @@ pub struct ServerState {
     historic_client_connections: AtomicU64,
     client_bytes_sent: AtomicU64,
     client_bytes_received: AtomicU64,
+    current_sandstorm_connections: AtomicU32,
+    historic_sandstorm_connections: AtomicU64,
     buffer_size: AtomicU32,
 }
 
@@ -35,20 +37,14 @@ impl ServerState {
             client_bytes_sent: AtomicU64::new(0),
             current_client_connections: AtomicU32::new(0),
             client_bytes_received: AtomicU64::new(0),
+            current_sandstorm_connections: AtomicU32::new(0),
+            historic_sandstorm_connections: AtomicU64::new(0),
             buffer_size: AtomicU32::new(buffer_size),
         }
     }
 
     pub fn users(&self) -> &UserManager {
         &self.users
-    }
-
-    pub fn get_buffer_size(&self) -> u32 {
-        self.buffer_size.load(Ordering::Relaxed)
-    }
-
-    pub fn set_buffer_size(&self, value: u32) {
-        self.buffer_size.store(value, Ordering::Relaxed);
     }
 }
 
@@ -218,5 +214,84 @@ impl ClientContext {
 impl Drop for ClientContext {
     fn drop(&mut self) {
         self.state.current_client_connections.fetch_sub(1, Ordering::Relaxed);
+    }
+}
+
+pub struct SandstormContext {
+    manager_id: u64,
+    bytes_sent: u64,
+    bytes_received: u64,
+    state: Arc<ServerState>,
+    log_sender: LogSender,
+}
+
+impl SandstormContext {
+    pub fn create(manager_id: u64, state: &Arc<ServerState>, log_sender: LogSender) -> Self {
+        let context = SandstormContext {
+            manager_id,
+            bytes_sent: 0,
+            bytes_received: 0,
+            state: Arc::clone(state),
+            log_sender,
+        };
+
+        context.state.current_sandstorm_connections.fetch_add(1, Ordering::Relaxed);
+        context.state.historic_sandstorm_connections.fetch_add(1, Ordering::Relaxed);
+
+        context
+    }
+
+    pub fn try_login(&self, username: &str, password: &str) -> bool {
+        self.state.users.try_login(username, password) == Some(UserRole::Admin)
+    }
+
+    pub fn get_buffer_size(&self) -> u32 {
+        self.state.buffer_size.load(Ordering::Relaxed)
+    }
+
+    pub fn set_buffer_size(&self, value: u32) {
+        self.state.buffer_size.store(value, Ordering::Relaxed);
+    }
+}
+
+impl SandstormContext {
+    pub async fn log_finished(&self, result: Result<(), io::Error>) {
+        let _ = self
+            .log_sender
+            .send(LogEventType::SandstormConnectionFinished(
+                self.manager_id,
+                self.bytes_sent,
+                self.bytes_received,
+                result,
+            ))
+            .await;
+    }
+
+    pub async fn log_unsupported_sandstorm_version(&self, version: u8) {
+        let _ = self
+            .log_sender
+            .send(LogEventType::SandstormRequestedUnsupportedVersion(self.manager_id, version))
+            .await;
+    }
+
+    pub async fn log_authenticated_as(&self, username: String, success: bool) {
+        let _ = self
+            .log_sender
+            .send(LogEventType::SandstormAuthenticatedAs(self.manager_id, username, success))
+            .await;
+    }
+
+    pub fn register_bytes_sent(&mut self, count: u64) {
+        self.bytes_sent += count;
+    }
+
+    pub fn register_bytes_received(&mut self, count: u64) {
+        self.bytes_received += count;
+    }
+}
+
+impl Drop for SandstormContext {
+    fn drop(&mut self) {
+        self.state.current_sandstorm_connections.fetch_sub(1, Ordering::Relaxed);
     }
 }

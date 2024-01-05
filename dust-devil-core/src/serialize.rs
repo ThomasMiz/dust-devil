@@ -563,7 +563,7 @@ impl ByteWrite for LogEventType {
             Self::RemovedSandstormSocket(socket_address) => (0x07u8, socket_address).write(writer).await,
             Self::LoadingUsersFromFile(filename) => (0x08u8, filename).write(writer).await,
             Self::UsersLoadedFromFile(filename, result) => (0x09u8, filename, result).write(writer).await,
-            Self::StartingUpWithSingleDefaultUser => 0x0Au8.write(writer).await,
+            Self::StartingUpWithSingleDefaultUser(userpass) => (0x0Au8, userpass).write(writer).await,
             Self::SavingUsersToFile(filename) => (0x0Bu8, filename).write(writer).await,
             Self::UsersSavedToFile(filename, result) => (0x0Cu8, filename, result).write(writer).await,
             Self::UserRegistered(username, role) => (0x0Du8, SmallWriteString(username), role).write(writer).await,
@@ -600,8 +600,19 @@ impl ByteWrite for LogEventType {
             Self::ClientConnectionFinished(client_id, sent, received, result) => {
                 (0x26u8, client_id, sent, received, result).write(writer).await
             }
-            Self::ShutdownSignalReceived => 0x27u8.write(writer).await,
-            Self::SandstormRequestedShutdown => 0x28u8.write(writer).await,
+            Self::NewSandstormConnectionAccepted(manager_id, socket_address) => (0x27u8, manager_id, socket_address).write(writer).await,
+            Self::SandstormConnectionAcceptFailed(maybe_socket_address, io_error) => {
+                (0x29u8, maybe_socket_address, io_error).write(writer).await
+            }
+            Self::SandstormRequestedUnsupportedVersion(manager_id, version) => (0x2Au8, manager_id, version).write(writer).await,
+            Self::SandstormAuthenticatedAs(manager_id, username, success) => (0x2Bu8, manager_id, username, success).write(writer).await,
+            Self::SandstormConnectionFinished(manager_id, total_bytes_sent, total_bytes_received, result) => {
+                (0x2Cu8, manager_id, total_bytes_sent, total_bytes_received, result)
+                    .write(writer)
+                    .await
+            }
+            Self::ShutdownSignalReceived => 0x2Du8.write(writer).await,
+            Self::SandstormRequestedShutdown => 0x2Eu8.write(writer).await,
         }
     }
 }
@@ -629,7 +640,7 @@ impl ByteRead for LogEventType {
                 String::read(reader).await?,
                 <Result<u64, UsersLoadingError> as ByteRead>::read(reader).await?,
             )),
-            0x0A => Ok(Self::StartingUpWithSingleDefaultUser),
+            0x0A => Ok(Self::StartingUpWithSingleDefaultUser(String::read(reader).await?)),
             0x0B => Ok(Self::SavingUsersToFile(String::read(reader).await?)),
             0x0C => Ok(Self::UsersSavedToFile(
                 String::read(reader).await?,
@@ -722,8 +733,31 @@ impl ByteRead for LogEventType {
                 reader.read_u64().await?,
                 <Result<(), io::Error> as ByteRead>::read(reader).await?,
             )),
-            0x27 => Ok(Self::ShutdownSignalReceived),
-            0x28 => Ok(Self::SandstormRequestedShutdown),
+            0x27 => Ok(Self::NewSandstormConnectionAccepted(
+                reader.read_u64().await?,
+                SocketAddr::read(reader).await?,
+            )),
+            0x29 => Ok(Self::SandstormConnectionAcceptFailed(
+                <Option<SocketAddr> as ByteRead>::read(reader).await?,
+                io::Error::read(reader).await?,
+            )),
+            0x2A => Ok(Self::SandstormRequestedUnsupportedVersion(
+                reader.read_u64().await?,
+                reader.read_u8().await?,
+            )),
+            0x2B => Ok(Self::SandstormAuthenticatedAs(
+                reader.read_u64().await?,
+                String::read(reader).await?,
+                bool::read(reader).await?,
+            )),
+            0x2C => Ok(Self::SandstormConnectionFinished(
+                reader.read_u64().await?,
+                reader.read_u64().await?,
+                reader.read_u64().await?,
+                <Result<(), io::Error> as ByteRead>::read(reader).await?,
+            )),
+            0x2D => Ok(Self::ShutdownSignalReceived),
+            0x2E => Ok(Self::SandstormRequestedShutdown),
             _ => Err(ErrorKind::InvalidData.into()),
         }
     }

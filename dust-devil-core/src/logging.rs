@@ -3,7 +3,7 @@ use std::{io, net::SocketAddr};
 
 use crate::{
     socks5::{AuthMethod, SocksRequest, SocksRequestAddress},
-    users::{UserRole, UsersLoadingError, DEFAULT_USER_PASSWORD, DEFAULT_USER_USERNAME},
+    users::{UserRole, UsersLoadingError},
 };
 
 pub struct LogEvent {
@@ -27,7 +27,7 @@ pub enum LogEventType {
     RemovedSandstormSocket(SocketAddr),
     LoadingUsersFromFile(String),
     UsersLoadedFromFile(String, Result<u64, UsersLoadingError>),
-    StartingUpWithSingleDefaultUser,
+    StartingUpWithSingleDefaultUser(String),
     SavingUsersToFile(String),
     UsersSavedToFile(String, Result<u64, io::Error>),
     UserRegistered(String, UserRole),
@@ -56,6 +56,11 @@ pub enum LogEventType {
     ClientSourceShutdown(u64),
     ClientDestinationShutdown(u64),
     ClientConnectionFinished(u64, u64, u64, Result<(), io::Error>),
+    NewSandstormConnectionAccepted(u64, SocketAddr),
+    SandstormConnectionAcceptFailed(Option<SocketAddr>, io::Error),
+    SandstormRequestedUnsupportedVersion(u64, u8),
+    SandstormAuthenticatedAs(u64, String, bool),
+    SandstormConnectionFinished(u64, u64, u64, Result<(), io::Error>),
     ShutdownSignalReceived,
     SandstormRequestedShutdown,
 }
@@ -73,7 +78,7 @@ impl fmt::Display for LogEventType {
             Self::LoadingUsersFromFile(filename) => write!(f, "Loading users from file {filename}"),
             Self::UsersLoadedFromFile(filename, Ok(user_count)) => write!(f, "Loaded {user_count} users from file {filename}"),
             Self::UsersLoadedFromFile(filename, Err(load_users_error)) => write!(f, "Error while loading users from file {filename}: {load_users_error}"),
-            Self::StartingUpWithSingleDefaultUser => write!(f, "Starting up with single default user {DEFAULT_USER_USERNAME}:{DEFAULT_USER_PASSWORD}"),
+            Self::StartingUpWithSingleDefaultUser(userpass) => write!(f, "Starting up with single default user {userpass}"),
             Self::SavingUsersToFile(filename) => write!(f, "Saving users to file {filename}"),
             Self::UsersSavedToFile(filename, Ok(amount)) => write!(f, "Successfully saved {amount} users to file {filename}"),
             Self::UsersSavedToFile(filename, Err(io_error)) => write!(f, "Failed to save users to file {filename}: {io_error}"),
@@ -90,8 +95,8 @@ impl fmt::Display for LogEventType {
             Self::AuthMethodToggled(auth_method, enabled) => write!(f, "Authentication method {auth_method} is now {}abled", if *enabled {"en"} else {"dis"}),
             Self::BufferSizeChanged(buffer_size) => write!(f, "Client buffer size is now {buffer_size}"),
             Self::NewClientConnectionAccepted(client_id, socket_address) => write!(f, "New client connection from {socket_address} assigned ID {client_id}"),
-            Self::ClientConnectionAcceptFailed(Some(socket_address), io_error) => write!(f, "Failed to accept incoming connection from socket {socket_address}: {io_error}"),
-            Self::ClientConnectionAcceptFailed(None, io_error) => write!(f, "Failed to accept incoming connection from unknown socket: {io_error}"),
+            Self::ClientConnectionAcceptFailed(Some(socket_address), io_error) => write!(f, "Failed to accept incoming socks connection from socket {socket_address}: {io_error}"),
+            Self::ClientConnectionAcceptFailed(None, io_error) => write!(f, "Failed to accept incoming socks connection from unknown socket: {io_error}"),
             Self::ClientRequestedUnsupportedVersion(client_id, version) => write!(f, "Client {client_id} requested unsupported socks version: {version}"),
             Self::ClientRequestedUnsupportedCommand(client_id, command) => write!(f, "Client {client_id} requested unsupported socks command: {command}"),
             Self::ClientRequestedUnsupportedAtyp(client_id, atyp) => write!(f, "Client {client_id} requested unsupported socks ATYP: {atyp}"),
@@ -120,6 +125,14 @@ impl fmt::Display for LogEventType {
             Self::ClientDestinationShutdown(client_id) => write!(f, "Client {client_id} destination socket shutdown"),
             Self::ClientConnectionFinished(client_id, total_bytes_sent, total_bytes_received,Ok(())) => write!(f, "Client {client_id} finished after {total_bytes_sent} bytes sent and {total_bytes_received} bytes received"),
             Self::ClientConnectionFinished(client_id, total_bytes_sent, total_bytes_received, Err(io_error)) => write!(f, "Client {client_id} closed with IO error after {total_bytes_sent} bytes sent and {total_bytes_received} bytes received: {io_error}"),
+            Self::NewSandstormConnectionAccepted(manager_id, socket_address) => write!(f, "New management connection from {socket_address} assigned ID {manager_id}"),
+            Self::SandstormConnectionAcceptFailed(Some(socket_address), io_error) => write!(f, "Failed to accept incoming management connection from socket {socket_address}: {io_error}"),
+            Self::SandstormConnectionAcceptFailed(None, io_error) => write!(f, "Failed to accept incoming management connection from unknown socket: {io_error}"),
+            Self::SandstormRequestedUnsupportedVersion(manager_id, version) => write!(f, "Manager {manager_id} requested unsupported sandstorm version: {version}"),
+            Self::SandstormAuthenticatedAs(manager_id, username, true) => write!(f, "Manager {manager_id} successfully authenticated as user {username}"),
+            Self::SandstormAuthenticatedAs(manager_id, username, false) => write!(f, "Manager {manager_id} unsuccessfully authenticated as user {username}"),
+            Self::SandstormConnectionFinished(manager_id, total_bytes_sent, total_bytes_received, Ok(())) => write!(f, "Manager {manager_id} finished after {total_bytes_sent} bytes sent and {total_bytes_received} bytes received"),
+            Self::SandstormConnectionFinished(manager_id, total_bytes_sent, total_bytes_received, Err(io_error)) => write!(f, "Manager {manager_id} closed with IO error after {total_bytes_sent} bytes sent and {total_bytes_received} bytes received: {io_error}"),
             Self::ShutdownSignalReceived => write!(f, "Shutdown signal received"),
             Self::SandstormRequestedShutdown => write!(f, "Sandstorm connection requested the server shuts down"),
         }
