@@ -1,7 +1,14 @@
-use std::io;
+use std::io::{self, ErrorKind};
 
-use dust_devil_core::sandstorm::SandstormHandshakeStatus;
-use tokio::{io::BufReader, net::TcpStream, select};
+use dust_devil_core::{
+    sandstorm::{SandstormCommandType, SandstormHandshakeStatus},
+    serialize::{ByteRead, ByteWrite},
+};
+use tokio::{
+    io::{AsyncRead, AsyncWrite, AsyncWriteExt, BufReader},
+    net::TcpStream,
+    select,
+};
 use tokio_util::sync::CancellationToken;
 
 use crate::context::SandstormContext;
@@ -49,6 +56,38 @@ async fn handle_sandstorm_inner(mut stream: TcpStream, context: &mut SandstormCo
         },
     )
     .await?;
+
+    loop {
+        match SandstormCommandType::read(&mut reader).await {
+            Ok(command) => run_command(command, &mut reader, &mut writer, context).await?,
+            Err(error) if error.kind() == ErrorKind::UnexpectedEof => break,
+            Err(error) => return Err(error),
+        };
+    }
+
+    Ok(())
+}
+
+async fn run_command<R, W>(
+    command: SandstormCommandType,
+    _reader: &mut R,
+    writer: &mut W,
+    _context: &mut SandstormContext,
+) -> Result<(), io::Error>
+where
+    R: AsyncRead + Unpin + ?Sized,
+    W: AsyncWrite + Unpin + ?Sized,
+{
+    match command {
+        SandstormCommandType::Meow => {
+            SandstormCommandType::Meow.write(writer).await?;
+            writer.write_all(b"MEOW").await?;
+        }
+        c => {
+            eprintln!("Yea I dunno what to do with {c:?}");
+            return Err(io::Error::new(ErrorKind::Unsupported, format!("Yea I dunno what to do with {c:?}")));
+        }
+    }
 
     Ok(())
 }

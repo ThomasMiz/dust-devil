@@ -7,15 +7,18 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 use crate::{
     logging::{LogEvent, LogEventType},
+    sandstorm::SandstormCommandType,
     socks5::{AuthMethod, SocksRequest, SocksRequestAddress},
     users::{UserRole, UsersLoadingError},
 };
 
-trait ByteWrite {
+#[allow(async_fn_in_trait)]
+pub trait ByteWrite {
     async fn write<W: AsyncWrite + Unpin + ?Sized>(&self, writer: &mut W) -> Result<(), io::Error>;
 }
 
-trait ByteRead: Sized {
+#[allow(async_fn_in_trait)]
+pub trait ByteRead: Sized {
     async fn read<R: AsyncRead + Unpin + ?Sized>(reader: &mut R) -> Result<Self, io::Error>;
 }
 
@@ -100,7 +103,7 @@ impl ByteWrite for char {
 impl ByteRead for char {
     async fn read<R: AsyncRead + Unpin + ?Sized>(reader: &mut R) -> Result<Self, io::Error> {
         let c = reader.read_u32().await?;
-        char::from_u32(c).ok_or(ErrorKind::InvalidData.into())
+        char::from_u32(c).ok_or_else(|| io::Error::new(ErrorKind::InvalidData, "char is not valid UTF-8"))
     }
 }
 
@@ -226,7 +229,7 @@ impl ByteRead for SocketAddr {
         match addr_type {
             4 => Ok(SocketAddr::V4(SocketAddrV4::read(reader).await?)),
             6 => Ok(SocketAddr::V6(SocketAddrV6::read(reader).await?)),
-            _ => Err(io::ErrorKind::InvalidData.into()),
+            v => Err(io::Error::new(ErrorKind::InvalidData, format!("Invalid socket address type, {v}"))),
         }
     }
 }
@@ -343,7 +346,7 @@ impl ByteWrite for &str {
         let bytes = self.as_bytes();
         let len = bytes.len();
         if len > u16::MAX as usize {
-            return Err(ErrorKind::InvalidData.into());
+            return Err(io::Error::new(ErrorKind::InvalidData, "String too long (>= 64KB)"));
         }
 
         let len = len as u16;
@@ -369,7 +372,7 @@ impl ByteRead for String {
             v.set_len(len);
             reader.read_exact(&mut v[0..len]).await?;
             if std::str::from_utf8(v).is_err() {
-                return Err(ErrorKind::InvalidData.into());
+                return Err(io::Error::new(ErrorKind::InvalidData, "String is not valid UTF-8"));
             }
         }
 
@@ -384,7 +387,7 @@ impl<'a> ByteWrite for SmallWriteString<'a> {
         let bytes = self.0.as_bytes();
         let len = bytes.len();
         if len > u8::MAX as usize {
-            return Err(ErrorKind::InvalidData.into());
+            return Err(io::Error::new(ErrorKind::InvalidData, "Small string is too long (>= 256B)"));
         }
 
         let len = len as u8;
@@ -406,7 +409,7 @@ impl ByteRead for SmallReadString {
             v.set_len(len);
             reader.read_exact(&mut v[0..len]).await?;
             if std::str::from_utf8(v).is_err() {
-                return Err(ErrorKind::InvalidData.into());
+                return Err(io::Error::new(ErrorKind::InvalidData, "Small string is not valid UTF-8"));
             }
         }
 
@@ -470,7 +473,7 @@ impl ByteRead for UsersLoadingError {
                 reader.read_u32().await?,
             )),
             11 => Ok(UsersLoadingError::NoUsers),
-            _ => Err(ErrorKind::InvalidData.into()),
+            _ => Err(io::Error::new(ErrorKind::InvalidData, "Invalid UsersLoadingError type byte")),
         }
     }
 }
@@ -484,7 +487,7 @@ impl ByteWrite for AuthMethod {
 impl ByteRead for AuthMethod {
     async fn read<R: AsyncRead + Unpin + ?Sized>(reader: &mut R) -> Result<Self, io::Error> {
         let value = reader.read_u8().await?;
-        AuthMethod::from_u8(value).ok_or(ErrorKind::InvalidData.into())
+        AuthMethod::from_u8(value).ok_or(io::Error::new(ErrorKind::InvalidData, "Invalid AuthMethod type byte"))
     }
 }
 
@@ -504,7 +507,7 @@ impl ByteRead for UserRole {
         match reader.read_u8().await? {
             1 => Ok(UserRole::Admin),
             2 => Ok(UserRole::Regular),
-            _ => Err(ErrorKind::InvalidData.into()),
+            _ => Err(io::Error::new(ErrorKind::InvalidData, "Invalid UserRole type byte")),
         }
     }
 }
@@ -531,7 +534,7 @@ impl ByteRead for SocksRequestAddress {
             4 => Ok(SocksRequestAddress::IPv4(Ipv4Addr::read(reader).await?)),
             6 => Ok(SocksRequestAddress::IPv6(Ipv6Addr::read(reader).await?)),
             200 => Ok(SocksRequestAddress::Domainname(SmallReadString::read(reader).await?.0)),
-            _ => Err(ErrorKind::InvalidData.into()),
+            _ => Err(io::Error::new(ErrorKind::InvalidData, "Invalid SocksRequestAddress type byte")),
         }
     }
 }
@@ -792,7 +795,7 @@ impl ByteRead for LogEventType {
                 <Result<(), io::Error> as ByteRead>::read(reader).await?,
             )),
             0x32 => Ok(Self::ShutdownSignalReceived),
-            _ => Err(ErrorKind::InvalidData.into()),
+            _ => Err(io::Error::new(ErrorKind::InvalidData, "Invalid LogEventType type byte")),
         }
     }
 }
@@ -807,5 +810,20 @@ impl ByteWrite for LogEvent {
 impl ByteRead for LogEvent {
     async fn read<R: AsyncRead + Unpin + ?Sized>(reader: &mut R) -> Result<Self, io::Error> {
         Ok(LogEvent::new(reader.read_i64().await?, LogEventType::read(reader).await?))
+    }
+}
+
+impl ByteWrite for SandstormCommandType {
+    async fn write<W: AsyncWrite + Unpin + ?Sized>(&self, writer: &mut W) -> Result<(), io::Error> {
+        writer.write_u8(*self as u8).await
+    }
+}
+
+impl ByteRead for SandstormCommandType {
+    async fn read<R: AsyncRead + Unpin + ?Sized>(reader: &mut R) -> Result<Self, io::Error> {
+        match SandstormCommandType::from_u8(reader.read_u8().await?) {
+            Some(value) => Ok(value),
+            None => Err(io::Error::new(ErrorKind::InvalidData, "Invalid SandstormCommandType type byte")),
+        }
     }
 }

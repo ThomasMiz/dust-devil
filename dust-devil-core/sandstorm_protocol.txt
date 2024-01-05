@@ -77,7 +77,7 @@ The following ATYPE/MTYPE values are possible:
     - Server-sent: Indicates the server is shutting down and is about to close this connection.
     Neither of these carries a payload.
 
-- 0x01: Monitoring Configuration
+- 0x01: Log Event Configuration
     - Client-sent: Requests enabling or disabling streaming of log events. The payload consists of
         a single byte, indicating 1 for enabling and 0 for disabling.
     - Server-sent: Acknowledges the enabling or disabling of streaming of log events. The payload
@@ -193,12 +193,17 @@ The following ATYPE/MTYPE values are possible:
             - 0x02 Cannot remove only admin
 
 - 0x0D List Authentication Methods
-TODO
-List supported authentication methods and whether each one is enabled/disabled
+    - Client-sent: Requests the server sends a list of supported authentication methods and whether
+        each one is enabled or disabled. No payload.
+    - Server-sent: Indicates the list of authentication methods and their states. The payload
+        starts with an u8 indicating the length of the list, followed by said amount of
+        (AuthMethod, bool) tuples.
 
 - 0x0E Enable/Disable Authentication Method
-TODO
-Set whether an auth method is enabled/disabled
+    - Client-sent: Requests the server enables or disables an authentication method. The payload
+        contains an AuthMethod and a bool, indicating the auth method and the desired state.
+    - Server-sent: Indicates the result of the operation. The payload contains a single bool, which
+        will be true when the operation succeeds, and false otherwise (not found / not supported).
 
 - 0x0F Request Current Metrics
     - Client-sent: Requests the server sends the current metrics. No payload.

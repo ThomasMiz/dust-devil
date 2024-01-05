@@ -1,6 +1,9 @@
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 
-use dust_devil_core::sandstorm::SandstormHandshakeStatus;
+use dust_devil_core::{
+    sandstorm::{SandstormCommandType, SandstormHandshakeStatus},
+    serialize::{ByteRead, ByteWrite},
+};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt, BufReader, BufWriter},
     net::TcpSocket,
@@ -35,5 +38,26 @@ async fn main() {
     match status {
         Some(status) => println!("Handshake status: {status:?}"),
         None => println!("handshake status: wtf"),
+    }
+
+    for _ in 0..50000 {
+        SandstormCommandType::Meow.write(&mut writer).await.expect("Write failed");
+        writer.flush().await.expect("Flush failed");
+        println!("Meow sent");
+
+        let resp = SandstormCommandType::read(&mut reader).await.expect("Read failed");
+        if resp == SandstormCommandType::Meow {
+            println!("server sent meow response byte");
+        } else {
+            panic!("Server didn't meow back!!");
+        }
+
+        let mut meow = [0u8; 4];
+        reader.read_exact(&mut meow).await.expect("Read failed");
+        if &meow == b"MEOW" {
+            println!("The server meowed back 🐈‍⬛")
+        } else {
+            println!("The server didn't meow back properly! {meow:?}");
+        }
     }
 }
