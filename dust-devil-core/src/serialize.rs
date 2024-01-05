@@ -566,49 +566,62 @@ impl ByteWrite for LogEventType {
             Self::StartingUpWithSingleDefaultUser(userpass) => (0x0Au8, userpass).write(writer).await,
             Self::SavingUsersToFile(filename) => (0x0Bu8, filename).write(writer).await,
             Self::UsersSavedToFile(filename, result) => (0x0Cu8, filename, result).write(writer).await,
-            Self::UserRegistered(username, role) => (0x0Du8, SmallWriteString(username), role).write(writer).await,
+            Self::UserRegisteredByArgs(username, role) => (0x0Du8, SmallWriteString(username), role).write(writer).await,
             Self::UserReplacedByArgs(username, role) => (0x0Eu8, SmallWriteString(username), role).write(writer).await,
-            Self::UserUpdated(username, role, password_changed) => {
-                (0x0Fu8, SmallWriteString(username), role, password_changed).write(writer).await
-            }
-            Self::UserDeleted(username, role) => (0x10u8, SmallWriteString(username), role).write(writer).await,
-            Self::AuthMethodToggled(auth_method, enabled) => (0x11u8, auth_method, enabled).write(writer).await,
-            Self::BufferSizeChanged(buffer_size) => (0x12u8, buffer_size).write(writer).await,
-            Self::NewClientConnectionAccepted(client_id, socket_address) => (0x13u8, client_id, socket_address).write(writer).await,
+            Self::NewClientConnectionAccepted(client_id, socket_address) => (0x0Fu8, client_id, socket_address).write(writer).await,
             Self::ClientConnectionAcceptFailed(maybe_socket_address, io_error) => {
-                (0x14u8, maybe_socket_address, io_error).write(writer).await
+                (0x10u8, maybe_socket_address, io_error).write(writer).await
             }
-            Self::ClientRequestedUnsupportedVersion(client_id, ver) => (0x15u8, client_id, ver).write(writer).await,
-            Self::ClientRequestedUnsupportedCommand(client_id, cmd) => (0x16u8, client_id, cmd).write(writer).await,
-            Self::ClientRequestedUnsupportedAtyp(client_id, atyp) => (0x17u8, client_id, atyp).write(writer).await,
-            Self::ClientSelectedAuthMethod(client_id, auth_method) => (0x18u8, client_id, auth_method).write(writer).await,
-            Self::ClientRequestedUnsupportedUserpassVersion(client_id, ver) => (0x19u8, client_id, ver).write(writer).await,
+            Self::ClientRequestedUnsupportedVersion(client_id, ver) => (0x11u8, client_id, ver).write(writer).await,
+            Self::ClientRequestedUnsupportedCommand(client_id, cmd) => (0x12u8, client_id, cmd).write(writer).await,
+            Self::ClientRequestedUnsupportedAtyp(client_id, atyp) => (0x13u8, client_id, atyp).write(writer).await,
+            Self::ClientSelectedAuthMethod(client_id, auth_method) => (0x14u8, client_id, auth_method).write(writer).await,
+            Self::ClientRequestedUnsupportedUserpassVersion(client_id, ver) => (0x15u8, client_id, ver).write(writer).await,
             Self::ClientAuthenticatedWithUserpass(client_id, username, success) => {
-                (0x1Au8, client_id, SmallWriteString(username), success).write(writer).await
+                (0x16u8, client_id, SmallWriteString(username), success).write(writer).await
             }
-            Self::ClientSocksRequest(client_id, request) => (0x1Bu8, client_id, request).write(writer).await,
-            Self::ClientDnsLookup(client_id, domainname) => (0x1Cu8, client_id, SmallWriteString(domainname)).write(writer).await,
-            Self::ClientAttemptingConnect(client_id, socket_address) => (0x1Du8, client_id, socket_address).write(writer).await,
-            Self::ClientConnectionAttemptBindFailed(client_id, io_error) => (0x1Eu8, client_id, io_error).write(writer).await,
-            Self::ClientConnectionAttemptConnectFailed(client_id, io_error) => (0x1Fu8, client_id, io_error).write(writer).await,
-            Self::ClientFailedToConnectToDestination(client_id) => (0x20u8, client_id).write(writer).await,
-            Self::ClientConnectedToDestination(client_id, socket_address) => (0x21u8, client_id, socket_address).write(writer).await,
-            Self::ClientBytesSent(client_id, count) => (0x22u8, client_id, count).write(writer).await,
-            Self::ClientBytesReceived(client_id, count) => (0x23u8, client_id, count).write(writer).await,
-            Self::ClientSourceShutdown(client_id) => (0x24u8, client_id).write(writer).await,
-            Self::ClientDestinationShutdown(client_id) => (0x25u8, client_id).write(writer).await,
+            Self::ClientSocksRequest(client_id, request) => (0x17u8, client_id, request).write(writer).await,
+            Self::ClientDnsLookup(client_id, domainname) => (0x18u8, client_id, SmallWriteString(domainname)).write(writer).await,
+            Self::ClientAttemptingConnect(client_id, socket_address) => (0x19u8, client_id, socket_address).write(writer).await,
+            Self::ClientConnectionAttemptBindFailed(client_id, io_error) => (0x1Au8, client_id, io_error).write(writer).await,
+            Self::ClientConnectionAttemptConnectFailed(client_id, io_error) => (0x1Bu8, client_id, io_error).write(writer).await,
+            Self::ClientFailedToConnectToDestination(client_id) => (0x1Cu8, client_id).write(writer).await,
+            Self::ClientConnectedToDestination(client_id, socket_address) => (0x1Du8, client_id, socket_address).write(writer).await,
+            Self::ClientBytesSent(client_id, count) => (0x1Eu8, client_id, count).write(writer).await,
+            Self::ClientBytesReceived(client_id, count) => (0x1Fu8, client_id, count).write(writer).await,
+            Self::ClientSourceShutdown(client_id) => (0x20u8, client_id).write(writer).await,
+            Self::ClientDestinationShutdown(client_id) => (0x21u8, client_id).write(writer).await,
             Self::ClientConnectionFinished(client_id, sent, received, result) => {
-                (0x26u8, client_id, sent, received, result).write(writer).await
+                (0x22u8, client_id, sent, received, result).write(writer).await
             }
-            Self::NewSandstormConnectionAccepted(manager_id, socket_address) => (0x27u8, manager_id, socket_address).write(writer).await,
+            Self::NewSandstormConnectionAccepted(manager_id, socket_address) => (0x23u8, manager_id, socket_address).write(writer).await,
             Self::SandstormConnectionAcceptFailed(maybe_socket_address, io_error) => {
-                (0x29u8, maybe_socket_address, io_error).write(writer).await
+                (0x24u8, maybe_socket_address, io_error).write(writer).await
             }
-            Self::SandstormRequestedUnsupportedVersion(manager_id, version) => (0x2Au8, manager_id, version).write(writer).await,
-            Self::SandstormAuthenticatedAs(manager_id, username, success) => (0x2Bu8, manager_id, username, success).write(writer).await,
-            Self::SandstormConnectionFinished(manager_id, result) => (0x2Cu8, manager_id, result).write(writer).await,
-            Self::ShutdownSignalReceived => 0x2Du8.write(writer).await,
-            Self::SandstormRequestedShutdown => 0x2Eu8.write(writer).await,
+            Self::SandstormRequestedUnsupportedVersion(manager_id, version) => (0x25u8, manager_id, version).write(writer).await,
+            Self::SandstormAuthenticatedAs(manager_id, username, success) => (0x26u8, manager_id, username, success).write(writer).await,
+            Self::NewSocksSocketRequestedByManager(manager_id, socket_address) => (0x27u8, manager_id, socket_address).write(writer).await,
+            Self::RemoveSocksSocketRequestedByManager(manager_id, socket_address) => {
+                (0x28u8, manager_id, socket_address).write(writer).await
+            }
+            Self::NewSandstormSocketRequestedByManager(manager_id, socket_address) => {
+                (0x29u8, manager_id, socket_address).write(writer).await
+            }
+            Self::RemoveSandstormSocketRequestedByManager(manager_id, socket_address) => {
+                (0x2Au8, manager_id, socket_address).write(writer).await
+            }
+            Self::UserRegisteredByManager(manager_id, username, role) => (0x2Bu8, manager_id, username, role).write(writer).await,
+            Self::UserUpdatedByManager(manager_id, username, role, password_changed) => {
+                (0x2Cu8, manager_id, username, role, password_changed).write(writer).await
+            }
+            Self::UserDeletedByManager(manager_id, username, role) => (0x2Du8, manager_id, username, role).write(writer).await,
+            Self::AuthMethodToggledByManager(manager_id, auth_method, enabled) => {
+                (0x2Eu8, manager_id, auth_method, enabled).write(writer).await
+            }
+            Self::BufferSizeChangedByManager(manager_id, buffer_size) => (0x2Fu8, manager_id, buffer_size).write(writer).await,
+            Self::SandstormRequestedShutdown(manager_id) => (0x30u8, manager_id).write(writer).await,
+            Self::SandstormConnectionFinished(manager_id, result) => (0x31u8, manager_id, result).write(writer).await,
+            Self::ShutdownSignalReceived => 0x32u8.write(writer).await,
         }
     }
 }
@@ -642,7 +655,7 @@ impl ByteRead for LogEventType {
                 String::read(reader).await?,
                 <Result<u64, io::Error> as ByteRead>::read(reader).await?,
             )),
-            0x0D => Ok(Self::UserRegistered(
+            0x0D => Ok(Self::UserRegisteredByArgs(
                 SmallReadString::read(reader).await?.0,
                 UserRole::read(reader).await?,
             )),
@@ -650,108 +663,135 @@ impl ByteRead for LogEventType {
                 SmallReadString::read(reader).await?.0,
                 UserRole::read(reader).await?,
             )),
-            0x0F => Ok(Self::UserUpdated(
-                SmallReadString::read(reader).await?.0,
-                UserRole::read(reader).await?,
-                bool::read(reader).await?,
-            )),
-            0x10 => Ok(Self::UserDeleted(
-                SmallReadString::read(reader).await?.0,
-                UserRole::read(reader).await?,
-            )),
-            0x11 => Ok(Self::AuthMethodToggled(AuthMethod::read(reader).await?, bool::read(reader).await?)),
-            0x12 => Ok(Self::BufferSizeChanged(reader.read_u32().await?)),
-            0x13 => Ok(Self::NewClientConnectionAccepted(
+            0x0F => Ok(Self::NewClientConnectionAccepted(
                 reader.read_u64().await?,
                 SocketAddr::read(reader).await?,
             )),
-            0x14 => Ok(Self::ClientConnectionAcceptFailed(
+            0x10 => Ok(Self::ClientConnectionAcceptFailed(
                 <Option<SocketAddr> as ByteRead>::read(reader).await?,
                 io::Error::read(reader).await?,
             )),
-            0x15 => Ok(Self::ClientRequestedUnsupportedVersion(
+            0x11 => Ok(Self::ClientRequestedUnsupportedVersion(
                 reader.read_u64().await?,
                 reader.read_u8().await?,
             )),
-            0x16 => Ok(Self::ClientRequestedUnsupportedCommand(
+            0x12 => Ok(Self::ClientRequestedUnsupportedCommand(
                 reader.read_u64().await?,
                 reader.read_u8().await?,
             )),
-            0x17 => Ok(Self::ClientRequestedUnsupportedAtyp(
+            0x13 => Ok(Self::ClientRequestedUnsupportedAtyp(
                 reader.read_u64().await?,
                 reader.read_u8().await?,
             )),
-            0x18 => Ok(Self::ClientSelectedAuthMethod(
+            0x14 => Ok(Self::ClientSelectedAuthMethod(
                 reader.read_u64().await?,
                 AuthMethod::read(reader).await?,
             )),
-            0x19 => Ok(Self::ClientRequestedUnsupportedUserpassVersion(
+            0x15 => Ok(Self::ClientRequestedUnsupportedUserpassVersion(
                 reader.read_u64().await?,
                 reader.read_u8().await?,
             )),
-            0x1A => Ok(Self::ClientAuthenticatedWithUserpass(
+            0x16 => Ok(Self::ClientAuthenticatedWithUserpass(
                 reader.read_u64().await?,
                 String::read(reader).await?,
                 bool::read(reader).await?,
             )),
-            0x1B => Ok(Self::ClientSocksRequest(
+            0x17 => Ok(Self::ClientSocksRequest(
                 reader.read_u64().await?,
                 SocksRequest::read(reader).await?,
             )),
-            0x1C => Ok(Self::ClientDnsLookup(
+            0x18 => Ok(Self::ClientDnsLookup(
                 reader.read_u64().await?,
                 SmallReadString::read(reader).await?.0,
             )),
-            0x1D => Ok(Self::ClientAttemptingConnect(
+            0x19 => Ok(Self::ClientAttemptingConnect(
                 reader.read_u64().await?,
                 SocketAddr::read(reader).await?,
             )),
-            0x1E => Ok(Self::ClientConnectionAttemptBindFailed(
+            0x1A => Ok(Self::ClientConnectionAttemptBindFailed(
                 reader.read_u64().await?,
                 io::Error::read(reader).await?,
             )),
-            0x1F => Ok(Self::ClientConnectionAttemptConnectFailed(
+            0x1B => Ok(Self::ClientConnectionAttemptConnectFailed(
                 reader.read_u64().await?,
                 io::Error::read(reader).await?,
             )),
-            0x20 => Ok(Self::ClientFailedToConnectToDestination(reader.read_u64().await?)),
-            0x21 => Ok(Self::ClientConnectedToDestination(
+            0x1C => Ok(Self::ClientFailedToConnectToDestination(reader.read_u64().await?)),
+            0x1D => Ok(Self::ClientConnectedToDestination(
                 reader.read_u64().await?,
                 SocketAddr::read(reader).await?,
             )),
-            0x22 => Ok(Self::ClientBytesSent(reader.read_u64().await?, reader.read_u64().await?)),
-            0x23 => Ok(Self::ClientBytesReceived(reader.read_u64().await?, reader.read_u64().await?)),
-            0x24 => Ok(Self::ClientSourceShutdown(reader.read_u64().await?)),
-            0x25 => Ok(Self::ClientDestinationShutdown(reader.read_u64().await?)),
-            0x26 => Ok(Self::ClientConnectionFinished(
+            0x1E => Ok(Self::ClientBytesSent(reader.read_u64().await?, reader.read_u64().await?)),
+            0x1F => Ok(Self::ClientBytesReceived(reader.read_u64().await?, reader.read_u64().await?)),
+            0x20 => Ok(Self::ClientSourceShutdown(reader.read_u64().await?)),
+            0x21 => Ok(Self::ClientDestinationShutdown(reader.read_u64().await?)),
+            0x22 => Ok(Self::ClientConnectionFinished(
                 reader.read_u64().await?,
                 reader.read_u64().await?,
                 reader.read_u64().await?,
                 <Result<(), io::Error> as ByteRead>::read(reader).await?,
             )),
-            0x27 => Ok(Self::NewSandstormConnectionAccepted(
+            0x23 => Ok(Self::NewSandstormConnectionAccepted(
                 reader.read_u64().await?,
                 SocketAddr::read(reader).await?,
             )),
-            0x29 => Ok(Self::SandstormConnectionAcceptFailed(
+            0x24 => Ok(Self::SandstormConnectionAcceptFailed(
                 <Option<SocketAddr> as ByteRead>::read(reader).await?,
                 io::Error::read(reader).await?,
             )),
-            0x2A => Ok(Self::SandstormRequestedUnsupportedVersion(
+            0x25 => Ok(Self::SandstormRequestedUnsupportedVersion(
                 reader.read_u64().await?,
                 reader.read_u8().await?,
             )),
-            0x2B => Ok(Self::SandstormAuthenticatedAs(
+            0x26 => Ok(Self::SandstormAuthenticatedAs(
                 reader.read_u64().await?,
                 String::read(reader).await?,
                 bool::read(reader).await?,
             )),
-            0x2C => Ok(Self::SandstormConnectionFinished(
+            0x27 => Ok(Self::NewSocksSocketRequestedByManager(
+                reader.read_u64().await?,
+                SocketAddr::read(reader).await?,
+            )),
+            0x28 => Ok(Self::RemoveSocksSocketRequestedByManager(
+                reader.read_u64().await?,
+                SocketAddr::read(reader).await?,
+            )),
+            0x29 => Ok(Self::NewSandstormSocketRequestedByManager(
+                reader.read_u64().await?,
+                SocketAddr::read(reader).await?,
+            )),
+            0x2A => Ok(Self::RemoveSandstormSocketRequestedByManager(
+                reader.read_u64().await?,
+                SocketAddr::read(reader).await?,
+            )),
+            0x2B => Ok(Self::UserRegisteredByManager(
+                reader.read_u64().await?,
+                String::read(reader).await?,
+                UserRole::read(reader).await?,
+            )),
+            0x2C => Ok(Self::UserUpdatedByManager(
+                reader.read_u64().await?,
+                String::read(reader).await?,
+                UserRole::read(reader).await?,
+                bool::read(reader).await?,
+            )),
+            0x2D => Ok(Self::UserDeletedByManager(
+                reader.read_u64().await?,
+                String::read(reader).await?,
+                UserRole::read(reader).await?,
+            )),
+            0x2E => Ok(Self::AuthMethodToggledByManager(
+                reader.read_u64().await?,
+                AuthMethod::read(reader).await?,
+                bool::read(reader).await?,
+            )),
+            0x2F => Ok(Self::BufferSizeChangedByManager(reader.read_u64().await?, reader.read_u32().await?)),
+            0x30 => Ok(Self::SandstormRequestedShutdown(reader.read_u64().await?)),
+            0x31 => Ok(Self::SandstormConnectionFinished(
                 reader.read_u64().await?,
                 <Result<(), io::Error> as ByteRead>::read(reader).await?,
             )),
-            0x2D => Ok(Self::ShutdownSignalReceived),
-            0x2E => Ok(Self::SandstormRequestedShutdown),
+            0x32 => Ok(Self::ShutdownSignalReceived),
             _ => Err(ErrorKind::InvalidData.into()),
         }
     }

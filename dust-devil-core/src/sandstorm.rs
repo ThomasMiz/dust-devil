@@ -15,7 +15,7 @@ impl SandstormHandshakeStatus {
             0x01 => Some(SandstormHandshakeStatus::UnsupportedVersion),
             0x02 => Some(SandstormHandshakeStatus::InvalidUsernameOrPassword),
             0x03 => Some(SandstormHandshakeStatus::PermissionDenied),
-            _ => None
+            _ => None,
         }
     }
 }

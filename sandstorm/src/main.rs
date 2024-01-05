@@ -1,7 +1,10 @@
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 
 use dust_devil_core::sandstorm::SandstormHandshakeStatus;
-use tokio::{net::TcpSocket, io::{AsyncWriteExt, BufWriter, AsyncReadExt, BufReader}};
+use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt, BufReader, BufWriter},
+    net::TcpSocket,
+};
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() {

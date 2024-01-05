@@ -104,7 +104,7 @@ async fn run_server_inner(startup_args: StartupArguments, logger: &LogManager) {
             _ = tokio::signal::ctrl_c() => {
                 eprintln!("Received shutdown signal, shutting down gracefully. Signal again to shut down ungracefully.");
                 let _ = log_sender.send(LogEventType::ShutdownSignalReceived).await;
-                break
+                break;
             },
         }
     }
@@ -147,7 +147,7 @@ async fn create_user_manager(users_file: &String, mut new_users: HashMap<String,
                 .send(LogEventType::UserReplacedByArgs(username.clone(), userdata.role))
                 .await;
         } else {
-            let _ = log_sender.send(LogEventType::UserRegistered(username, userdata.role)).await;
+            let _ = log_sender.send(LogEventType::UserRegisteredByArgs(username, userdata.role)).await;
         }
     }
 
