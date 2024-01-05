@@ -2,9 +2,7 @@ use std::io;
 
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
-use crate::context::ClientContext;
-
-use super::chunk_reader::read_chunked_utf8_string;
+use crate::{context::ClientContext, utils::chunk_reader::read_chunked_utf8_string};
 
 pub async fn handle_userpass_auth<R, W>(reader: &mut R, writer: &mut W, context: &ClientContext) -> Result<bool, io::Error>
 where

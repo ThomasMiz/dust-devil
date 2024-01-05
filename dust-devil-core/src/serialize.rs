@@ -606,11 +606,7 @@ impl ByteWrite for LogEventType {
             }
             Self::SandstormRequestedUnsupportedVersion(manager_id, version) => (0x2Au8, manager_id, version).write(writer).await,
             Self::SandstormAuthenticatedAs(manager_id, username, success) => (0x2Bu8, manager_id, username, success).write(writer).await,
-            Self::SandstormConnectionFinished(manager_id, total_bytes_sent, total_bytes_received, result) => {
-                (0x2Cu8, manager_id, total_bytes_sent, total_bytes_received, result)
-                    .write(writer)
-                    .await
-            }
+            Self::SandstormConnectionFinished(manager_id, result) => (0x2Cu8, manager_id, result).write(writer).await,
             Self::ShutdownSignalReceived => 0x2Du8.write(writer).await,
             Self::SandstormRequestedShutdown => 0x2Eu8.write(writer).await,
         }
@@ -751,8 +747,6 @@ impl ByteRead for LogEventType {
                 bool::read(reader).await?,
             )),
             0x2C => Ok(Self::SandstormConnectionFinished(
-                reader.read_u64().await?,
-                reader.read_u64().await?,
                 reader.read_u64().await?,
                 <Result<(), io::Error> as ByteRead>::read(reader).await?,
             )),

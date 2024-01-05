@@ -219,8 +219,6 @@ impl Drop for ClientContext {
 
 pub struct SandstormContext {
     manager_id: u64,
-    bytes_sent: u64,
-    bytes_received: u64,
     state: Arc<ServerState>,
     log_sender: LogSender,
 }
@@ -229,8 +227,6 @@ impl SandstormContext {
     pub fn create(manager_id: u64, state: &Arc<ServerState>, log_sender: LogSender) -> Self {
         let context = SandstormContext {
             manager_id,
-            bytes_sent: 0,
-            bytes_received: 0,
             state: Arc::clone(state),
             log_sender,
         };
@@ -241,8 +237,8 @@ impl SandstormContext {
         context
     }
 
-    pub fn try_login(&self, username: &str, password: &str) -> bool {
-        self.state.users.try_login(username, password) == Some(UserRole::Admin)
+    pub fn try_login(&self, username: &str, password: &str) -> Option<bool> {
+        self.state.users.try_login(username, password).map(|u| u == UserRole::Admin)
     }
 
     pub fn get_buffer_size(&self) -> u32 {
@@ -258,12 +254,7 @@ impl SandstormContext {
     pub async fn log_finished(&self, result: Result<(), io::Error>) {
         let _ = self
             .log_sender
-            .send(LogEventType::SandstormConnectionFinished(
-                self.manager_id,
-                self.bytes_sent,
-                self.bytes_received,
-                result,
-            ))
+            .send(LogEventType::SandstormConnectionFinished(self.manager_id, result))
             .await;
     }
 
@@ -279,14 +270,6 @@ impl SandstormContext {
             .log_sender
             .send(LogEventType::SandstormAuthenticatedAs(self.manager_id, username, success))
             .await;
-    }
-
-    pub fn register_bytes_sent(&mut self, count: u64) {
-        self.bytes_sent += count;
-    }
-
-    pub fn register_bytes_received(&mut self, count: u64) {
-        self.bytes_received += count;
     }
 }
 

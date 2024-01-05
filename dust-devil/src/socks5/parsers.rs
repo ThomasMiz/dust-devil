@@ -6,7 +6,7 @@ use std::{
 use dust_devil_core::socks5::SocksRequest;
 use tokio::io::{AsyncRead, AsyncReadExt};
 
-use super::chunk_reader::read_domainname;
+use crate::utils::chunk_reader::read_domainname;
 
 #[derive(Debug)]
 pub enum ParseHandshakeError {

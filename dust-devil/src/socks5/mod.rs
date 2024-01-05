@@ -20,7 +20,6 @@ use crate::{
 };
 
 mod auth;
-mod chunk_reader;
 mod copy;
 mod parsers;
 mod responses;

@@ -60,7 +60,7 @@ pub enum LogEventType {
     SandstormConnectionAcceptFailed(Option<SocketAddr>, io::Error),
     SandstormRequestedUnsupportedVersion(u64, u8),
     SandstormAuthenticatedAs(u64, String, bool),
-    SandstormConnectionFinished(u64, u64, u64, Result<(), io::Error>),
+    SandstormConnectionFinished(u64, Result<(), io::Error>),
     ShutdownSignalReceived,
     SandstormRequestedShutdown,
 }
@@ -103,8 +103,8 @@ impl fmt::Display for LogEventType {
             Self::ClientSelectedAuthMethod(client_id, AuthMethod::NoAcceptableMethod) => write!(f, "Client {client_id} no acceptable authentication method found"),
             Self::ClientSelectedAuthMethod(client_id, auth_method) => write!(f, "Client {client_id} will use auth method {auth_method}"),
             Self::ClientRequestedUnsupportedUserpassVersion(client_id, version) => write!(f, "Client {client_id} requested unsupported userpass version: {version}"),
-            Self::ClientAuthenticatedWithUserpass(client_id, username, true) => write!(f, "Client {client_id} successfully authenticated as user {username}"),
-            Self::ClientAuthenticatedWithUserpass(client_id, username, false) => write!(f, "Client {client_id} unsuccessfully authenticated as user {username}"),
+            Self::ClientAuthenticatedWithUserpass(client_id, username, true) => write!(f, "Client {client_id} successfully authenticated as {username}"),
+            Self::ClientAuthenticatedWithUserpass(client_id, username, false) => write!(f, "Client {client_id} unsuccessfully authenticated as {username}"),
             Self::ClientSocksRequest(client_id, request) => {
                 write!(f, "Client {client_id} requested to connect to ")?;
                 match &request.destination {
@@ -129,10 +129,10 @@ impl fmt::Display for LogEventType {
             Self::SandstormConnectionAcceptFailed(Some(socket_address), io_error) => write!(f, "Failed to accept incoming management connection from socket {socket_address}: {io_error}"),
             Self::SandstormConnectionAcceptFailed(None, io_error) => write!(f, "Failed to accept incoming management connection from unknown socket: {io_error}"),
             Self::SandstormRequestedUnsupportedVersion(manager_id, version) => write!(f, "Manager {manager_id} requested unsupported sandstorm version: {version}"),
-            Self::SandstormAuthenticatedAs(manager_id, username, true) => write!(f, "Manager {manager_id} successfully authenticated as user {username}"),
-            Self::SandstormAuthenticatedAs(manager_id, username, false) => write!(f, "Manager {manager_id} unsuccessfully authenticated as user {username}"),
-            Self::SandstormConnectionFinished(manager_id, total_bytes_sent, total_bytes_received, Ok(())) => write!(f, "Manager {manager_id} finished after {total_bytes_sent} bytes sent and {total_bytes_received} bytes received"),
-            Self::SandstormConnectionFinished(manager_id, total_bytes_sent, total_bytes_received, Err(io_error)) => write!(f, "Manager {manager_id} closed with IO error after {total_bytes_sent} bytes sent and {total_bytes_received} bytes received: {io_error}"),
+            Self::SandstormAuthenticatedAs(manager_id, username, true) => write!(f, "Manager {manager_id} successfully authenticated as {username}"),
+            Self::SandstormAuthenticatedAs(manager_id, username, false) => write!(f, "Manager {manager_id} unsuccessfully authenticated as {username}"),
+            Self::SandstormConnectionFinished(manager_id, Ok(())) => write!(f, "Manager {manager_id} finished"),
+            Self::SandstormConnectionFinished(manager_id, Err(io_error)) => write!(f, "Manager {manager_id} closed with IO error: {io_error}"),
             Self::ShutdownSignalReceived => write!(f, "Shutdown signal received"),
             Self::SandstormRequestedShutdown => write!(f, "Sandstorm connection requested the server shuts down"),
         }

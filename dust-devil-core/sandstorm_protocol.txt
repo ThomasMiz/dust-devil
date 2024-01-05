@@ -12,7 +12,7 @@ first one to talk, sending an authorization header that looks like this:
     +-----+------+------+------+-------+
 
 Where:
-- VER is the version of the protocol. Initially 1.
+- VER is the version of the protocol. For the current version of this protocol, this is 1.
 - ULEN is the length of the username, must be greater than 0.
 - USER is the username, with a length of ULEN bytes, must be a valid UTF-8 string.
 - PLEN is the length of the password, must be greater than 0.
@@ -30,6 +30,7 @@ The STATUS must be one of the following values:
 - 0x00: OK
 - 0x01: Unsupported version
 - 0x02: Invalid username or password
+- 0x03: Permission denied
 - 0xFF: Unspecified error
 
 The server may respond with an unsupported version status code before it receives the username or
