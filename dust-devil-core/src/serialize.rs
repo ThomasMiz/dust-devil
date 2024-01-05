@@ -114,11 +114,23 @@ impl<T0: ByteWrite, T1: ByteWrite> ByteWrite for (T0, T1) {
     }
 }
 
+impl<T0: ByteRead, T1: ByteRead> ByteRead for (T0, T1) {
+    async fn read<R: AsyncRead + Unpin + ?Sized>(reader: &mut R) -> Result<Self, io::Error> {
+        Ok((T0::read(reader).await?, T1::read(reader).await?))
+    }
+}
+
 impl<T0: ByteWrite, T1: ByteWrite, T2: ByteWrite> ByteWrite for (T0, T1, T2) {
     async fn write<W: AsyncWrite + Unpin + ?Sized>(&self, writer: &mut W) -> Result<(), io::Error> {
         self.0.write(writer).await?;
         self.1.write(writer).await?;
         self.2.write(writer).await
+    }
+}
+
+impl<T0: ByteRead, T1: ByteRead, T2: ByteRead> ByteRead for (T0, T1, T2) {
+    async fn read<R: AsyncRead + Unpin + ?Sized>(reader: &mut R) -> Result<Self, io::Error> {
+        Ok((T0::read(reader).await?, T1::read(reader).await?, T2::read(reader).await?))
     }
 }
 
@@ -131,6 +143,17 @@ impl<T0: ByteWrite, T1: ByteWrite, T2: ByteWrite, T3: ByteWrite> ByteWrite for (
     }
 }
 
+impl<T0: ByteRead, T1: ByteRead, T2: ByteRead, T3: ByteRead> ByteRead for (T0, T1, T2, T3) {
+    async fn read<R: AsyncRead + Unpin + ?Sized>(reader: &mut R) -> Result<Self, io::Error> {
+        Ok((
+            T0::read(reader).await?,
+            T1::read(reader).await?,
+            T2::read(reader).await?,
+            T3::read(reader).await?,
+        ))
+    }
+}
+
 impl<T0: ByteWrite, T1: ByteWrite, T2: ByteWrite, T3: ByteWrite, T4: ByteWrite> ByteWrite for (T0, T1, T2, T3, T4) {
     async fn write<W: AsyncWrite + Unpin + ?Sized>(&self, writer: &mut W) -> Result<(), io::Error> {
         self.0.write(writer).await?;
@@ -138,6 +161,18 @@ impl<T0: ByteWrite, T1: ByteWrite, T2: ByteWrite, T3: ByteWrite, T4: ByteWrite> 
         self.2.write(writer).await?;
         self.3.write(writer).await?;
         self.4.write(writer).await
+    }
+}
+
+impl<T0: ByteRead, T1: ByteRead, T2: ByteRead, T3: ByteRead, T4: ByteRead> ByteRead for (T0, T1, T2, T3, T4) {
+    async fn read<R: AsyncRead + Unpin + ?Sized>(reader: &mut R) -> Result<Self, io::Error> {
+        Ok((
+            T0::read(reader).await?,
+            T1::read(reader).await?,
+            T2::read(reader).await?,
+            T3::read(reader).await?,
+            T4::read(reader).await?,
+        ))
     }
 }
 
@@ -346,7 +381,7 @@ impl ByteWrite for &str {
         let bytes = self.as_bytes();
         let len = bytes.len();
         if len > u16::MAX as usize {
-            return Err(io::Error::new(ErrorKind::InvalidData, "String too long (>= 64KB)"));
+            return Err(io::Error::new(ErrorKind::InvalidData, "String is too long (>= 64KB)"));
         }
 
         let len = len as u16;
@@ -380,7 +415,7 @@ impl ByteRead for String {
     }
 }
 
-struct SmallWriteString<'a>(&'a str);
+struct SmallWriteString<'a>(pub &'a str);
 
 impl<'a> ByteWrite for SmallWriteString<'a> {
     async fn write<W: AsyncWrite + Unpin + ?Sized>(&self, writer: &mut W) -> Result<(), io::Error> {
@@ -396,7 +431,7 @@ impl<'a> ByteWrite for SmallWriteString<'a> {
     }
 }
 
-struct SmallReadString(String);
+struct SmallReadString(pub String);
 
 impl ByteRead for SmallReadString {
     async fn read<R: AsyncRead + Unpin + ?Sized>(reader: &mut R) -> Result<Self, io::Error> {
@@ -414,6 +449,70 @@ impl ByteRead for SmallReadString {
         }
 
         Ok(SmallReadString(s))
+    }
+}
+
+impl<T: ByteWrite> ByteWrite for &[T] {
+    async fn write<W: AsyncWrite + Unpin + ?Sized>(&self, writer: &mut W) -> Result<(), io::Error> {
+        let len = self.len();
+        if len > u16::MAX as usize {
+            return Err(io::Error::new(ErrorKind::InvalidData, "List is too long (>= 64K)"));
+        }
+
+        let len = len as u16;
+        writer.write_u16(len).await?;
+        for ele in self.iter() {
+            ele.write(writer).await?;
+        }
+
+        Ok(())
+    }
+}
+
+impl<T: ByteRead> ByteRead for Vec<T> {
+    async fn read<R: AsyncRead + Unpin + ?Sized>(reader: &mut R) -> Result<Self, io::Error> {
+        let len = reader.read_u16().await? as usize;
+
+        let mut v = Vec::with_capacity(len);
+        for _ in 0..len {
+            v.push(T::read(reader).await?);
+        }
+
+        Ok(v)
+    }
+}
+
+pub struct SmallWriteList<'a, T>(pub &'a [T]);
+
+impl<'a, T: ByteWrite> ByteWrite for SmallWriteList<'a, T> {
+    async fn write<W: AsyncWrite + Unpin + ?Sized>(&self, writer: &mut W) -> Result<(), io::Error> {
+        let len = self.0.len();
+        if len > u8::MAX as usize {
+            return Err(io::Error::new(ErrorKind::InvalidData, "Small list is too long (>= 256)"));
+        }
+
+        let len = len as u8;
+        writer.write_u8(len).await?;
+        for ele in self.0.iter() {
+            ele.write(writer).await?;
+        }
+
+        Ok(())
+    }
+}
+
+pub struct SmallReadList<T>(pub Vec<T>);
+
+impl<T: ByteRead> ByteRead for SmallReadList<T> {
+    async fn read<R: AsyncRead + Unpin + ?Sized>(reader: &mut R) -> Result<Self, io::Error> {
+        let len = reader.read_u8().await? as usize;
+
+        let mut v = Vec::with_capacity(len);
+        for _ in 0..len {
+            v.push(T::read(reader).await?);
+        }
+
+        Ok(SmallReadList(v))
     }
 }
 

@@ -241,12 +241,46 @@ impl SandstormContext {
         self.state.users.try_login(username, password).map(|u| u == UserRole::Admin)
     }
 
+    pub fn get_users_snapshot(&self) -> Vec<(String, UserRole)> {
+        self.state.users.users().iter().map(|u| (u.key().clone(), u.role)).collect()
+    }
+
+    pub fn get_auth_methods(&self) -> Vec<(AuthMethod, bool)> {
+        vec![
+            (AuthMethod::NoAuth, self.state.no_auth_enabled.load(Ordering::Relaxed)),
+            (
+                AuthMethod::UsernameAndPassword,
+                self.state.userpass_auth_enabled.load(Ordering::Relaxed),
+            ),
+        ]
+    }
+
+    pub fn toggle_auth_method(&self, auth_method: u8, state: bool) -> bool {
+        let auth_method = match AuthMethod::from_u8(auth_method) {
+            Some(a) => a,
+            None => return false,
+        };
+
+        match auth_method {
+            AuthMethod::NoAuth => self.state.no_auth_enabled.store(state, Ordering::Relaxed),
+            AuthMethod::UsernameAndPassword => self.state.userpass_auth_enabled.store(state, Ordering::Relaxed),
+            _ => return false,
+        }
+
+        true
+    }
+
     pub fn get_buffer_size(&self) -> u32 {
         self.state.buffer_size.load(Ordering::Relaxed)
     }
 
-    pub fn set_buffer_size(&self, value: u32) {
+    pub fn set_buffer_size(&self, value: u32) -> bool {
+        if value == 0 {
+            return false;
+        }
+
         self.state.buffer_size.store(value, Ordering::Relaxed);
+        true
     }
 }
 

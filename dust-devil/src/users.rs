@@ -253,7 +253,6 @@ impl UserManager {
         self.users.get(username).filter(|u| u.password == password).map(|u| u.role)
     }
 
-    #[cfg(test)]
     pub fn users(&self) -> &DashMap<String, UserData> {
         &self.users
     }
