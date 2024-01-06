@@ -7,7 +7,7 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 use crate::{
     logging::{LogEvent, LogEventType},
-    sandstorm::SandstormCommandType,
+    sandstorm::{AddUserResponse, DeleteUserResponse, SandstormCommandType, UpdateUserResponse},
     socks5::{AuthMethod, SocksRequest, SocksRequestAddress},
     users::{UserRole, UsersLoadingError},
 };
@@ -415,7 +415,7 @@ impl ByteRead for String {
     }
 }
 
-struct SmallWriteString<'a>(pub &'a str);
+pub struct SmallWriteString<'a>(pub &'a str);
 
 impl<'a> ByteWrite for SmallWriteString<'a> {
     async fn write<W: AsyncWrite + Unpin + ?Sized>(&self, writer: &mut W) -> Result<(), io::Error> {
@@ -431,7 +431,7 @@ impl<'a> ByteWrite for SmallWriteString<'a> {
     }
 }
 
-struct SmallReadString(pub String);
+pub struct SmallReadString(pub String);
 
 impl ByteRead for SmallReadString {
     async fn read<R: AsyncRead + Unpin + ?Sized>(reader: &mut R) -> Result<Self, io::Error> {
@@ -592,21 +592,15 @@ impl ByteRead for AuthMethod {
 
 impl ByteWrite for UserRole {
     async fn write<W: AsyncWrite + Unpin + ?Sized>(&self, writer: &mut W) -> Result<(), io::Error> {
-        writer
-            .write_u8(match self {
-                UserRole::Admin => 1,
-                UserRole::Regular => 2,
-            })
-            .await
+        writer.write_u8(*self as u8).await
     }
 }
 
 impl ByteRead for UserRole {
     async fn read<R: AsyncRead + Unpin + ?Sized>(reader: &mut R) -> Result<Self, io::Error> {
-        match reader.read_u8().await? {
-            1 => Ok(UserRole::Admin),
-            2 => Ok(UserRole::Regular),
-            _ => Err(io::Error::new(ErrorKind::InvalidData, "Invalid UserRole type byte")),
+        match UserRole::from_u8(reader.read_u8().await?) {
+            Some(role) => Ok(role),
+            None => Err(io::Error::new(ErrorKind::InvalidData, "Invalid UserRole type byte")),
         }
     }
 }
@@ -923,6 +917,51 @@ impl ByteRead for SandstormCommandType {
         match SandstormCommandType::from_u8(reader.read_u8().await?) {
             Some(value) => Ok(value),
             None => Err(io::Error::new(ErrorKind::InvalidData, "Invalid SandstormCommandType type byte")),
+        }
+    }
+}
+
+impl ByteWrite for AddUserResponse {
+    async fn write<W: AsyncWrite + Unpin + ?Sized>(&self, writer: &mut W) -> Result<(), io::Error> {
+        writer.write_u8(*self as u8).await
+    }
+}
+
+impl ByteRead for AddUserResponse {
+    async fn read<R: AsyncRead + Unpin + ?Sized>(reader: &mut R) -> Result<Self, io::Error> {
+        match AddUserResponse::from_u8(reader.read_u8().await?) {
+            Some(value) => Ok(value),
+            None => Err(io::Error::new(ErrorKind::InvalidData, "Invalid AddUserResponse type byte")),
+        }
+    }
+}
+
+impl ByteWrite for UpdateUserResponse {
+    async fn write<W: AsyncWrite + Unpin + ?Sized>(&self, writer: &mut W) -> Result<(), io::Error> {
+        writer.write_u8(*self as u8).await
+    }
+}
+
+impl ByteRead for UpdateUserResponse {
+    async fn read<R: AsyncRead + Unpin + ?Sized>(reader: &mut R) -> Result<Self, io::Error> {
+        match UpdateUserResponse::from_u8(reader.read_u8().await?) {
+            Some(value) => Ok(value),
+            None => Err(io::Error::new(ErrorKind::InvalidData, "Invalid UpdateUserResponse type byte")),
+        }
+    }
+}
+
+impl ByteWrite for DeleteUserResponse {
+    async fn write<W: AsyncWrite + Unpin + ?Sized>(&self, writer: &mut W) -> Result<(), io::Error> {
+        writer.write_u8(*self as u8).await
+    }
+}
+
+impl ByteRead for DeleteUserResponse {
+    async fn read<R: AsyncRead + Unpin + ?Sized>(reader: &mut R) -> Result<Self, io::Error> {
+        match DeleteUserResponse::from_u8(reader.read_u8().await?) {
+            Some(value) => Ok(value),
+            None => Err(io::Error::new(ErrorKind::InvalidData, "Invalid DeleteUserResponse type byte")),
         }
     }
 }

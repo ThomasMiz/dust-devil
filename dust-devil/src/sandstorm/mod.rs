@@ -2,7 +2,8 @@ use std::io::{self, ErrorKind};
 
 use dust_devil_core::{
     sandstorm::{SandstormCommandType, SandstormHandshakeStatus},
-    serialize::{ByteRead, ByteWrite, SmallWriteList},
+    serialize::{ByteRead, ByteWrite, SmallReadString, SmallWriteList},
+    users::UserRole,
 };
 use tokio::{
     io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader, BufWriter},
@@ -97,9 +98,28 @@ where
             let snapshot = context.get_users_snapshot();
             (SandstormCommandType::ListUsers, snapshot.as_slice()).write(writer).await?;
         }
-        // SandstormCommandType::AddUser => {}
-        // SandstormCommandType::UpdateUser => {}
-        // SandstormCommandType::DeleteUser => {}
+        SandstormCommandType::AddUser => {
+            let username = SmallReadString::read(reader).await?.0;
+            let password = SmallReadString::read(reader).await?.0;
+            let role = reader.read_u8().await?;
+
+            let result = context.add_user(username, password, role).await;
+            (SandstormCommandType::AddUser, result).write(writer).await?;
+        }
+        SandstormCommandType::UpdateUser => {
+            let username = SmallReadString::read(reader).await?.0;
+            let password = <Option<String> as ByteRead>::read(reader).await?;
+            let role = <Option<UserRole> as ByteRead>::read(reader).await?;
+
+            let result = context.update_user(username, password, role).await;
+            (SandstormCommandType::UpdateUser, result).write(writer).await?;
+        }
+        SandstormCommandType::DeleteUser => {
+            let username = SmallReadString::read(reader).await?.0;
+
+            let result = context.delete_user(username).await;
+            (SandstormCommandType::DeleteUser, result).write(writer).await?;
+        }
         SandstormCommandType::ListAuthMethods => {
             let auth_methods = context.get_auth_methods();
             (SandstormCommandType::ListAuthMethods, SmallWriteList(auth_methods.as_slice()))

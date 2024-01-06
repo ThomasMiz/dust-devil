@@ -7,7 +7,12 @@ use std::{
     },
 };
 
-use dust_devil_core::{logging::LogEventType, socks5::AuthMethod, users::UserRole};
+use dust_devil_core::{
+    logging::LogEventType,
+    sandstorm::{AddUserResponse, DeleteUserResponse, UpdateUserResponse},
+    socks5::AuthMethod,
+    users::UserRole,
+};
 use tokio::sync::mpsc::error::TrySendError;
 
 use crate::{logger::LogSender, printlnif, users::UserManager};
@@ -242,7 +247,58 @@ impl SandstormContext {
     }
 
     pub fn get_users_snapshot(&self) -> Vec<(String, UserRole)> {
-        self.state.users.users().iter().map(|u| (u.key().clone(), u.role)).collect()
+        self.state.users.take_snapshot()
+    }
+
+    pub async fn add_user(&self, username: String, password: String, role: u8) -> AddUserResponse {
+        let role = match UserRole::from_u8(role) {
+            Some(r) => r,
+            None => return AddUserResponse::InvalidValues,
+        };
+
+        if self.state.users.insert(username.clone(), password, role) {
+            let _ = self
+                .log_sender
+                .send(LogEventType::UserRegisteredByManager(self.manager_id, username, role))
+                .await;
+
+            AddUserResponse::Ok
+        } else {
+            AddUserResponse::AlreadyExists
+        }
+    }
+
+    pub async fn update_user(&self, username: String, password: Option<String>, role: Option<UserRole>) -> UpdateUserResponse {
+        if password.is_none() && role.is_none() {
+            return UpdateUserResponse::NothingWasRequested;
+        }
+
+        let has_password = password.is_some();
+        match self.state.users.update(username.clone(), password, role) {
+            Ok(Some(role)) => {
+                let _ = self
+                    .log_sender
+                    .send(LogEventType::UserUpdatedByManager(self.manager_id, username, role, has_password))
+                    .await;
+                UpdateUserResponse::Ok
+            }
+            Ok(None) => UpdateUserResponse::CannotRemoveOnlyAdmin,
+            Err(()) => UpdateUserResponse::UserNotFound,
+        }
+    }
+
+    pub async fn delete_user(&self, username: String) -> DeleteUserResponse {
+        match self.state.users.delete(username) {
+            Ok(Some((username, role))) => {
+                let _ = self
+                    .log_sender
+                    .send(LogEventType::UserDeletedByManager(self.manager_id, username, role))
+                    .await;
+                DeleteUserResponse::Ok
+            }
+            Ok(None) => DeleteUserResponse::CannotRemoveOnlyAdmin,
+            Err(()) => DeleteUserResponse::UserNotFound,
+        }
     }
 
     pub fn get_auth_methods(&self) -> Vec<(AuthMethod, bool)> {

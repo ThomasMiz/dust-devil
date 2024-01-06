@@ -8,10 +8,21 @@ pub const ESCAPE_CHAR: char = '\\';
 pub const DEFAULT_USER_USERNAME: &str = "admin";
 pub const DEFAULT_USER_PASSWORD: &str = "admin";
 
+#[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum UserRole {
-    Admin,
-    Regular,
+    Admin = 1,
+    Regular = 2,
+}
+
+impl UserRole {
+    pub fn from_u8(value: u8) -> Option<UserRole> {
+        match value {
+            1 => Some(UserRole::Admin),
+            2 => Some(UserRole::Regular),
+            _ => None,
+        }
+    }
 }
 
 impl fmt::Display for UserRole {

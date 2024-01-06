@@ -36,7 +36,11 @@
 //! ! Chi:chí's password is "super:secret:password"
 //! ```
 
-use std::{io, path::Path};
+use std::{
+    io,
+    path::Path,
+    sync::atomic::{AtomicU32, Ordering},
+};
 
 use dashmap::{mapref::entry::Entry, DashMap};
 use dust_devil_core::users::{UserRole, UsersLoadingError, ADMIN_PREFIX_CHAR, COMMENT_PREFIX_CHAR, ESCAPE_CHAR, REGULAR_PREFIX_CHAR};
@@ -50,6 +54,7 @@ use crate::utils::{self, process_lines::ProcessFileLinesError};
 #[derive(Debug)]
 pub struct UserManager {
     users: DashMap<String, UserData>,
+    admin_count: AtomicU32,
 }
 
 #[derive(Debug, PartialEq)]
@@ -125,7 +130,10 @@ pub fn parse_line_into_user(s: &str, line_number: u32, mut char_at: u32) -> Resu
 
 impl UserManager {
     pub fn new() -> UserManager {
-        UserManager { users: DashMap::new() }
+        UserManager {
+            users: DashMap::new(),
+            admin_count: AtomicU32::new(0),
+        }
     }
 
     pub async fn from<T>(reader: &mut T) -> Result<UserManager, UsersLoadingError>
@@ -133,6 +141,7 @@ impl UserManager {
         T: AsyncRead + Unpin + ?Sized,
     {
         let users = DashMap::new();
+        let mut admin_count = 0;
 
         let result = utils::process_lines::process_lines_utf8(reader, |mut s, line_number| {
             let mut char_at = 0;
@@ -143,7 +152,14 @@ impl UserManager {
 
             if !s.is_empty() {
                 if let Some((username, user)) = parse_line_into_user(s, line_number, char_at)? {
-                    users.insert(username, user);
+                    let role = user.role;
+                    let insert_result = users.insert(username, user);
+                    if insert_result.is_some_and(|old| old.role == UserRole::Admin) {
+                        admin_count -= 1;
+                    }
+                    if role == UserRole::Admin {
+                        admin_count += 1;
+                    }
                 }
             }
 
@@ -170,7 +186,10 @@ impl UserManager {
             return Err(UsersLoadingError::NoUsers);
         }
 
-        Ok(UserManager { users })
+        Ok(UserManager {
+            users,
+            admin_count: AtomicU32::new(admin_count),
+        })
     }
 
     pub async fn from_file<F: AsRef<Path>>(filename: F) -> Result<UserManager, UsersLoadingError> {
@@ -234,25 +253,117 @@ impl UserManager {
         }
 
         entry.insert(UserData { password, role });
+        if role == UserRole::Admin {
+            self.admin_count.fetch_add(1, Ordering::Relaxed);
+        }
+
         true
     }
 
     pub fn insert_or_update(&self, username: String, password: String, role: UserRole) -> bool {
-        self.users.insert(username, UserData { password, role }).is_some()
+        let insert_result = self.users.insert(username, UserData { password, role });
+
+        if insert_result.as_ref().is_some_and(|old| old.role == UserRole::Admin) {
+            if role != UserRole::Admin {
+                self.admin_count.fetch_sub(1, Ordering::Relaxed);
+            }
+        } else if role == UserRole::Admin {
+            self.admin_count.fetch_add(1, Ordering::Relaxed);
+        }
+
+        insert_result.is_some()
+    }
+
+    pub fn update(&self, username: String, password: Option<String>, role: Option<UserRole>) -> Result<Option<UserRole>, ()> {
+        let entry = self.users.entry(username);
+
+        if let Entry::Occupied(mut occupied_entry) = entry {
+            let user = occupied_entry.get_mut();
+
+            if let Some(new_role) = role {
+                if user.role == UserRole::Admin && new_role != UserRole::Admin {
+                    let update_result =
+                        self.admin_count.fetch_update(
+                            Ordering::Relaxed,
+                            Ordering::Relaxed,
+                            |val| {
+                                if val == 1 {
+                                    None
+                                } else {
+                                    Some(val - 1)
+                                }
+                            },
+                        );
+
+                    if update_result.is_err() {
+                        return Ok(None);
+                    }
+                }
+
+                if user.role != UserRole::Admin && new_role == UserRole::Admin {
+                    self.admin_count.fetch_add(1, Ordering::Relaxed);
+                }
+
+                user.role = new_role;
+            }
+
+            if let Some(new_password) = password {
+                user.password = new_password;
+            }
+
+            Ok(Some(user.role))
+        } else {
+            Err(())
+        }
+    }
+
+    pub fn delete(&self, username: String) -> Result<Option<(String, UserRole)>, ()> {
+        let entry = self.users.entry(username);
+
+        if let Entry::Occupied(occupied_entry) = entry {
+            if occupied_entry.get().role == UserRole::Admin {
+                let update_result =
+                    self.admin_count.fetch_update(
+                        Ordering::Relaxed,
+                        Ordering::Relaxed,
+                        |val| {
+                            if val == 1 {
+                                None
+                            } else {
+                                Some(val - 1)
+                            }
+                        },
+                    );
+
+                if update_result.is_err() {
+                    return Ok(None);
+                }
+            }
+
+            let entry = occupied_entry.remove_entry();
+            Ok(Some((entry.0, entry.1.role)))
+        } else {
+            Err(())
+        }
     }
 
     pub fn count(&self) -> usize {
         self.users.len()
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.users.is_empty()
+    pub fn admin_count(&self) -> u32 {
+        self.admin_count.load(Ordering::Relaxed)
     }
 
     pub fn try_login(&self, username: &str, password: &str) -> Option<UserRole> {
         self.users.get(username).filter(|u| u.password == password).map(|u| u.role)
     }
 
+    pub fn take_snapshot(&self) -> Vec<(String, UserRole)> {
+        self.users.iter().map(|u| (u.key().clone(), u.role)).collect()
+    }
+
+    #[cfg(test)]
     pub fn users(&self) -> &DashMap<String, UserData> {
         &self.users
     }

@@ -143,15 +143,13 @@ async fn create_user_manager(users_file: &String, mut new_users: HashMap<String,
 
     for (username, userdata) in new_users.drain() {
         if users.insert_or_update(username.clone(), userdata.password, userdata.role) {
-            let _ = log_sender
-                .send(LogEventType::UserReplacedByArgs(username.clone(), userdata.role))
-                .await;
+            let _ = log_sender.send(LogEventType::UserReplacedByArgs(username, userdata.role)).await;
         } else {
             let _ = log_sender.send(LogEventType::UserRegisteredByArgs(username, userdata.role)).await;
         }
     }
 
-    if users.is_empty() {
+    if users.admin_count() == 0 {
         let _ = log_sender
             .send(LogEventType::StartingUpWithSingleDefaultUser(format!(
                 "{DEFAULT_USER_PASSWORD}:{DEFAULT_USER_PASSWORD}"

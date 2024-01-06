@@ -25,18 +25,20 @@ fn usermap(s: &[(&str, &str, UserRole)]) -> DashMap<String, UserData> {
     h
 }
 
+fn assert_has(mgr: &UserManager, s: &[(&str, &str, UserRole)]) {
+    let expected = usermap(s);
+    for ele in mgr.users().iter() {
+        assert_eq!(expected.get(ele.key()).as_deref(), Some(ele.value()));
+    }
+
+    for (username, userdata) in expected {
+        assert_eq!(mgr.users().get(&username).as_deref(), Some(&userdata));
+    }
+}
+
 fn assert_ok_with(result: &Result<UserManager, UsersLoadingError>, s: &[(&str, &str, UserRole)]) {
     match result {
-        Ok(mgr) => {
-            let expected = usermap(s);
-            for ele in mgr.users().iter() {
-                assert_eq!(expected.get(ele.key()).as_deref(), Some(ele.value()));
-            }
-
-            for (username, userdata) in expected {
-                assert_eq!(mgr.users().get(&username).as_deref(), Some(&userdata));
-            }
-        }
+        Ok(mgr) => assert_has(mgr, s),
         Err(_) => panic!("Expected Ok but got Err!"),
     }
 }
@@ -190,4 +192,119 @@ async fn test_integration1() {
             ("chi:chí", "super:secret:password", UserRole::Regular),
         ],
     );
+
+    let result = result.unwrap();
+    assert_eq!(result.admin_count(), 1);
+
+    assert_eq!(
+        result.update("chi:chí".to_string(), None, Some(UserRole::Admin)),
+        Ok(Some(UserRole::Admin))
+    );
+    assert_has(
+        &result,
+        &[
+            ("pedro", "pedrito4321", UserRole::Admin),
+            ("carlos", "carlitox@33", UserRole::Regular),
+            ("felipe", "mi_hermano_es_un_boludo", UserRole::Regular),
+            ("chi:chí", "super:secret:password", UserRole::Admin),
+        ],
+    );
+    assert_eq!(result.admin_count(), 2);
+
+    assert_eq!(
+        result.update("chi:chí".to_string(), None, Some(UserRole::Admin)),
+        Ok(Some(UserRole::Admin))
+    );
+    assert_has(
+        &result,
+        &[
+            ("pedro", "pedrito4321", UserRole::Admin),
+            ("carlos", "carlitox@33", UserRole::Regular),
+            ("felipe", "mi_hermano_es_un_boludo", UserRole::Regular),
+            ("chi:chí", "super:secret:password", UserRole::Admin),
+        ],
+    );
+    assert_eq!(result.admin_count(), 2);
+
+    assert_eq!(
+        result.update("pedro".to_string(), Some("CROCANTE".to_string()), Some(UserRole::Regular)),
+        Ok(Some(UserRole::Regular))
+    );
+    assert_has(
+        &result,
+        &[
+            ("pedro", "CROCANTE", UserRole::Regular),
+            ("carlos", "carlitox@33", UserRole::Regular),
+            ("felipe", "mi_hermano_es_un_boludo", UserRole::Regular),
+            ("chi:chí", "super:secret:password", UserRole::Admin),
+        ],
+    );
+    assert_eq!(result.admin_count(), 1);
+
+    assert!(!result.insert("pedro".to_string(), "password".to_string(), UserRole::Regular));
+    assert_eq!(result.admin_count(), 1);
+
+    assert_eq!(result.update("chi:chí".to_string(), None, Some(UserRole::Regular)), Ok(None));
+    assert_has(
+        &result,
+        &[
+            ("pedro", "CROCANTE", UserRole::Regular),
+            ("carlos", "carlitox@33", UserRole::Regular),
+            ("felipe", "mi_hermano_es_un_boludo", UserRole::Regular),
+            ("chi:chí", "super:secret:password", UserRole::Admin),
+        ],
+    );
+    assert_eq!(result.admin_count(), 1);
+
+    assert_eq!(result.delete("chi:chí".to_string()), Ok(None));
+    assert_has(
+        &result,
+        &[
+            ("pedro", "CROCANTE", UserRole::Regular),
+            ("carlos", "carlitox@33", UserRole::Regular),
+            ("felipe", "mi_hermano_es_un_boludo", UserRole::Regular),
+            ("chi:chí", "super:secret:password", UserRole::Admin),
+        ],
+    );
+    assert_eq!(result.admin_count(), 1);
+
+    assert_eq!(
+        result.delete("pedro".to_string()),
+        Ok(Some(("pedro".to_string(), UserRole::Regular)))
+    );
+    assert_has(
+        &result,
+        &[
+            ("carlos", "carlitox@33", UserRole::Regular),
+            ("felipe", "mi_hermano_es_un_boludo", UserRole::Regular),
+            ("chi:chí", "super:secret:password", UserRole::Admin),
+        ],
+    );
+    assert_eq!(result.admin_count(), 1);
+
+    assert!(result.insert("peluca".to_string(), "pelu💇💇".to_string(), UserRole::Admin));
+    assert_has(
+        &result,
+        &[
+            ("peluca", "pelu💇💇", UserRole::Admin),
+            ("carlos", "carlitox@33", UserRole::Regular),
+            ("felipe", "mi_hermano_es_un_boludo", UserRole::Regular),
+            ("chi:chí", "super:secret:password", UserRole::Admin),
+        ],
+    );
+    assert_eq!(result.admin_count(), 2);
+
+    assert_eq!(
+        result.delete("chi:chí".to_string()),
+        Ok(Some(("chi:chí".to_string(), UserRole::Admin)))
+    );
+    assert_has(
+        &result,
+        &[
+            ("peluca", "pelu💇💇", UserRole::Admin),
+            ("carlos", "carlitox@33", UserRole::Regular),
+            ("felipe", "mi_hermano_es_un_boludo", UserRole::Regular),
+        ],
+    );
+    assert_eq!(result.admin_count(), 1);
 }

@@ -70,3 +70,62 @@ impl SandstormCommandType {
         }
     }
 }
+
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum AddUserResponse {
+    Ok = 0,
+    AlreadyExists = 1,
+    InvalidValues = 2,
+}
+
+impl AddUserResponse {
+    pub fn from_u8(value: u8) -> Option<AddUserResponse> {
+        match value {
+            0 => Some(AddUserResponse::Ok),
+            1 => Some(AddUserResponse::AlreadyExists),
+            2 => Some(AddUserResponse::InvalidValues),
+            _ => None,
+        }
+    }
+}
+
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum UpdateUserResponse {
+    Ok = 0,
+    UserNotFound = 1,
+    CannotRemoveOnlyAdmin = 2,
+    NothingWasRequested = 3,
+}
+
+impl UpdateUserResponse {
+    pub fn from_u8(value: u8) -> Option<UpdateUserResponse> {
+        match value {
+            0 => Some(UpdateUserResponse::Ok),
+            1 => Some(UpdateUserResponse::UserNotFound),
+            2 => Some(UpdateUserResponse::CannotRemoveOnlyAdmin),
+            3 => Some(UpdateUserResponse::NothingWasRequested),
+            _ => None,
+        }
+    }
+}
+
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum DeleteUserResponse {
+    Ok = 0,
+    UserNotFound = 1,
+    CannotRemoveOnlyAdmin = 2,
+}
+
+impl DeleteUserResponse {
+    pub fn from_u8(value: u8) -> Option<DeleteUserResponse> {
+        match value {
+            0 => Some(DeleteUserResponse::Ok),
+            1 => Some(DeleteUserResponse::UserNotFound),
+            2 => Some(DeleteUserResponse::CannotRemoveOnlyAdmin),
+            _ => None,
+        }
+    }
+}
