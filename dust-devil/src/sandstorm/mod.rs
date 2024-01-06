@@ -42,6 +42,7 @@ async fn handle_sandstorm_inner(mut stream: TcpStream, context: &mut SandstormCo
         Err(parsers::ParseHandshakeError::InvalidVersion(ver)) => {
             context.log_unsupported_sandstorm_version(ver).await;
             send_handshake_response(&mut writer, SandstormHandshakeStatus::UnsupportedVersion).await?;
+            let _ = writer.shutdown().await;
             return Ok(());
         }
     };
@@ -108,7 +109,8 @@ where
         }
         SandstormCommandType::UpdateUser => {
             let username = SmallReadString::read(reader).await?.0;
-            let password = <Option<String> as ByteRead>::read(reader).await?;
+            let password = <Option<SmallReadString> as ByteRead>::read(reader).await?;
+            let password = password.map(|s| s.0);
             let role = <Option<UserRole> as ByteRead>::read(reader).await?;
 
             let result = context.update_user(username, password, role).await;
@@ -116,7 +118,6 @@ where
         }
         SandstormCommandType::DeleteUser => {
             let username = SmallReadString::read(reader).await?.0;
-
             let result = context.delete_user(username).await;
             (SandstormCommandType::DeleteUser, result).write(writer).await?;
         }
@@ -129,7 +130,7 @@ where
         SandstormCommandType::ToggleAuthMethod => {
             let auth_method = reader.read_u8().await?;
             let state = bool::read(reader).await?;
-            let result = context.toggle_auth_method(auth_method, state);
+            let result = context.toggle_auth_method(auth_method, state).await;
             (SandstormCommandType::ToggleAuthMethod, result).write(writer).await?;
         }
         // SandstormCommandType::RequestCurrentMetrics => {}
@@ -139,7 +140,7 @@ where
         }
         SandstormCommandType::SetBufferSize => {
             let buffer_size = reader.read_u32().await?;
-            let result = context.set_buffer_size(buffer_size);
+            let result = context.set_buffer_size(buffer_size).await;
             (SandstormCommandType::SetBufferSize, result).write(writer).await?;
         }
         SandstormCommandType::Meow => {

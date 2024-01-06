@@ -311,7 +311,7 @@ impl SandstormContext {
         ]
     }
 
-    pub fn toggle_auth_method(&self, auth_method: u8, state: bool) -> bool {
+    pub async fn toggle_auth_method(&self, auth_method: u8, state: bool) -> bool {
         let auth_method = match AuthMethod::from_u8(auth_method) {
             Some(a) => a,
             None => return false,
@@ -323,6 +323,10 @@ impl SandstormContext {
             _ => return false,
         }
 
+        let _ = self
+            .log_sender
+            .send(LogEventType::AuthMethodToggledByManager(self.manager_id, auth_method, state))
+            .await;
         true
     }
 
@@ -330,10 +334,15 @@ impl SandstormContext {
         self.state.buffer_size.load(Ordering::Relaxed)
     }
 
-    pub fn set_buffer_size(&self, value: u32) -> bool {
+    pub async fn set_buffer_size(&self, value: u32) -> bool {
         if value == 0 {
             return false;
         }
+
+        let _ = self
+            .log_sender
+            .send(LogEventType::BufferSizeChangedByManager(self.manager_id, value))
+            .await;
 
         self.state.buffer_size.store(value, Ordering::Relaxed);
         true
