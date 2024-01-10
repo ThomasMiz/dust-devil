@@ -1,4 +1,4 @@
-use std::{collections::HashMap, net::SocketAddr, sync::Arc};
+use std::{collections::HashMap, io, net::SocketAddr, sync::Arc};
 
 use dust_devil_core::{
     logging::LogEventType,
@@ -11,10 +11,13 @@ use crate::{
     args::StartupArguments,
     context::{ClientContext, SandstormContext, ServerState},
     logger::{LogManager, LogSender},
+    messaging::MessageType,
     printlnif, sandstorm, socks5,
     users::{UserData, UserManager},
     utils::accept_from_any::accept_from_any,
 };
+
+const MESSAGING_CHANNEL_SIZE: usize = 8;
 
 pub async fn run_server(startup_args: StartupArguments) {
     let verbose = startup_args.verbose;
@@ -43,13 +46,15 @@ async fn run_server_inner(startup_args: StartupArguments, logger: &LogManager) {
 
     let users = create_user_manager(&startup_args.users_file, startup_args.users, &log_sender).await;
 
-    let socks_listeners = bind_socks_sockets(startup_args.verbose, startup_args.socks5_bind_sockets, &log_sender).await;
+    let mut socks_listeners = bind_socks_sockets(startup_args.verbose, startup_args.socks5_bind_sockets, &log_sender).await;
     if socks_listeners.is_empty() {
         let _ = log_sender.send(LogEventType::FailedBindAnySocketAborting).await;
         return;
     }
 
-    let sandstorm_listeners = bind_sandstorm_sockets(startup_args.verbose, startup_args.sandstorm_bind_sockets, &log_sender).await;
+    let mut sandstorm_listeners = bind_sandstorm_sockets(startup_args.verbose, startup_args.sandstorm_bind_sockets, &log_sender).await;
+
+    let (message_sender, mut message_receiver) = tokio::sync::mpsc::channel(MESSAGING_CHANNEL_SIZE);
 
     printlnif!(startup_args.verbose, "Constructing server state");
     let state = Arc::new(ServerState::new(
@@ -58,6 +63,7 @@ async fn run_server_inner(startup_args: StartupArguments, logger: &LogManager) {
         startup_args.no_auth_enabled,
         startup_args.userpass_auth_enabled,
         startup_args.buffer_size,
+        message_sender,
     ));
 
     let mut client_id_counter: u64 = 1;
@@ -67,6 +73,7 @@ async fn run_server_inner(startup_args: StartupArguments, logger: &LogManager) {
     let manager_cancel_token = CancellationToken::new();
 
     printlnif!(startup_args.verbose, "Entering main loop");
+
     loop {
         select! {
             accept_result = accept_from_any(&socks_listeners) => {
@@ -101,6 +108,77 @@ async fn run_server_inner(startup_args: StartupArguments, logger: &LogManager) {
                     },
                 }
             }
+            message = message_receiver.recv() => {
+                let message = message.expect("Message channel closed before server loop!");
+                // `message` should never be `None`, as we still have a reference to the ServerState through the `state` variable,
+                // so the sender remains alive.
+
+                match message {
+                    MessageType::ShutdownRequest(result_notifier) => {
+                        let _ = result_notifier.send(());
+                        eprintln!("Received shutdown request from monitoring connection, shutting down.");
+                        break;
+                    }
+                    MessageType::ListSocks5Sockets(result_notifier) => {
+                        let _ = result_notifier.send(socks_listeners.iter().filter_map(|l| l.local_addr().ok()).collect());
+                    }
+                    MessageType::AddSocks5Socket(socket_address, result_notifier) => match TcpListener::bind(socket_address).await {
+                        Ok(result) => {
+                            socks_listeners.push(result);
+                            let _ = log_sender.send(LogEventType::NewSocks5Socket(socket_address)).await;
+                            let _ = result_notifier.send(Ok(()));
+                        }
+                        Err(err) => {
+                            let err2 = io::Error::new(err.kind(), err.to_string());
+                            let _ = log_sender.send(LogEventType::FailedBindSocks5Socket(socket_address, err)).await;
+                            let _ = result_notifier.send(Err(err2));
+                        }
+                    },
+                    MessageType::RemoveSocks5Socket(socket_address, result_notifier) => {
+                        let maybe_listener_index = socks_listeners
+                            .iter()
+                            .enumerate()
+                            .find(|(_, l)| l.local_addr().is_ok_and(|a| a == socket_address))
+                            .map(|(i, _)| i);
+
+                        if let Some(listener_index) = maybe_listener_index {
+                            socks_listeners.swap_remove(listener_index);
+                            let _ = log_sender.send(LogEventType::RemovedSocks5Socket(socket_address)).await;
+                        }
+
+                        let _ = result_notifier.send(maybe_listener_index.is_some());
+                    }
+                    MessageType::ListSandstormSockets(result_notifier) => {
+                        let _ = result_notifier.send(sandstorm_listeners.iter().filter_map(|l| l.local_addr().ok()).collect());
+                    }
+                    MessageType::AddSandstormSocket(socket_address, result_notifier) => match TcpListener::bind(socket_address).await {
+                        Ok(result) => {
+                            sandstorm_listeners.push(result);
+                            let _ = log_sender.send(LogEventType::NewSandstormSocket(socket_address)).await;
+                            let _ = result_notifier.send(Ok(()));
+                        }
+                        Err(err) => {
+                            let err2 = io::Error::new(err.kind(), err.to_string());
+                            let _ = log_sender.send(LogEventType::FailedBindSandstormSocket(socket_address, err)).await;
+                            let _ = result_notifier.send(Err(err2));
+                        }
+                    },
+                    MessageType::RemoveSandstormSocket(socket_address, result_notifier) => {
+                        let maybe_listener_index = sandstorm_listeners
+                            .iter()
+                            .enumerate()
+                            .find(|(_, l)| l.local_addr().is_ok_and(|a| a == socket_address))
+                            .map(|(i, _)| i);
+
+                        if let Some(listener_index) = maybe_listener_index {
+                            sandstorm_listeners.swap_remove(listener_index);
+                            let _ = log_sender.send(LogEventType::RemovedSandstormSocket(socket_address)).await;
+                        }
+
+                        let _ = result_notifier.send(maybe_listener_index.is_some());
+                    }
+                }
+            }
             _ = tokio::signal::ctrl_c() => {
                 eprintln!("Received shutdown signal, shutting down gracefully. Signal again to shut down ungracefully.");
                 let _ = log_sender.send(LogEventType::ShutdownSignalReceived).await;
@@ -111,8 +189,9 @@ async fn run_server_inner(startup_args: StartupArguments, logger: &LogManager) {
 
     printlnif!(startup_args.verbose, "Exited main loop");
 
-    drop(socks_listeners);
+    drop(message_receiver);
     drop(sandstorm_listeners);
+    drop(socks_listeners);
     manager_cancel_token.cancel();
     client_cancel_token.cancel();
 

@@ -13,9 +13,12 @@ use dust_devil_core::{
     socks5::AuthMethod,
     users::UserRole,
 };
-use tokio::sync::mpsc::error::TrySendError;
+use tokio::sync::{
+    mpsc::{error::TrySendError, Sender},
+    oneshot,
+};
 
-use crate::{logger::LogSender, printlnif, users::UserManager};
+use crate::{logger::LogSender, messaging::MessageType, printlnif, users::UserManager};
 
 pub struct ServerState {
     verbose: bool,
@@ -29,10 +32,18 @@ pub struct ServerState {
     current_sandstorm_connections: AtomicU32,
     historic_sandstorm_connections: AtomicU64,
     buffer_size: AtomicU32,
+    message_sender: Sender<MessageType>,
 }
 
 impl ServerState {
-    pub fn new(verbose: bool, users: UserManager, no_auth_enabled: bool, userpass_auth_enabled: bool, buffer_size: u32) -> Self {
+    pub fn new(
+        verbose: bool,
+        users: UserManager,
+        no_auth_enabled: bool,
+        userpass_auth_enabled: bool,
+        buffer_size: u32,
+        message_sender: Sender<MessageType>,
+    ) -> Self {
         ServerState {
             verbose,
             users,
@@ -45,6 +56,7 @@ impl ServerState {
             current_sandstorm_connections: AtomicU32::new(0),
             historic_sandstorm_connections: AtomicU64::new(0),
             buffer_size: AtomicU32::new(buffer_size),
+            message_sender,
         }
     }
 
@@ -244,6 +256,92 @@ impl SandstormContext {
 
     pub fn try_login(&self, username: &str, password: &str) -> Option<bool> {
         self.state.users.try_login(username, password).map(|u| u == UserRole::Admin)
+    }
+
+    pub async fn request_shutdown(&self) {
+        let _ = self
+            .log_sender
+            .send(LogEventType::SandstormRequestedShutdown(self.manager_id))
+            .await;
+
+        let (result_tx, result_rx) = oneshot::channel();
+        let _ = self.state.message_sender.send(MessageType::ShutdownRequest(result_tx)).await;
+        let _ = result_rx.await;
+    }
+
+    pub async fn list_socks5_sockets(&self) -> Result<Vec<SocketAddr>, ()> {
+        let (result_tx, result_rx) = oneshot::channel();
+        let _ = self.state.message_sender.send(MessageType::ListSocks5Sockets(result_tx)).await;
+        result_rx.await.map_err(|_| ())
+    }
+
+    pub async fn add_socks5_socket(&self, socket_address: SocketAddr) -> Result<Result<(), io::Error>, ()> {
+        let _ = self
+            .log_sender
+            .send(LogEventType::NewSocksSocketRequestedByManager(self.manager_id, socket_address))
+            .await;
+
+        let (result_tx, result_rx) = oneshot::channel();
+        let _ = self
+            .state
+            .message_sender
+            .send(MessageType::AddSocks5Socket(socket_address, result_tx))
+            .await;
+        result_rx.await.map_err(|_| ())
+    }
+
+    pub async fn remove_socks5_socket(&self, socket_address: SocketAddr) -> Result<bool, ()> {
+        let _ = self
+            .log_sender
+            .send(LogEventType::RemoveSocksSocketRequestedByManager(self.manager_id, socket_address))
+            .await;
+
+        let (result_tx, result_rx) = oneshot::channel();
+        let _ = self
+            .state
+            .message_sender
+            .send(MessageType::RemoveSocks5Socket(socket_address, result_tx))
+            .await;
+        result_rx.await.map_err(|_| ())
+    }
+
+    pub async fn list_sandstorm_sockets(&self) -> Result<Vec<SocketAddr>, ()> {
+        let (result_tx, result_rx) = oneshot::channel();
+        let _ = self.state.message_sender.send(MessageType::ListSandstormSockets(result_tx)).await;
+        result_rx.await.map_err(|_| ())
+    }
+
+    pub async fn add_sandstorm_socket(&self, socket_address: SocketAddr) -> Result<Result<(), io::Error>, ()> {
+        let _ = self
+            .log_sender
+            .send(LogEventType::NewSandstormSocketRequestedByManager(self.manager_id, socket_address))
+            .await;
+
+        let (result_tx, result_rx) = oneshot::channel();
+        let _ = self
+            .state
+            .message_sender
+            .send(MessageType::AddSandstormSocket(socket_address, result_tx))
+            .await;
+        result_rx.await.map_err(|_| ())
+    }
+
+    pub async fn remove_sandstorm_socket(&self, socket_address: SocketAddr) -> Result<bool, ()> {
+        let _ = self
+            .log_sender
+            .send(LogEventType::RemoveSandstormSocketRequestedByManager(
+                self.manager_id,
+                socket_address,
+            ))
+            .await;
+
+        let (result_tx, result_rx) = oneshot::channel();
+        let _ = self
+            .state
+            .message_sender
+            .send(MessageType::RemoveSandstormSocket(socket_address, result_tx))
+            .await;
+        result_rx.await.map_err(|_| ())
     }
 
     pub fn get_users_snapshot(&self) -> Vec<(String, UserRole)> {

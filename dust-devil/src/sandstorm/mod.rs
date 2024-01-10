@@ -1,4 +1,7 @@
-use std::io::{self, ErrorKind};
+use std::{
+    io::{self, ErrorKind},
+    net::SocketAddr,
+};
 
 use dust_devil_core::{
     sandstorm::{SandstormCommandType, SandstormHandshakeStatus},
@@ -86,15 +89,56 @@ where
     W: AsyncWrite + Unpin + ?Sized,
 {
     match command {
-        // SandstormCommandType::Shutdown => {}
+        SandstormCommandType::Shutdown => {
+            context.request_shutdown().await;
+        }
         // SandstormCommandType::LogEventConfig => {}
         // SandstormCommandType::LogEventStream => {}
-        // SandstormCommandType::ListSocks5Sockets => {}
-        // SandstormCommandType::AddSocks5Socket => {}
-        // SandstormCommandType::RemoveSocks5Socket => {}
-        // SandstormCommandType::ListSandstormSockets => {}
-        // SandstormCommandType::AddSandstormSocket => {}
-        // SandstormCommandType::RemoveSandstormSocket => {}
+        SandstormCommandType::ListSocks5Sockets => {
+            let sockets = context.list_socks5_sockets().await.map_err(|_| io::Error::from(ErrorKind::Other))?;
+            (SandstormCommandType::ListSocks5Sockets, sockets.as_slice()).write(writer).await?;
+        }
+        SandstormCommandType::AddSocks5Socket => {
+            let socket_address = SocketAddr::read(reader).await?;
+            let result = context
+                .add_socks5_socket(socket_address)
+                .await
+                .map_err(|_| io::Error::from(ErrorKind::Other))?;
+            (SandstormCommandType::AddSocks5Socket, result).write(writer).await?;
+        }
+        SandstormCommandType::RemoveSocks5Socket => {
+            let socket_address = SocketAddr::read(reader).await?;
+            let result = context
+                .remove_socks5_socket(socket_address)
+                .await
+                .map_err(|_| io::Error::from(ErrorKind::Other))?;
+            (SandstormCommandType::RemoveSocks5Socket, !result).write(writer).await?;
+        }
+        SandstormCommandType::ListSandstormSockets => {
+            let sockets = context
+                .list_sandstorm_sockets()
+                .await
+                .map_err(|_| io::Error::from(ErrorKind::Other))?;
+            (SandstormCommandType::ListSandstormSockets, sockets.as_slice())
+                .write(writer)
+                .await?;
+        }
+        SandstormCommandType::AddSandstormSocket => {
+            let socket_address = SocketAddr::read(reader).await?;
+            let result = context
+                .add_sandstorm_socket(socket_address)
+                .await
+                .map_err(|_| io::Error::from(ErrorKind::Other))?;
+            (SandstormCommandType::AddSandstormSocket, result).write(writer).await?;
+        }
+        SandstormCommandType::RemoveSandstormSocket => {
+            let socket_address = SocketAddr::read(reader).await?;
+            let result = context
+                .remove_sandstorm_socket(socket_address)
+                .await
+                .map_err(|_| io::Error::from(ErrorKind::Other))?;
+            (SandstormCommandType::RemoveSandstormSocket, !result).write(writer).await?;
+        }
         SandstormCommandType::ListUsers => {
             let snapshot = context.get_users_snapshot();
             (SandstormCommandType::ListUsers, snapshot.as_slice()).write(writer).await?;

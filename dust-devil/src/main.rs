@@ -3,6 +3,7 @@ use std::{env, process::exit};
 mod args;
 mod context;
 mod logger;
+mod messaging;
 mod sandstorm;
 mod server;
 mod socks5;

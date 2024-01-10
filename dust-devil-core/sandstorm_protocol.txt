@@ -75,7 +75,8 @@ The following ATYPE/MTYPE values are possible:
 - 0x00: Shutdown
     - Client-sent: Requests the server shuts down gracefully.
     - Server-sent: Indicates the server is shutting down and is about to close this connection.
-    Neither of these carries a payload.
+    Neither of these carries a payload. The server is not required to send the response before
+    shutting down.
 
 - 0x01: Log Event Configuration
     - Client-sent: Requests enabling or disabling streaming of log events. The payload consists of
