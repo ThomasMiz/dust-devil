@@ -24,12 +24,7 @@ pub async fn run_server(startup_args: StartupArguments) {
     printlnif!(verbose, "Starting up logger");
 
     let logger = if startup_args.events_enabled {
-        let (lgr, log_file_result) = LogManager::new(verbose, !startup_args.silent, startup_args.log_file.as_deref()).await;
-
-        if let Err(log_file_error) = log_file_result {
-            eprintln!("Error: Failed to open log file: {log_file_error}");
-        }
-
+        let lgr = LogManager::new(verbose, !startup_args.silent, startup_args.log_file.as_deref()).await;
         Some(lgr)
     } else {
         None
