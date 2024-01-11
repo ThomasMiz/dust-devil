@@ -1,4 +1,4 @@
-use std::io;
+use std::{io, sync::Arc};
 
 use dust_devil_core::logging::{LogEvent, LogEventType};
 use time::{OffsetDateTime, UtcOffset};
@@ -6,11 +6,7 @@ use tokio::{
     fs::File,
     io::{stdout, AsyncWrite, AsyncWriteExt, BufWriter},
     join,
-    sync::mpsc::{
-        self,
-        error::{SendError, TrySendError},
-        Receiver, Sender,
-    },
+    sync::broadcast::{self, error::RecvError, Receiver, Sender},
     task::{JoinError, JoinHandle},
 };
 
@@ -18,19 +14,18 @@ use std::io::Write;
 
 use crate::printlnif;
 
-const EVENT_LOG_BUFFER: usize = 1024;
+const EVENT_LOG_BUFFER: usize = 4096;
 const STDOUT_BUFFER_SIZE: usize = 0x2000;
 const FILE_BUFFER_SIZE: usize = 0x2000;
-const RECV_VEC_SIZE: usize = 0x40;
 const PARSE_VEC_SIZE: usize = 0x100;
 
 pub struct LogManager {
-    log_sender: Sender<LogEvent>,
+    log_sender: Sender<Arc<LogEvent>>,
     log_task_handle: JoinHandle<()>,
 }
 
 pub struct LogSender {
-    log_sender: Sender<LogEvent>,
+    log_sender: Sender<Arc<LogEvent>>,
 }
 
 async fn write_if_some<W: AsyncWrite + Unpin>(writer_name: &str, maybe_writer: &mut Option<W>, buf: &[u8]) {
@@ -60,7 +55,7 @@ async fn shutdown_if_some<W: AsyncWrite + Unpin>(writer_name: &str, maybe_writer
     }
 }
 
-async fn logger_task(verbose: bool, mut log_receiver: Receiver<LogEvent>, log_to_stdout: bool, file: Option<File>) {
+async fn logger_task(verbose: bool, mut log_receiver: Receiver<Arc<LogEvent>>, log_to_stdout: bool, file: Option<File>) {
     printlnif!(verbose, "Logger task started");
 
     let local_utc_offset = match UtcOffset::current_local_offset() {
@@ -84,41 +79,46 @@ async fn logger_task(verbose: bool, mut log_receiver: Receiver<LogEvent>, log_to
 
     let mut maybe_file = file.map(|f| BufWriter::with_capacity(FILE_BUFFER_SIZE, f));
 
-    let mut recv_vec = Vec::with_capacity(RECV_VEC_SIZE);
     let mut parse_vec = Vec::<u8>::with_capacity(PARSE_VEC_SIZE);
-    let limit = recv_vec.capacity();
 
     printlnif!(verbose, "Logger task entering event receiving loop");
 
-    while log_receiver.recv_many(&mut recv_vec, limit).await != 0 {
-        for event in recv_vec.iter() {
-            let t = OffsetDateTime::from_unix_timestamp(event.timestamp)
-                .map(|t| t.to_offset(local_utc_offset))
-                .unwrap_or(OffsetDateTime::UNIX_EPOCH);
+    loop {
+        match log_receiver.recv().await {
+            Ok(event) => {
+                let t = OffsetDateTime::from_unix_timestamp(event.timestamp)
+                    .map(|t| t.to_offset(local_utc_offset))
+                    .unwrap_or(OffsetDateTime::UNIX_EPOCH);
 
-            let _ = writeln!(
-                parse_vec,
-                "[{:04}-{:02}-{:02} {:02}:{:02}:{:02}] {}",
-                t.year(),
-                t.month() as u8,
-                t.day(),
-                t.hour(),
-                t.minute(),
-                t.second(),
-                event.data
-            );
-
-            join!(
-                write_if_some("stdout", &mut maybe_stdout, &parse_vec),
-                write_if_some("file", &mut maybe_file, &parse_vec),
-            );
-
-            parse_vec.clear();
+                let _ = writeln!(
+                    parse_vec,
+                    "[{:04}-{:02}-{:02} {:02}:{:02}:{:02}] {}",
+                    t.year(),
+                    t.month() as u8,
+                    t.day(),
+                    t.hour(),
+                    t.minute(),
+                    t.second(),
+                    event.data
+                );
+            }
+            Err(RecvError::Lagged(lost_count)) => {
+                let _ = writeln!(parse_vec, "ERROR!! {lost_count} events lost due to slowdown!");
+                printlnif!(verbose, "ERROR!! {lost_count} events lost due to slowdown!");
+            }
+            Err(RecvError::Closed) => break,
         }
 
-        join!(flush_if_some("stdout", &mut maybe_stdout), flush_if_some("file", &mut maybe_file));
+        join!(
+            write_if_some("stdout", &mut maybe_stdout, &parse_vec),
+            write_if_some("file", &mut maybe_file, &parse_vec),
+        );
 
-        recv_vec.clear();
+        if log_receiver.is_empty() {
+            join!(flush_if_some("stdout", &mut maybe_stdout), flush_if_some("file", &mut maybe_file));
+        }
+
+        parse_vec.clear();
     }
 
     printlnif!(verbose, "Logger task exited event receiving loop, shutting down");
@@ -133,7 +133,7 @@ async fn logger_task(verbose: bool, mut log_receiver: Receiver<LogEvent>, log_to
 
 impl LogManager {
     pub async fn new(verbose: bool, log_to_stdout: bool, log_to_file: Option<&str>) -> (Self, Result<(), io::Error>) {
-        let (log_sender, log_receiver) = mpsc::channel::<LogEvent>(EVENT_LOG_BUFFER);
+        let (log_sender, log_receiver) = broadcast::channel::<Arc<LogEvent>>(EVENT_LOG_BUFFER);
 
         let (file, file_result) = if let Some(path) = log_to_file {
             printlnif!(verbose, "Logger opening up file: {path}");
@@ -180,27 +180,12 @@ impl LogManager {
 }
 
 impl LogSender {
-    fn new(log_sender: Sender<LogEvent>) -> Self {
+    fn new(log_sender: Sender<Arc<LogEvent>>) -> Self {
         LogSender { log_sender }
     }
 
-    pub async fn send(&self, data: LogEventType) -> Result<(), SendError<LogEvent>> {
+    pub fn send(&self, data: LogEventType) -> bool {
         let timestamp = time::OffsetDateTime::now_utc().unix_timestamp();
-        self.log_sender.send(LogEvent::new(timestamp, data)).await
+        self.log_sender.send(Arc::new(LogEvent::new(timestamp, data))).is_ok()
     }
-
-    /*pub async fn send_timeout(&self, data: LogEventType, timeout: Duration) -> Result<(), SendTimeoutError<LogEvent>> {
-        let timestamp = time::OffsetDateTime::now_utc().unix_timestamp();
-        self.log_sender.send_timeout(LogEvent::new(timestamp, data), timeout).await
-    }*/
-
-    pub fn try_send(&self, data: LogEventType) -> Result<(), TrySendError<LogEvent>> {
-        let timestamp = time::OffsetDateTime::now_utc().unix_timestamp();
-        self.log_sender.try_send(LogEvent::new(timestamp, data))
-    }
-
-    /*pub fn blocking_send(&self, data: LogEventType) -> Result<(), SendError<LogEvent>> {
-        let timestamp = time::OffsetDateTime::now_utc().unix_timestamp();
-        self.log_sender.blocking_send(LogEvent::new(timestamp, data))
-    }*/
 }

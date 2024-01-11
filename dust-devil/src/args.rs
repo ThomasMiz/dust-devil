@@ -52,6 +52,7 @@ pub fn get_help_string() -> &'static str {
         "  -V, --version                   Display the version number and exit\n",
         "  -v, --verbose                   Display additional information while running\n",
         "  -s, --silent                    Do not print logs to stdout\n",
+        "  -d, --disable-events            Disables events, logs, and all data collection\n",
         "  -o, --log-file <path>           Append logs to the specified file\n",
         "  -l, --listen <address>          Specify a socket address to listen for incoming socks5 clients\n",
         "  -m, --management <address>      Specify a socket address to listen for incoming Sandstorm clients\n",
@@ -95,6 +96,7 @@ pub struct StartupArguments {
     pub sandstorm_bind_sockets: Vec<SocketAddr>,
     pub verbose: bool,
     pub silent: bool,
+    pub events_enabled: bool,
     pub log_file: Option<String>,
     pub users_file: String,
     pub users: HashMap<String, UserData>,
@@ -110,6 +112,7 @@ impl StartupArguments {
             sandstorm_bind_sockets: Vec::new(),
             verbose: false,
             silent: false,
+            events_enabled: true,
             log_file: None,
             users_file: String::new(),
             users: HashMap::new(),
@@ -159,6 +162,7 @@ impl Default for StartupArguments {
 #[derive(Debug, PartialEq)]
 pub enum ArgumentsError {
     UnknownArgument(String),
+    CannotLogWithEventsDisabled,
     LogFileError(FileErrorType),
     Socks5ListenError(ListenErrorType),
     SandstormListenError(ListenErrorType),
@@ -172,6 +176,7 @@ impl fmt::Display for ArgumentsError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             ArgumentsError::UnknownArgument(arg) => write!(f, "Unknown argument: {arg}"),
+            ArgumentsError::CannotLogWithEventsDisabled => write!(f, "Cannot log to file with events disabled"),
             ArgumentsError::LogFileError(log_file_error) => fmt_file_error_type(log_file_error, "log", f),
             ArgumentsError::Socks5ListenError(listen_error) => listen_error.fmt(f),
             ArgumentsError::SandstormListenError(listen_error) => listen_error.fmt(f),
@@ -440,7 +445,16 @@ where
             result.verbose = true;
         } else if arg.eq("-s") || arg.eq_ignore_ascii_case("--silent") {
             result.silent = true;
+        } else if arg.eq("-d") || arg.eq_ignore_ascii_case("--disable-events") {
+            if result.log_file.is_some() {
+                return Err(ArgumentsError::CannotLogWithEventsDisabled);
+            }
+            result.events_enabled = false;
+            result.silent = true;
         } else if arg.eq("-o") || arg.eq_ignore_ascii_case("--log-file") {
+            if !result.events_enabled {
+                return Err(ArgumentsError::CannotLogWithEventsDisabled);
+            }
             let mut log_file = result.log_file.unwrap_or_default();
             parse_file_arg(&mut log_file, arg, args.next()).map_err(ArgumentsError::LogFileError)?;
             result.log_file = Some(log_file);

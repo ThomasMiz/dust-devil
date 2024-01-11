@@ -82,7 +82,11 @@ The following ATYPE/MTYPE values are possible:
     - Client-sent: Requests enabling or disabling streaming of log events. The payload consists of
         a single byte, indicating 1 for enabling and 0 for disabling.
     - Server-sent: Acknowledges the enabling or disabling of streaming of log events. The payload
-        consists of a single byte, 1 or 0 indicating the current (not previous) configuration.
+        starts with a single byte:
+        - 0 the log stream is now disabled.
+        - 1 the log event stream is now enabled. This value is followed by a `Metrics` struct, that
+            contains the metrics at the moment the log stream started.
+        - 2 the log event stream was already enabled.
     At the start of the connection, log event streaming is disabled. To start, it must be
     explicitly enabled by the client. The server can also refuse to enable log event streaming, for
     example if it doesn't support it, by returning a 0 to a request of 1.
@@ -209,12 +213,9 @@ The following ATYPE/MTYPE values are possible:
 - 0x0F Request Current Metrics
     - Client-sent: Requests the server sends the current metrics. No payload.
     - Server-sent: Indicates the result of the operation. The payload starts with an u8 which,
-        if 0, the server doesn't support metrics. If 1, then the rest payload is composed of:
-        (u32) current_client_connections, (u64) historic_client_connections,
-        (u64) client_bytes_sent, (u64) client_bytes_received, (u32) current_sandstorm_connections,
-        (u64) historic_sandstorm_connections. These values must be synchronized with the log event
-        stream, as in, these values must be the exact metric values the server had after the last
-        log event sent (when log event streaming is enabled).
+        if 0, the server doesn't support metrics. If 1, then the rest payload is composed of a
+        `Metrics` struct. These values may not be synchronized with the log
+        event stream.
 
 - 0x10 Get Buffer Size
     - Client-sent: Requests the server sends the current buffer size used for clients. No payload.

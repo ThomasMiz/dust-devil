@@ -13,12 +13,9 @@ use dust_devil_core::{
     socks5::AuthMethod,
     users::UserRole,
 };
-use tokio::sync::{
-    mpsc::{error::TrySendError, Sender},
-    oneshot,
-};
+use tokio::sync::{mpsc::Sender, oneshot};
 
-use crate::{logger::LogSender, messaging::MessageType, printlnif, users::UserManager};
+use crate::{logger::LogSender, messaging::MessageType, users::UserManager};
 
 pub struct ServerState {
     verbose: bool,
@@ -66,15 +63,24 @@ impl ServerState {
 }
 
 pub struct ClientContext {
-    client_id: u64,
-    bytes_sent: u64,
-    bytes_received: u64,
-    state: Arc<ServerState>,
-    log_sender: LogSender,
+    pub client_id: u64,
+    pub bytes_sent: u64,
+    pub bytes_received: u64,
+    pub state: Arc<ServerState>,
+    pub log_sender: Option<LogSender>,
+}
+
+#[macro_export]
+macro_rules! log {
+    ($cx:expr, $event:expr) => {
+        if let Some(sender) = &$cx.log_sender {
+            sender.send($event);
+        }
+    };
 }
 
 impl ClientContext {
-    pub fn create(client_id: u64, state: &Arc<ServerState>, log_sender: LogSender) -> Self {
+    pub fn create(client_id: u64, state: &Arc<ServerState>, log_sender: Option<LogSender>) -> Self {
         let context = ClientContext {
             client_id,
             bytes_sent: 0,
@@ -108,124 +114,187 @@ impl ClientContext {
     pub fn register_bytes_sent(&mut self, count: u64) {
         self.bytes_sent += count;
         self.state.client_bytes_sent.fetch_add(count, Ordering::Relaxed);
-        let _ = self.log_sender.try_send(LogEventType::ClientBytesSent(self.client_id, count));
+        log!(self, LogEventType::ClientBytesSent(self.client_id, count));
     }
 
     pub fn register_bytes_received(&mut self, count: u64) {
         self.bytes_received += count;
         self.state.client_bytes_received.fetch_add(count, Ordering::Relaxed);
-        let _ = self.log_sender.try_send(LogEventType::ClientBytesReceived(self.client_id, count));
+        log!(self, LogEventType::ClientBytesReceived(self.client_id, count));
     }
 }
 
-impl ClientContext {
-    pub async fn log_finished(&self, result: Result<(), io::Error>) {
-        let _ = self
-            .log_sender
-            .send(LogEventType::ClientConnectionFinished(
-                self.client_id,
-                self.bytes_sent,
-                self.bytes_received,
-                result,
-            ))
-            .await;
-    }
-
-    pub async fn log_unsupported_socks_version(&self, version: u8) {
-        let _ = self
-            .log_sender
-            .send(LogEventType::ClientRequestedUnsupportedVersion(self.client_id, version))
-            .await;
-    }
-
-    pub async fn log_unsupported_atyp(&self, atyp: u8) {
-        let _ = self
-            .log_sender
-            .send(LogEventType::ClientRequestedUnsupportedAtyp(self.client_id, atyp))
-            .await;
-    }
-
-    pub async fn log_unsupported_socks_command(&self, cmd: u8) {
-        let _ = self
-            .log_sender
-            .send(LogEventType::ClientRequestedUnsupportedCommand(self.client_id, cmd))
-            .await;
-    }
-
-    pub async fn log_selected_auth(&self, auth_method: AuthMethod) {
-        let _ = self
-            .log_sender
-            .send(LogEventType::ClientSelectedAuthMethod(self.client_id, auth_method))
-            .await;
-    }
-
-    pub async fn log_unsupported_userpass_version(&self, version: u8) {
-        let _ = self
-            .log_sender
-            .send(LogEventType::ClientRequestedUnsupportedUserpassVersion(self.client_id, version))
-            .await;
-    }
-
-    pub async fn log_authenticated_with_userpass(&self, username: String, success: bool) {
-        let _ = self
-            .log_sender
-            .send(LogEventType::ClientAuthenticatedWithUserpass(self.client_id, username, success))
-            .await;
-    }
-
-    pub async fn log_dns_lookup(&self, domainname: String) {
-        let _ = self
-            .log_sender
-            .send(LogEventType::ClientDnsLookup(self.client_id, domainname))
-            .await;
-    }
-
-    pub async fn log_connection_attempt(&self, address: SocketAddr) {
-        let _ = self
-            .log_sender
-            .send(LogEventType::ClientAttemptingConnect(self.client_id, address))
-            .await;
-    }
-
-    pub async fn log_connection_attempt_bind_failed(&self, error: io::Error) {
-        let _ = self
-            .log_sender
-            .send(LogEventType::ClientConnectionAttemptBindFailed(self.client_id, error))
-            .await;
-    }
-
-    pub async fn log_connection_attempt_connect_failed(&self, error: io::Error) {
-        let _ = self
-            .log_sender
-            .send(LogEventType::ClientConnectionAttemptConnectFailed(self.client_id, error))
-            .await;
-    }
-
-    pub async fn log_connect_to_destination_failed(&self) {
-        let _ = self
-            .log_sender
-            .send(LogEventType::ClientFailedToConnectToDestination(self.client_id))
-            .await;
-    }
-
-    pub async fn log_connected_to_destination(&self, address: SocketAddr) {
-        let _ = self
-            .log_sender
-            .send(LogEventType::ClientConnectedToDestination(self.client_id, address))
-            .await;
-    }
-
-    pub fn log_source_shutdown(&self) {
-        if let Err(TrySendError::Full(e)) = self.log_sender.try_send(LogEventType::ClientSourceShutdown(self.client_id)) {
-            printlnif!(self.state.verbose, "Verbose warning, log event lost: {}", e.data);
+#[macro_export]
+macro_rules! log_socks_finished {
+    ($cx:expr, $result:expr) => {
+        if let Some(sender) = &$cx.log_sender {
+            sender.send(dust_devil_core::logging::LogEventType::ClientConnectionFinished(
+                $cx.client_id,
+                $cx.bytes_sent,
+                $cx.bytes_received,
+                $result,
+            ));
         }
-    }
+    };
+}
 
-    pub fn log_destination_shutdown(&self) {
-        if let Err(TrySendError::Full(e)) = self.log_sender.try_send(LogEventType::ClientDestinationShutdown(self.client_id)) {
-            printlnif!(self.state.verbose, "Verbose warning, log event lost: {}", e.data);
+#[macro_export]
+macro_rules! log_socks_unsupported_version {
+    ($cx:expr, $version:expr) => {
+        if let Some(sender) = &$cx.log_sender {
+            sender.send(dust_devil_core::logging::LogEventType::ClientRequestedUnsupportedVersion(
+                $cx.client_id,
+                $version,
+            ));
         }
-    }
+    };
+}
+
+#[macro_export]
+macro_rules! log_socks_unsupported_atyp {
+    ($cx:expr, $atyp:expr) => {
+        if let Some(sender) = &$cx.log_sender {
+            sender.send(dust_devil_core::logging::LogEventType::ClientRequestedUnsupportedAtyp(
+                $cx.client_id,
+                $atyp,
+            ));
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! log_socks_unsupported_command {
+    ($cx:expr, $cmd:expr) => {
+        if let Some(sender) = &$cx.log_sender {
+            sender.send(dust_devil_core::logging::LogEventType::ClientRequestedUnsupportedCommand(
+                $cx.client_id,
+                $cmd,
+            ));
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! log_socks_selected_auth {
+    ($cx:expr, $auth_method:expr) => {
+        if let Some(sender) = &$cx.log_sender {
+            sender.send(dust_devil_core::logging::LogEventType::ClientSelectedAuthMethod(
+                $cx.client_id,
+                $auth_method,
+            ));
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! log_socks_unsupported_userpass_version {
+    ($cx:expr, $version:expr) => {
+        if let Some(sender) = &$cx.log_sender {
+            sender.send(dust_devil_core::logging::LogEventType::ClientRequestedUnsupportedUserpassVersion(
+                $cx.client_id,
+                $version,
+            ));
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! log_socks_authenticated_with_userpass {
+    ($cx:expr, $username:expr, $success:expr) => {
+        if let Some(sender) = &$cx.log_sender {
+            sender.send(dust_devil_core::logging::LogEventType::ClientAuthenticatedWithUserpass(
+                $cx.client_id,
+                $username,
+                $success,
+            ));
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! log_socks_dns_lookup {
+    ($cx:expr, $domainname:expr) => {
+        if let Some(sender) = &$cx.log_sender {
+            sender.send(dust_devil_core::logging::LogEventType::ClientDnsLookup($cx.client_id, $domainname));
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! log_socks_connection_attempt {
+    ($cx:expr, $address:expr) => {
+        if let Some(sender) = &$cx.log_sender {
+            sender.send(dust_devil_core::logging::LogEventType::ClientAttemptingConnect(
+                $cx.client_id,
+                $address,
+            ));
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! log_socks_connection_attempt_bind_failed {
+    ($cx:expr, $error:expr) => {
+        if let Some(sender) = &$cx.log_sender {
+            sender.send(dust_devil_core::logging::LogEventType::ClientConnectionAttemptBindFailed(
+                $cx.client_id,
+                $error,
+            ));
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! log_socks_connection_attempt_connect_failed {
+    ($cx:expr, $error:expr) => {
+        if let Some(sender) = &$cx.log_sender {
+            sender.send(dust_devil_core::logging::LogEventType::ClientConnectionAttemptConnectFailed(
+                $cx.client_id,
+                $error,
+            ));
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! log_socks_connect_to_destination_failed {
+    ($cx:expr) => {
+        if let Some(sender) = &$cx.log_sender {
+            sender.send(dust_devil_core::logging::LogEventType::ClientFailedToConnectToDestination(
+                $cx.client_id,
+            ));
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! log_socks_connected_to_destination {
+    ($cx:expr, $address:expr) => {
+        if let Some(sender) = &$cx.log_sender {
+            sender.send(dust_devil_core::logging::LogEventType::ClientConnectedToDestination(
+                $cx.client_id,
+                $address,
+            ));
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! log_socks_source_shutdown {
+    ($cx:expr) => {
+        if let Some(sender) = &$cx.log_sender {
+            sender.send(dust_devil_core::logging::LogEventType::ClientSourceShutdown($cx.client_id));
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! log_socks_destination_shutdown {
+    ($cx:expr) => {
+        if let Some(sender) = &$cx.log_sender {
+            sender.send(dust_devil_core::logging::LogEventType::ClientDestinationShutdown($cx.client_id));
+        }
+    };
 }
 
 impl Drop for ClientContext {
@@ -235,13 +304,13 @@ impl Drop for ClientContext {
 }
 
 pub struct SandstormContext {
-    manager_id: u64,
-    state: Arc<ServerState>,
-    log_sender: LogSender,
+    pub manager_id: u64,
+    pub state: Arc<ServerState>,
+    pub log_sender: Option<LogSender>,
 }
 
 impl SandstormContext {
-    pub fn create(manager_id: u64, state: &Arc<ServerState>, log_sender: LogSender) -> Self {
+    pub fn create(manager_id: u64, state: &Arc<ServerState>, log_sender: Option<LogSender>) -> Self {
         let context = SandstormContext {
             manager_id,
             state: Arc::clone(state),
@@ -259,11 +328,7 @@ impl SandstormContext {
     }
 
     pub async fn request_shutdown(&self) {
-        let _ = self
-            .log_sender
-            .send(LogEventType::SandstormRequestedShutdown(self.manager_id))
-            .await;
-
+        log!(self, LogEventType::SandstormRequestedShutdown(self.manager_id));
         let (result_tx, result_rx) = oneshot::channel();
         let _ = self.state.message_sender.send(MessageType::ShutdownRequest(result_tx)).await;
         let _ = result_rx.await;
@@ -276,10 +341,10 @@ impl SandstormContext {
     }
 
     pub async fn add_socks5_socket(&self, socket_address: SocketAddr) -> Result<Result<(), io::Error>, ()> {
-        let _ = self
-            .log_sender
-            .send(LogEventType::NewSocksSocketRequestedByManager(self.manager_id, socket_address))
-            .await;
+        log!(
+            self,
+            LogEventType::NewSocksSocketRequestedByManager(self.manager_id, socket_address)
+        );
 
         let (result_tx, result_rx) = oneshot::channel();
         let _ = self
@@ -291,10 +356,10 @@ impl SandstormContext {
     }
 
     pub async fn remove_socks5_socket(&self, socket_address: SocketAddr) -> Result<bool, ()> {
-        let _ = self
-            .log_sender
-            .send(LogEventType::RemoveSocksSocketRequestedByManager(self.manager_id, socket_address))
-            .await;
+        log!(
+            self,
+            LogEventType::RemoveSocksSocketRequestedByManager(self.manager_id, socket_address)
+        );
 
         let (result_tx, result_rx) = oneshot::channel();
         let _ = self
@@ -312,10 +377,10 @@ impl SandstormContext {
     }
 
     pub async fn add_sandstorm_socket(&self, socket_address: SocketAddr) -> Result<Result<(), io::Error>, ()> {
-        let _ = self
-            .log_sender
-            .send(LogEventType::NewSandstormSocketRequestedByManager(self.manager_id, socket_address))
-            .await;
+        log!(
+            self,
+            LogEventType::NewSandstormSocketRequestedByManager(self.manager_id, socket_address)
+        );
 
         let (result_tx, result_rx) = oneshot::channel();
         let _ = self
@@ -327,13 +392,10 @@ impl SandstormContext {
     }
 
     pub async fn remove_sandstorm_socket(&self, socket_address: SocketAddr) -> Result<bool, ()> {
-        let _ = self
-            .log_sender
-            .send(LogEventType::RemoveSandstormSocketRequestedByManager(
-                self.manager_id,
-                socket_address,
-            ))
-            .await;
+        log!(
+            self,
+            LogEventType::RemoveSandstormSocketRequestedByManager(self.manager_id, socket_address)
+        );
 
         let (result_tx, result_rx) = oneshot::channel();
         let _ = self
@@ -355,10 +417,7 @@ impl SandstormContext {
         };
 
         if self.state.users.insert(username.clone(), password, role) {
-            let _ = self
-                .log_sender
-                .send(LogEventType::UserRegisteredByManager(self.manager_id, username, role))
-                .await;
+            log!(self, LogEventType::UserRegisteredByManager(self.manager_id, username, role));
 
             AddUserResponse::Ok
         } else {
@@ -374,10 +433,10 @@ impl SandstormContext {
         let has_password = password.is_some();
         match self.state.users.update(username.clone(), password, role) {
             Ok(Some(role)) => {
-                let _ = self
-                    .log_sender
-                    .send(LogEventType::UserUpdatedByManager(self.manager_id, username, role, has_password))
-                    .await;
+                log!(
+                    self,
+                    LogEventType::UserUpdatedByManager(self.manager_id, username, role, has_password)
+                );
                 UpdateUserResponse::Ok
             }
             Ok(None) => UpdateUserResponse::CannotRemoveOnlyAdmin,
@@ -388,10 +447,7 @@ impl SandstormContext {
     pub async fn delete_user(&self, username: String) -> DeleteUserResponse {
         match self.state.users.delete(username) {
             Ok(Some((username, role))) => {
-                let _ = self
-                    .log_sender
-                    .send(LogEventType::UserDeletedByManager(self.manager_id, username, role))
-                    .await;
+                log!(self, LogEventType::UserDeletedByManager(self.manager_id, username, role));
                 DeleteUserResponse::Ok
             }
             Ok(None) => DeleteUserResponse::CannotRemoveOnlyAdmin,
@@ -421,10 +477,7 @@ impl SandstormContext {
             _ => return false,
         }
 
-        let _ = self
-            .log_sender
-            .send(LogEventType::AuthMethodToggledByManager(self.manager_id, auth_method, state))
-            .await;
+        log!(self, LogEventType::AuthMethodToggledByManager(self.manager_id, auth_method, state));
         true
     }
 
@@ -437,37 +490,48 @@ impl SandstormContext {
             return false;
         }
 
-        let _ = self
-            .log_sender
-            .send(LogEventType::BufferSizeChangedByManager(self.manager_id, value))
-            .await;
+        log!(self, LogEventType::BufferSizeChangedByManager(self.manager_id, value));
 
         self.state.buffer_size.store(value, Ordering::Relaxed);
         true
     }
 }
 
-impl SandstormContext {
-    pub async fn log_finished(&self, result: Result<(), io::Error>) {
-        let _ = self
-            .log_sender
-            .send(LogEventType::SandstormConnectionFinished(self.manager_id, result))
-            .await;
-    }
+#[macro_export]
+macro_rules! log_sandstorm_finished {
+    ($cx:expr, $result:expr) => {
+        if let Some(sender) = &$cx.log_sender {
+            sender.send(dust_devil_core::logging::LogEventType::SandstormConnectionFinished(
+                $cx.manager_id,
+                $result,
+            ));
+        }
+    };
+}
 
-    pub async fn log_unsupported_sandstorm_version(&self, version: u8) {
-        let _ = self
-            .log_sender
-            .send(LogEventType::SandstormRequestedUnsupportedVersion(self.manager_id, version))
-            .await;
-    }
+#[macro_export]
+macro_rules! log_sandstorm_unsupported_version {
+    ($cx:expr, $version:expr) => {
+        if let Some(sender) = &$cx.log_sender {
+            sender.send(dust_devil_core::logging::LogEventType::SandstormRequestedUnsupportedVersion(
+                $cx.manager_id,
+                $version,
+            ));
+        }
+    };
+}
 
-    pub async fn log_authenticated_as(&self, username: String, success: bool) {
-        let _ = self
-            .log_sender
-            .send(LogEventType::SandstormAuthenticatedAs(self.manager_id, username, success))
-            .await;
-    }
+#[macro_export]
+macro_rules! log_sandstorm_authenticated_as {
+    ($cx:expr, $username:expr, $success:expr) => {
+        if let Some(sender) = &$cx.log_sender {
+            sender.send(dust_devil_core::logging::LogEventType::SandstormAuthenticatedAs(
+                $cx.manager_id,
+                $username,
+                $success,
+            ));
+        }
+    };
 }
 
 impl Drop for SandstormContext {

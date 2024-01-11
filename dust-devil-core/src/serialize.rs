@@ -7,7 +7,7 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 use crate::{
     logging::{LogEvent, LogEventType},
-    sandstorm::{AddUserResponse, DeleteUserResponse, SandstormCommandType, UpdateUserResponse},
+    sandstorm::{AddUserResponse, DeleteUserResponse, Metrics, SandstormCommandType, UpdateUserResponse},
     socks5::{AuthMethod, SocksRequest, SocksRequestAddress},
     users::{UserRole, UsersLoadingError},
 };
@@ -963,5 +963,29 @@ impl ByteRead for DeleteUserResponse {
             Some(value) => Ok(value),
             None => Err(io::Error::new(ErrorKind::InvalidData, "Invalid DeleteUserResponse type byte")),
         }
+    }
+}
+
+impl ByteRead for Metrics {
+    async fn read<R: AsyncRead + Unpin + ?Sized>(reader: &mut R) -> Result<Self, io::Error> {
+        Ok(Metrics {
+            current_client_connections: reader.read_u32().await?,
+            historic_client_connections: reader.read_u64().await?,
+            client_bytes_sent: reader.read_u64().await?,
+            client_bytes_received: reader.read_u64().await?,
+            current_sandstorm_connections: reader.read_u32().await?,
+            historic_sandstorm_connections: reader.read_u64().await?,
+        })
+    }
+}
+
+impl ByteWrite for Metrics {
+    async fn write<W: AsyncWrite + Unpin + ?Sized>(&self, writer: &mut W) -> Result<(), io::Error> {
+        writer.write_u32(self.current_client_connections).await?;
+        writer.write_u64(self.historic_client_connections).await?;
+        writer.write_u64(self.client_bytes_sent).await?;
+        writer.write_u64(self.client_bytes_received).await?;
+        writer.write_u32(self.current_sandstorm_connections).await?;
+        writer.write_u64(self.historic_sandstorm_connections).await
     }
 }

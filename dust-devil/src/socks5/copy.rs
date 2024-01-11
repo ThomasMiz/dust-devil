@@ -13,7 +13,7 @@ use std::{
     task::{ready, Context, Poll},
 };
 
-use crate::context::ClientContext;
+use crate::{context::ClientContext, log_socks_destination_shutdown, log_socks_source_shutdown};
 
 enum TransferState {
     Running,
@@ -42,9 +42,9 @@ where
                 let buffer = ready!(reader.as_mut().poll_fill_buf(cx))?;
                 if buffer.is_empty() {
                     if is_src_to_dst {
-                        context.log_source_shutdown();
+                        log_socks_source_shutdown!(context);
                     } else {
-                        context.log_destination_shutdown();
+                        log_socks_destination_shutdown!(context);
                     }
                     ready!(writer.as_mut().poll_flush(cx))?;
                     *state = TransferState::ShuttingDown;
@@ -54,9 +54,9 @@ where
                 let i = ready!(writer.as_mut().poll_write(cx, buffer))?;
                 if i == 0 {
                     if is_src_to_dst {
-                        context.log_source_shutdown();
+                        log_socks_source_shutdown!(context);
                     } else {
-                        context.log_destination_shutdown();
+                        log_socks_destination_shutdown!(context);
                     }
                     *state = TransferState::ShuttingDown;
                     continue;

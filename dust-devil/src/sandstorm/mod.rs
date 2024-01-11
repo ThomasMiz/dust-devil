@@ -15,7 +15,7 @@ use tokio::{
 };
 use tokio_util::sync::CancellationToken;
 
-use crate::context::SandstormContext;
+use crate::{context::SandstormContext, log_sandstorm_authenticated_as, log_sandstorm_finished, log_sandstorm_unsupported_version};
 
 use self::{
     parsers::{parse_handshake, ParseHandshakeError},
@@ -30,7 +30,7 @@ const SANDSTORM_WRITE_BUFFER_SIZE: usize = 1024;
 
 pub async fn handle_sandstorm(stream: TcpStream, mut context: SandstormContext, cancel_token: CancellationToken) {
     select! {
-        result = handle_sandstorm_inner(stream, &mut context) => context.log_finished(result).await,
+        result = handle_sandstorm_inner(stream, &mut context) => log_sandstorm_finished!(context, result),
         _ = cancel_token.cancelled() => {}
     }
 }
@@ -43,7 +43,7 @@ async fn handle_sandstorm_inner(mut stream: TcpStream, context: &mut SandstormCo
         Ok(handshake) => handshake,
         Err(ParseHandshakeError::IO(error)) => return Err(error),
         Err(parsers::ParseHandshakeError::InvalidVersion(ver)) => {
-            context.log_unsupported_sandstorm_version(ver).await;
+            log_sandstorm_unsupported_version!(context, ver);
             send_handshake_response(&mut writer, SandstormHandshakeStatus::UnsupportedVersion).await?;
             let _ = writer.shutdown().await;
             return Ok(());
@@ -51,7 +51,7 @@ async fn handle_sandstorm_inner(mut stream: TcpStream, context: &mut SandstormCo
     };
 
     let success = context.try_login(&handshake.username, &handshake.password);
-    context.log_authenticated_as(handshake.username, success == Some(true)).await;
+    log_sandstorm_authenticated_as!(context, handshake.username, success == Some(true));
 
     send_handshake_response(
         &mut writer,

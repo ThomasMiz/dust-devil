@@ -129,3 +129,13 @@ impl DeleteUserResponse {
         }
     }
 }
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Metrics {
+    pub current_client_connections: u32,
+    pub historic_client_connections: u64,
+    pub client_bytes_sent: u64,
+    pub client_bytes_received: u64,
+    pub current_sandstorm_connections: u32,
+    pub historic_sandstorm_connections: u64,
+}

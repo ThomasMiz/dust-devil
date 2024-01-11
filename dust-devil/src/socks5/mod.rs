@@ -13,6 +13,9 @@ use tokio_util::sync::CancellationToken;
 
 use crate::{
     context::ClientContext,
+    log_socks_connect_to_destination_failed, log_socks_connected_to_destination, log_socks_connection_attempt,
+    log_socks_connection_attempt_bind_failed, log_socks_connection_attempt_connect_failed, log_socks_dns_lookup, log_socks_finished,
+    log_socks_selected_auth, log_socks_unsupported_atyp, log_socks_unsupported_command, log_socks_unsupported_version,
     socks5::{
         parsers::{parse_handshake, parse_request},
         responses::{send_handshake_response, send_request_response},
@@ -54,7 +57,7 @@ impl From<ParseRequestError> for SocksStatus {
 
 pub async fn handle_socks5(stream: TcpStream, mut context: ClientContext, cancel_token: CancellationToken) {
     select! {
-        result = handle_socks5_inner(stream, &mut context) => context.log_finished(result).await,
+        result = handle_socks5_inner(stream, &mut context) => log_socks_finished!(context, result),
         _ = cancel_token.cancelled() => {}
     }
 }
@@ -66,13 +69,13 @@ async fn handle_socks5_inner(mut stream: TcpStream, context: &mut ClientContext)
         Ok(handshake) => select_auth_method(context, &handshake.methods),
         Err(ParseHandshakeError::IO(error)) => return Err(error),
         Err(ParseHandshakeError::InvalidVersion(ver)) => {
-            context.log_unsupported_socks_version(ver).await;
+            log_socks_unsupported_version!(context, ver);
             send_handshake_response(&mut writer, AuthMethod::NoAcceptableMethod).await?;
             return Ok(());
         }
     };
 
-    context.log_selected_auth(auth_method).await;
+    log_socks_selected_auth!(context, auth_method);
     send_handshake_response(&mut writer, auth_method).await?;
 
     let auth_status = match auth_method {
@@ -94,7 +97,7 @@ async fn handle_socks5_inner(mut stream: TcpStream, context: &mut ClientContext)
                 vec![SocketAddr::V6(SocketAddrV6::new(ipv6, request.port, 0, 0))]
             }
             SocksRequestAddress::Domainname(mut domainname) => {
-                context.log_dns_lookup(domainname.clone()).await;
+                log_socks_dns_lookup!(context, domainname.clone());
                 domainname.push_str(":0");
 
                 tokio::net::lookup_host(domainname)
@@ -110,9 +113,9 @@ async fn handle_socks5_inner(mut stream: TcpStream, context: &mut ClientContext)
         Err(error) => {
             match error {
                 ParseRequestError::IO(error) => return Err(error),
-                ParseRequestError::InvalidVersion(ver) => context.log_unsupported_socks_version(ver).await,
-                ParseRequestError::CommandNotSupported(cmd) => context.log_unsupported_socks_command(cmd).await,
-                ParseRequestError::InvalidATYP(atyp) => context.log_unsupported_atyp(atyp).await,
+                ParseRequestError::InvalidVersion(ver) => log_socks_unsupported_version!(context, ver),
+                ParseRequestError::CommandNotSupported(cmd) => log_socks_unsupported_command!(context, cmd),
+                ParseRequestError::InvalidATYP(atyp) => log_socks_unsupported_atyp!(context, atyp),
             }
 
             send_request_response(&mut writer, error.into(), None).await?;
@@ -123,7 +126,7 @@ async fn handle_socks5_inner(mut stream: TcpStream, context: &mut ClientContext)
     let mut destination_stream = match connect_socket(request_addresses, context).await {
         Ok(stream) => stream,
         Err(status) => {
-            context.log_connect_to_destination_failed().await;
+            log_socks_connect_to_destination_failed!(context);
             send_request_response(&mut writer, status, None).await?;
             return Ok(());
         }
@@ -151,7 +154,7 @@ async fn connect_socket(request_addresses: Vec<SocketAddr>, context: &ClientCont
     let mut last_error = None;
 
     for address in request_addresses {
-        context.log_connection_attempt(address).await;
+        log_socks_connection_attempt!(context, address);
 
         let destination_socket = if address.is_ipv4() {
             TcpSocket::new_v4()
@@ -164,7 +167,7 @@ async fn connect_socket(request_addresses: Vec<SocketAddr>, context: &ClientCont
         let destination_socket = match destination_socket {
             Ok(dst_socket) => dst_socket,
             Err(error) => {
-                context.log_connection_attempt_bind_failed(error).await;
+                log_socks_connection_attempt_bind_failed!(context, error);
                 continue;
             }
         };
@@ -173,12 +176,12 @@ async fn connect_socket(request_addresses: Vec<SocketAddr>, context: &ClientCont
             Ok(dst_stream) => dst_stream,
             Err(error) => {
                 last_error = Some(SocksStatus::from(&error));
-                context.log_connection_attempt_connect_failed(error).await;
+                log_socks_connection_attempt_connect_failed!(context, error);
                 continue;
             }
         };
 
-        context.log_connected_to_destination(address).await;
+        log_socks_connected_to_destination!(context, address);
         return Ok(destination_stream);
     }
 
