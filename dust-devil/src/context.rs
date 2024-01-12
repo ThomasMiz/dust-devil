@@ -2,61 +2,54 @@ use std::{
     io,
     net::SocketAddr,
     sync::{
-        atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU32, Ordering},
         Arc,
     },
 };
 
 use dust_devil_core::{
-    logging::LogEventType,
-    sandstorm::{AddUserResponse, DeleteUserResponse, UpdateUserResponse},
+    logging::{LogEvent, LogEventType},
+    sandstorm::{AddUserResponse, DeleteUserResponse, Metrics, UpdateUserResponse},
     socks5::AuthMethod,
     users::UserRole,
 };
 use tokio::sync::{
+    broadcast,
     mpsc::Sender,
     oneshot::{self, Receiver},
 };
 
-use crate::{logger::LogSender, messaging::MessageType, users::UserManager};
+use crate::{
+    logger::{LogSender, MetricsRequester},
+    messaging::MessageType,
+    users::UserManager,
+};
 
 pub struct ServerState {
-    verbose: bool,
     users: UserManager,
     no_auth_enabled: AtomicBool,
     userpass_auth_enabled: AtomicBool,
-    current_client_connections: AtomicU32,
-    historic_client_connections: AtomicU64,
-    client_bytes_sent: AtomicU64,
-    client_bytes_received: AtomicU64,
-    current_sandstorm_connections: AtomicU32,
-    historic_sandstorm_connections: AtomicU64,
     buffer_size: AtomicU32,
     message_sender: Sender<MessageType>,
+    metrics_requester: Option<MetricsRequester>,
 }
 
 impl ServerState {
     pub fn new(
-        verbose: bool,
         users: UserManager,
         no_auth_enabled: bool,
         userpass_auth_enabled: bool,
         buffer_size: u32,
         message_sender: Sender<MessageType>,
+        metrics_requester: Option<MetricsRequester>,
     ) -> Self {
         ServerState {
-            verbose,
             users,
             no_auth_enabled: AtomicBool::new(no_auth_enabled),
             userpass_auth_enabled: AtomicBool::new(userpass_auth_enabled),
-            historic_client_connections: AtomicU64::new(0),
-            client_bytes_sent: AtomicU64::new(0),
-            current_client_connections: AtomicU32::new(0),
-            client_bytes_received: AtomicU64::new(0),
-            current_sandstorm_connections: AtomicU32::new(0),
-            historic_sandstorm_connections: AtomicU64::new(0),
             buffer_size: AtomicU32::new(buffer_size),
             message_sender,
+            metrics_requester,
         }
     }
 
@@ -84,18 +77,13 @@ macro_rules! log {
 
 impl ClientContext {
     pub fn create(client_id: u64, state: &Arc<ServerState>, log_sender: Option<LogSender>) -> Self {
-        let context = ClientContext {
+        ClientContext {
             client_id,
             bytes_sent: 0,
             bytes_received: 0,
             state: Arc::clone(state),
             log_sender,
-        };
-
-        context.state.current_client_connections.fetch_add(1, Ordering::Relaxed);
-        context.state.historic_client_connections.fetch_add(1, Ordering::Relaxed);
-
-        context
+        }
     }
 
     pub fn buffer_size(&self) -> usize {
@@ -116,13 +104,11 @@ impl ClientContext {
 
     pub fn register_bytes_sent(&mut self, count: u64) {
         self.bytes_sent += count;
-        self.state.client_bytes_sent.fetch_add(count, Ordering::Relaxed);
         log!(self, LogEventType::ClientBytesSent(self.client_id, count));
     }
 
     pub fn register_bytes_received(&mut self, count: u64) {
         self.bytes_received += count;
-        self.state.client_bytes_received.fetch_add(count, Ordering::Relaxed);
         log!(self, LogEventType::ClientBytesReceived(self.client_id, count));
     }
 }
@@ -300,12 +286,6 @@ macro_rules! log_socks_destination_shutdown {
     };
 }
 
-impl Drop for ClientContext {
-    fn drop(&mut self) {
-        self.state.current_client_connections.fetch_sub(1, Ordering::Relaxed);
-    }
-}
-
 pub struct SandstormContext {
     pub manager_id: u64,
     pub state: Arc<ServerState>,
@@ -314,16 +294,11 @@ pub struct SandstormContext {
 
 impl SandstormContext {
     pub fn create(manager_id: u64, state: &Arc<ServerState>, log_sender: Option<LogSender>) -> Self {
-        let context = SandstormContext {
+        SandstormContext {
             manager_id,
             state: Arc::clone(state),
             log_sender,
-        };
-
-        context.state.current_sandstorm_connections.fetch_add(1, Ordering::Relaxed);
-        context.state.historic_sandstorm_connections.fetch_add(1, Ordering::Relaxed);
-
-        context
+        }
     }
 
     pub fn try_login(&self, username: &str, password: &str) -> Option<bool> {
@@ -420,7 +395,7 @@ impl SandstormContext {
         self.state.users.take_snapshot()
     }
 
-    pub async fn add_user(&self, username: String, password: String, role: u8) -> AddUserResponse {
+    pub fn add_user(&self, username: String, password: String, role: u8) -> AddUserResponse {
         let role = match UserRole::from_u8(role) {
             Some(r) => r,
             None => return AddUserResponse::InvalidValues,
@@ -435,7 +410,7 @@ impl SandstormContext {
         }
     }
 
-    pub async fn update_user(&self, username: String, password: Option<String>, role: Option<UserRole>) -> UpdateUserResponse {
+    pub fn update_user(&self, username: String, password: Option<String>, role: Option<UserRole>) -> UpdateUserResponse {
         if password.is_none() && role.is_none() {
             return UpdateUserResponse::NothingWasRequested;
         }
@@ -454,7 +429,7 @@ impl SandstormContext {
         }
     }
 
-    pub async fn delete_user(&self, username: String) -> DeleteUserResponse {
+    pub fn delete_user(&self, username: String) -> DeleteUserResponse {
         match self.state.users.delete(username) {
             Ok(Some((username, role))) => {
                 log!(self, LogEventType::UserDeletedByManager(self.manager_id, username, role));
@@ -475,7 +450,7 @@ impl SandstormContext {
         ]
     }
 
-    pub async fn toggle_auth_method(&self, auth_method: u8, state: bool) -> bool {
+    pub fn toggle_auth_method(&self, auth_method: u8, state: bool) -> bool {
         let auth_method = match AuthMethod::from_u8(auth_method) {
             Some(a) => a,
             None => return false,
@@ -491,11 +466,25 @@ impl SandstormContext {
         true
     }
 
+    pub async fn request_metrics(&self) -> Option<Receiver<Metrics>> {
+        match &self.state.metrics_requester {
+            Some(requester) => requester.request_metrics().await,
+            None => None,
+        }
+    }
+
+    pub async fn request_metrics_and_subscribe(&self) -> Option<Receiver<(Metrics, broadcast::Receiver<Arc<LogEvent>>)>> {
+        match &self.state.metrics_requester {
+            Some(requester) => requester.request_metrics_and_subscribe().await,
+            None => None,
+        }
+    }
+
     pub fn get_buffer_size(&self) -> u32 {
         self.state.buffer_size.load(Ordering::Relaxed)
     }
 
-    pub async fn set_buffer_size(&self, value: u32) -> bool {
+    pub fn set_buffer_size(&self, value: u32) -> bool {
         if value == 0 {
             return false;
         }
@@ -542,10 +531,4 @@ macro_rules! log_sandstorm_authenticated_as {
             ));
         }
     };
-}
-
-impl Drop for SandstormContext {
-    fn drop(&mut self) {
-        self.state.current_sandstorm_connections.fetch_sub(1, Ordering::Relaxed);
-    }
 }

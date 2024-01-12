@@ -1,7 +1,7 @@
 use std::{io, net::SocketAddr};
 
 use dust_devil_core::{
-    sandstorm::{AddUserResponse, DeleteUserResponse, UpdateUserResponse},
+    sandstorm::{AddUserResponse, DeleteUserResponse, Metrics, UpdateUserResponse},
     socks5::AuthMethod,
     users::UserRole,
 };
@@ -9,8 +9,7 @@ use tokio::sync::oneshot::Receiver;
 
 pub enum ResponseNotification {
     Shutdown(Receiver<()>),
-    // LogEventConfig(),
-    // LogEventStream(),
+    LogEventConfig(bool),
     ListSocks5Sockets(Receiver<Vec<SocketAddr>>),
     AddSocks5Socket(Receiver<Result<(), io::Error>>),
     RemoveSocks5Socket(Receiver<bool>),
@@ -23,7 +22,7 @@ pub enum ResponseNotification {
     DeleteUser(DeleteUserResponse),
     ListAuthMethods(Vec<(AuthMethod, bool)>),
     ToggleAuthMethod(bool),
-    // RequestCurrentMetrics(),
+    RequestCurrentMetrics(Option<Receiver<Metrics>>),
     GetBufferSize(u32),
     SetBufferSize(bool),
     Meow,

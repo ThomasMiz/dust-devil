@@ -51,8 +51,13 @@ where
                 .await
                 .map_err_to_io()?;
         }
-        // SandstormCommandType::LogEventConfig => {}
-        // SandstormCommandType::LogEventStream => {}
+        SandstormCommandType::LogEventConfig => {
+            let toggle_status = bool::read(reader).await?;
+            response_notifier
+                .send(ResponseNotification::LogEventConfig(toggle_status))
+                .await
+                .map_err_to_io()?;
+        }
         SandstormCommandType::ListSocks5Sockets => {
             let receiver = context.list_socks5_sockets().await;
             response_notifier
@@ -111,7 +116,7 @@ where
             let password = SmallReadString::read(reader).await?.0;
             let role = reader.read_u8().await?;
 
-            let result = context.add_user(username, password, role).await;
+            let result = context.add_user(username, password, role);
             response_notifier
                 .send(ResponseNotification::AddUser(result))
                 .await
@@ -123,7 +128,7 @@ where
             let password = password.map(|s| s.0);
             let role = <Option<UserRole> as ByteRead>::read(reader).await?;
 
-            let result = context.update_user(username, password, role).await;
+            let result = context.update_user(username, password, role);
             response_notifier
                 .send(ResponseNotification::UpdateUser(result))
                 .await
@@ -131,7 +136,7 @@ where
         }
         SandstormCommandType::DeleteUser => {
             let username = SmallReadString::read(reader).await?.0;
-            let result = context.delete_user(username).await;
+            let result = context.delete_user(username);
             response_notifier
                 .send(ResponseNotification::DeleteUser(result))
                 .await
@@ -147,13 +152,19 @@ where
         SandstormCommandType::ToggleAuthMethod => {
             let auth_method = reader.read_u8().await?;
             let state = bool::read(reader).await?;
-            let result = context.toggle_auth_method(auth_method, state).await;
+            let result = context.toggle_auth_method(auth_method, state);
             response_notifier
                 .send(ResponseNotification::ToggleAuthMethod(result))
                 .await
                 .map_err_to_io()?;
         }
-        // SandstormCommandType::RequestCurrentMetrics => {}
+        SandstormCommandType::RequestCurrentMetrics => {
+            let receiver = context.request_metrics().await;
+            response_notifier
+                .send(ResponseNotification::RequestCurrentMetrics(receiver))
+                .await
+                .map_err_to_io()?;
+        }
         SandstormCommandType::GetBufferSize => {
             let buffer_size = context.get_buffer_size();
             response_notifier
@@ -163,7 +174,7 @@ where
         }
         SandstormCommandType::SetBufferSize => {
             let buffer_size = reader.read_u32().await?;
-            let result = context.set_buffer_size(buffer_size).await;
+            let result = context.set_buffer_size(buffer_size);
             response_notifier
                 .send(ResponseNotification::SetBufferSize(result))
                 .await
@@ -173,8 +184,10 @@ where
             response_notifier.send(ResponseNotification::Meow).await.map_err_to_io()?;
         }
         c => {
-            eprintln!("Yea I dunno what to do with {c:?} yet ((is not implemented 💀))");
-            return Err(io::Error::new(ErrorKind::Unsupported, format!("Yea I dunno what to do with {c:?}")));
+            return Err(io::Error::new(
+                ErrorKind::Unsupported,
+                format!("Unsupported or invalid sandstorm command {c:?}"),
+            ));
         }
     }
 

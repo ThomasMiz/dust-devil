@@ -4,7 +4,7 @@ use dust_devil_core::{
     logging::LogEventType,
     users::{UserRole, DEFAULT_USER_PASSWORD, DEFAULT_USER_USERNAME},
 };
-use tokio::{net::TcpListener, select};
+use tokio::{net::TcpListener, select, sync::mpsc};
 use tokio_util::sync::CancellationToken;
 
 use crate::{
@@ -65,16 +65,16 @@ async fn run_server_inner(startup_args: StartupArguments, logger: Option<&LogMan
 
     let mut sandstorm_listeners = bind_sandstorm_sockets(startup_args.verbose, startup_args.sandstorm_bind_sockets, &log_sender).await;
 
-    let (message_sender, mut message_receiver) = tokio::sync::mpsc::channel(MESSAGING_CHANNEL_SIZE);
+    let (message_sender, mut message_receiver) = mpsc::channel(MESSAGING_CHANNEL_SIZE);
 
     printlnif!(startup_args.verbose, "Constructing server state");
     let state = Arc::new(ServerState::new(
-        startup_args.verbose,
         users,
         startup_args.no_auth_enabled,
         startup_args.userpass_auth_enabled,
         startup_args.buffer_size,
         message_sender,
+        logger.map(|l| l.new_requester()),
     ));
 
     let mut client_id_counter: u64 = 1;

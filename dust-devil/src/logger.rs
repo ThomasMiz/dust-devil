@@ -1,11 +1,18 @@
 use std::{io, path::PathBuf, sync::Arc};
 
-use dust_devil_core::logging::{LogEvent, LogEventType};
+use dust_devil_core::{
+    logging::{LogEvent, LogEventType},
+    sandstorm::Metrics,
+};
 use time::{OffsetDateTime, UtcOffset};
 use tokio::{
     fs::File,
     io::{stdout, AsyncWrite, AsyncWriteExt, BufWriter},
-    sync::broadcast::{self, error::RecvError, Receiver, Sender},
+    select,
+    sync::{
+        broadcast::{self, error::RecvError, Receiver, Sender},
+        mpsc, oneshot,
+    },
     task::{JoinError, JoinHandle},
 };
 
@@ -13,19 +20,31 @@ use std::io::Write;
 
 use crate::printlnif;
 
-const EVENT_LOG_BUFFER: usize = 4096;
+const EVENT_LOG_BUFFER: usize = 0x1000;
 const STDOUT_BUFFER_SIZE: usize = 0x2000;
 const FILE_BUFFER_SIZE: usize = 0x2000;
 const PARSE_VEC_SIZE: usize = 0x100;
+const METRICS_REQUEST_CHANNEL_SIZE: usize = 0x10;
 
 pub struct LogManager {
     log_sender: Sender<Arc<LogEvent>>,
+    metrics_request_sender: mpsc::Sender<MetricsRequest>,
+    metrics_task_handle: JoinHandle<()>,
     log_stdout_task_handle: Option<JoinHandle<()>>,
     log_file_task_handle: Option<JoinHandle<()>>,
 }
 
 pub struct LogSender {
     log_sender: Sender<Arc<LogEvent>>,
+}
+
+enum MetricsRequest {
+    Metrics(oneshot::Sender<Metrics>),
+    MetricsAndSubscribe(oneshot::Sender<(Metrics, Receiver<Arc<LogEvent>>)>),
+}
+
+pub struct MetricsRequester {
+    request_sender: mpsc::Sender<MetricsRequest>,
 }
 
 async fn logger_task<W>(
@@ -91,12 +110,105 @@ where
     }
 }
 
+async fn metrics_task(verbose: bool, mut log_receiver: Receiver<Arc<LogEvent>>, mut request_receiver: mpsc::Receiver<MetricsRequest>) {
+    printlnif!(verbose, "Metrics tracker task started");
+
+    let mut current_client_connections: u32 = 0;
+    let mut historic_client_connections: u64 = 0;
+    let mut client_bytes_sent: u64 = 0;
+    let mut client_bytes_received: u64 = 0;
+    let mut current_sandstorm_connections: u32 = 0;
+    let mut historic_sandstorm_connections: u64 = 0;
+
+    loop {
+        select! {
+            biased;
+            event = log_receiver.recv() => {
+                let event = match event {
+                    Ok(evt) => evt,
+                    Err(RecvError::Lagged(amount)) => {
+                        eprintln!("Warning! Metrics tracker lagged behind {amount} events!");
+                        continue;
+                    }
+                    Err(RecvError::Closed) => break,
+                };
+
+                match event.data {
+                    LogEventType::NewClientConnectionAccepted(_, _) => {
+                        current_client_connections += 1;
+                        historic_client_connections += 1;
+                    }
+                    LogEventType::ClientConnectionFinished(_, _, _, _) => {
+                        current_client_connections -= 1;
+                    }
+                    LogEventType::ClientBytesSent(_, count) => {
+                        client_bytes_sent += count;
+                    }
+                    LogEventType::ClientBytesReceived(_, count) => {
+                        client_bytes_received += count;
+                    }
+                    LogEventType::NewSandstormConnectionAccepted(_, _) => {
+                        current_sandstorm_connections += 1;
+                        historic_sandstorm_connections += 1;
+                    }
+                    LogEventType::SandstormConnectionFinished(_, _) => {
+                        current_sandstorm_connections -= 1;
+                    }
+                    _ => {}
+                }
+            }
+            request = request_receiver.recv() => {
+                let request = match request {
+                    Some(req) => req,
+                    None => break,
+                };
+
+                let metrics = Metrics {
+                    current_client_connections,
+                    historic_client_connections,
+                    client_bytes_sent,
+                    client_bytes_received,
+                    current_sandstorm_connections,
+                    historic_sandstorm_connections,
+                };
+
+                match request {
+                    MetricsRequest::Metrics(sender) => {
+                        let _ = sender.send(metrics);
+                    },
+                    MetricsRequest::MetricsAndSubscribe(sender) => {
+                        // Note: log_receiver.resubcribe() makes a new receiver that receives values _after_ the resubcribe.
+                        // This means, in the Sandstorm protocol, the metrics sent won't be truly synchronized with the event
+                        // stream. Note however that this branch is last in a biased select! block, and therefore won't
+                        // execute if the previous branch completes immediately. This means this branch doesn't run unless
+                        // the log_receiver is empty! There is still, however, a very slight chance that a log event comes in
+                        // right in between the start of this branch and the `.resubscribe()`.
+
+                        // Since the option to fully fix this would be to have a second broadcast channel that is synchronized
+                        // with the events, and all events are relayed from the original broadcast to this second broadcast by
+                        // this task, for performance reasons it makes more sense to just accept this minor issue.
+                        let _ = sender.send((metrics, log_receiver.resubscribe()));
+                    }
+                }
+            }
+        }
+    }
+
+    printlnif!(verbose, "Metrics tracker task finished");
+}
+
 fn setup_logger_tasks(
     verbose: bool,
     log_receiver: Receiver<Arc<LogEvent>>,
+    metrics_request_receiver: mpsc::Receiver<MetricsRequest>,
     log_to_stdout: bool,
     file: Option<File>,
-) -> (Option<JoinHandle<()>>, Option<JoinHandle<()>>) {
+) -> (JoinHandle<()>, Option<JoinHandle<()>>, Option<JoinHandle<()>>) {
+    let log_receiver1 = log_receiver.resubscribe();
+    let metrics_tracker_task = tokio::spawn(async move {
+        metrics_task(verbose, log_receiver1, metrics_request_receiver).await;
+    });
+
     let local_utc_offset = match UtcOffset::current_local_offset() {
         Ok(offset) => {
             printlnif!(verbose, "Local UTC offset determined to be at {offset}");
@@ -128,7 +240,7 @@ fn setup_logger_tasks(
         })
     });
 
-    (maybe_stdout_task_handle, maybe_file_task_handle)
+    (metrics_tracker_task, maybe_stdout_task_handle, maybe_file_task_handle)
 }
 
 async fn create_file(verbose: bool, path: &str) -> Option<File> {
@@ -170,10 +282,15 @@ impl LogManager {
             None
         };
 
-        let (log_stdout_task_handle, log_file_task_handle) = setup_logger_tasks(verbose, log_receiver, log_to_stdout, file);
+        let (metrics_request_sender, metrics_request_receiver) = mpsc::channel(METRICS_REQUEST_CHANNEL_SIZE);
+
+        let (metrics_task_handle, log_stdout_task_handle, log_file_task_handle) =
+            setup_logger_tasks(verbose, log_receiver, metrics_request_receiver, log_to_stdout, file);
 
         LogManager {
             log_sender,
+            metrics_request_sender,
+            metrics_task_handle,
             log_stdout_task_handle,
             log_file_task_handle,
         }
@@ -183,8 +300,15 @@ impl LogManager {
         LogSender::new(self.log_sender.clone())
     }
 
+    pub fn new_requester(&self) -> MetricsRequester {
+        MetricsRequester::new(self.metrics_request_sender.clone())
+    }
+
     pub async fn join(self) -> Result<(), JoinError> {
         drop(self.log_sender);
+        drop(self.metrics_request_sender);
+
+        self.metrics_task_handle.await?;
 
         if let Some(handle) = self.log_stdout_task_handle {
             handle.await?;
@@ -206,5 +330,31 @@ impl LogSender {
     pub fn send(&self, data: LogEventType) -> bool {
         let timestamp = time::OffsetDateTime::now_utc().unix_timestamp();
         self.log_sender.send(Arc::new(LogEvent::new(timestamp, data))).is_ok()
+    }
+}
+
+impl MetricsRequester {
+    fn new(request_sender: mpsc::Sender<MetricsRequest>) -> MetricsRequester {
+        MetricsRequester { request_sender }
+    }
+
+    pub async fn request_metrics(&self) -> Option<oneshot::Receiver<Metrics>> {
+        let (result_tx, result_rx) = oneshot::channel();
+
+        let result = self.request_sender.send(MetricsRequest::Metrics(result_tx)).await;
+        match result {
+            Ok(()) => Some(result_rx),
+            Err(_) => None,
+        }
+    }
+
+    pub async fn request_metrics_and_subscribe(&self) -> Option<oneshot::Receiver<(Metrics, broadcast::Receiver<Arc<LogEvent>>)>> {
+        let (result_tx, result_rx) = oneshot::channel();
+
+        let result = self.request_sender.send(MetricsRequest::MetricsAndSubscribe(result_tx)).await;
+        match result {
+            Ok(()) => Some(result_rx),
+            Err(_) => None,
+        }
     }
 }

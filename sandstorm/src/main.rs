@@ -1,11 +1,12 @@
-use std::{net::{Ipv4Addr, SocketAddr, SocketAddrV4}, io};
+use std::{net::{Ipv4Addr, SocketAddr, SocketAddrV4}, io::{self, stdin}};
 
 use dust_devil_core::{
-    sandstorm::{AddUserResponse, DeleteUserResponse, SandstormCommandType, SandstormHandshakeStatus, UpdateUserResponse},
+    sandstorm::{AddUserResponse, DeleteUserResponse, SandstormCommandType, SandstormHandshakeStatus, UpdateUserResponse, Metrics},
     serialize::{ByteRead, ByteWrite, SmallReadList, SmallWriteString},
     socks5::AuthMethod,
-    users::UserRole,
+    users::UserRole, logging::LogEvent,
 };
+use time::{OffsetDateTime, UtcOffset};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt, BufReader, BufWriter},
     net::TcpSocket,
@@ -76,10 +77,7 @@ async fn main() {
     println!("User list: {list:?}");
     println!();
 
-    SandstormCommandType::ListAuthMethods
-        .write(&mut writer)
-        .await
-        .expect("Write failed");
+    SandstormCommandType::ListAuthMethods.write(&mut writer).await.expect("Write failed");
     writer.flush().await.expect("Flush failed");
     let resp = SandstormCommandType::read(&mut reader).await.expect("Read failed");
     if resp != SandstormCommandType::ListAuthMethods {
@@ -90,10 +88,7 @@ async fn main() {
     println!();
 
     println!("Turning off AuthMethod NoAuth");
-    SandstormCommandType::ToggleAuthMethod
-        .write(&mut writer)
-        .await
-        .expect("Write failed");
+    SandstormCommandType::ToggleAuthMethod.write(&mut writer).await.expect("Write failed");
     AuthMethod::NoAuth.write(&mut writer).await.expect("Write failed");
     false.write(&mut writer).await.expect("Write failed");
     writer.flush().await.expect("Flush failed");
@@ -105,10 +100,7 @@ async fn main() {
     println!("{}", if status { "Success!" } else { "Failed 💀💀" });
     println!();
 
-    SandstormCommandType::ListAuthMethods
-        .write(&mut writer)
-        .await
-        .expect("Write failed");
+    SandstormCommandType::ListAuthMethods.write(&mut writer).await.expect("Write failed");
     writer.flush().await.expect("Flush failed");
     let resp = SandstormCommandType::read(&mut reader).await.expect("Read failed");
     if resp != SandstormCommandType::ListAuthMethods {
@@ -175,10 +167,7 @@ async fn main() {
     println!();
 
     SandstormCommandType::AddUser.write(&mut writer).await.expect("Write failed");
-    (SmallWriteString("marcelo"), SmallWriteString("machelo"), UserRole::Regular)
-        .write(&mut writer)
-        .await
-        .expect("Write failed");
+    (SmallWriteString("marcelo"), SmallWriteString("machelo"), UserRole::Regular).write(&mut writer).await.expect("Write failed");
     writer.flush().await.expect("Flush failed");
     let resp = SandstormCommandType::read(&mut reader).await.expect("Read failed");
     if resp != SandstormCommandType::AddUser {
@@ -199,10 +188,7 @@ async fn main() {
     println!();
 
     SandstormCommandType::UpdateUser.write(&mut writer).await.expect("Write failed");
-    (SmallWriteString("marcelo"), None::<SmallWriteString>, Some(UserRole::Admin))
-        .write(&mut writer)
-        .await
-        .expect("Write failed");
+    (SmallWriteString("marcelo"), None::<SmallWriteString>, Some(UserRole::Admin)).write(&mut writer).await.expect("Write failed");
     writer.flush().await.expect("Flush failed");
     let resp = SandstormCommandType::read(&mut reader).await.expect("Read failed");
     if resp != SandstormCommandType::UpdateUser {
@@ -223,10 +209,7 @@ async fn main() {
     println!();
 
     SandstormCommandType::UpdateUser.write(&mut writer).await.expect("Write failed");
-    (SmallWriteString("marcelo"), Some(SmallWriteString("jajas!!")), None::<UserRole>)
-        .write(&mut writer)
-        .await
-        .expect("Write failed");
+    (SmallWriteString("marcelo"), Some(SmallWriteString("jajas!!")), None::<UserRole>).write(&mut writer).await.expect("Write failed");
     writer.flush().await.expect("Flush failed");
     let resp = SandstormCommandType::read(&mut reader).await.expect("Read failed");
     if resp != SandstormCommandType::UpdateUser {
@@ -425,6 +408,23 @@ async fn main() {
 
 
 
+    println!("Disabling event stream (even though it's not enabled)");
+    SandstormCommandType::LogEventConfig.write(&mut writer).await.expect("Write failed");
+    false.write(&mut writer).await.expect("Write failed");
+    writer.flush().await.expect("Flush failed");
+    let resp = SandstormCommandType::read(&mut reader).await.expect("Read failed");
+    if resp != SandstormCommandType::LogEventConfig {
+        panic!("Server did not respond with LogEventConfig!!");
+    }
+    let status = reader.read_u8().await.expect("Read failed");
+    if status != 0 {
+        panic!("Failed to enable metrics! Server responded with status {status}!");
+    }
+    println!("Event stream remains disabled.");
+    println!();
+
+
+
 
     println!("Turning on AuthMethod NoAuth");
     SandstormCommandType::ToggleAuthMethod.write(&mut writer).await.expect("Write failed");
@@ -438,4 +438,79 @@ async fn main() {
     let status = bool::read(&mut reader).await.expect("Read failed");
     println!("{}", if status { "Success!" } else { "Failed 💀💀" });
     println!();
+
+
+
+
+    println!("Getting current metrics");
+    SandstormCommandType::RequestCurrentMetrics.write(&mut writer).await.expect("Write failed");
+    writer.flush().await.expect("Flush failed");
+    let resp = SandstormCommandType::read(&mut reader).await.expect("Read failed");
+    if resp != SandstormCommandType::RequestCurrentMetrics {
+        panic!("Server did not respond with RequestCurrentMetrics!!");
+    }
+    let result = <Option<Metrics> as ByteRead>::read(&mut reader).await.expect("Read failed");
+    println!("Current metrics: {result:?}");
+    println!();
+
+
+
+    println!("Start event stream? (Y/N)");
+    let mut linebuf = String::new();
+    stdin().read_line(&mut linebuf).expect("Read line from stdin failed");
+    if !linebuf.trim().eq_ignore_ascii_case("y") {
+        println!("Shut down the server? (Y/N)");
+        linebuf.clear();
+        stdin().read_line(&mut linebuf).expect("Read line from stdin failed");
+        if linebuf.trim().eq_ignore_ascii_case("y") {
+            println!("Sending shutdown request");
+            SandstormCommandType::Shutdown.write(&mut writer).await.expect("Write failed");
+            writer.flush().await.expect("Flush failed");
+            let resp = SandstormCommandType::read(&mut reader).await.expect("Read failed");
+            if resp != SandstormCommandType::Shutdown {
+                panic!("Server did not respond with Shutdown!!");
+            }
+        }
+        println!("Goodbye!");
+        return;
+    }
+
+    println!("Enabling event stream");
+    SandstormCommandType::LogEventConfig.write(&mut writer).await.expect("Write failed");
+    true.write(&mut writer).await.expect("Write failed");
+    writer.flush().await.expect("Flush failed");
+    let resp = SandstormCommandType::read(&mut reader).await.expect("Read failed");
+    if resp != SandstormCommandType::LogEventConfig {
+        panic!("Server did not respond with LogEventConfig!!");
+    }
+    let status = reader.read_u8().await.expect("Read failed");
+    if status != 1 {
+        panic!("Failed to enable metrics! Server responded with status {status}!");
+    }
+    let metrics = Metrics::read(&mut reader).await.expect("Read failed");
+    println!("Current metrics: {metrics:?}");
+    println!();
+
+    let utc_offset = match UtcOffset::current_local_offset() {
+        Ok(offset) => offset,
+        Err(_) => {
+            eprintln!("Could not determine system's UTC offset, defaulting to 00:00:00");
+            UtcOffset::UTC
+        }
+    };
+
+    loop {
+        let resp = SandstormCommandType::read(&mut reader).await.expect("Read failed");
+        if resp != SandstormCommandType::LogEventStream {
+            panic!("Server did not respond with LogEventStream!!");
+        }
+
+        let event = LogEvent::read(&mut reader).await.expect("Read failed");
+
+        let t = OffsetDateTime::from_unix_timestamp(event.timestamp)
+                    .map(|t| t.to_offset(utc_offset))
+                    .unwrap_or(OffsetDateTime::UNIX_EPOCH);
+
+        println!("[{:04}-{:02}-{:02} {:02}:{:02}:{:02}] {}", t.year(), t.month() as u8, t.day(), t.hour(), t.minute(), t.second(), event.data);
+    }
 }

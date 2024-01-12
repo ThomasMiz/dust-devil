@@ -20,12 +20,12 @@ use self::{
     responses::send_handshake_response,
 };
 
+mod error_handling;
 mod messaging;
 mod parsers;
 mod request_handler;
 mod response_handler;
 mod responses;
-mod error_handling;
 
 const SANDSTORM_READ_BUFFER_SIZE: usize = 1024;
 const SANDSTORM_WRITE_BUFFER_SIZE: usize = 1024;
