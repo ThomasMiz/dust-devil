@@ -421,4 +421,21 @@ async fn main() {
     let list = <Vec<SocketAddr> as ByteRead>::read(&mut reader).await.expect("Read failed");
     println!("Socket sandstorm list: {list:?}");
     println!();
+
+
+
+
+
+    println!("Turning on AuthMethod NoAuth");
+    SandstormCommandType::ToggleAuthMethod.write(&mut writer).await.expect("Write failed");
+    AuthMethod::NoAuth.write(&mut writer).await.expect("Write failed");
+    true.write(&mut writer).await.expect("Write failed");
+    writer.flush().await.expect("Flush failed");
+    let resp = SandstormCommandType::read(&mut reader).await.expect("Read failed");
+    if resp != SandstormCommandType::ToggleAuthMethod {
+        panic!("Server did not respond with ToggleAuthMethod!!");
+    }
+    let status = bool::read(&mut reader).await.expect("Read failed");
+    println!("{}", if status { "Success!" } else { "Failed 💀💀" });
+    println!();
 }

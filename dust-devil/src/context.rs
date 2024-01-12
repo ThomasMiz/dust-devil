@@ -13,7 +13,10 @@ use dust_devil_core::{
     socks5::AuthMethod,
     users::UserRole,
 };
-use tokio::sync::{mpsc::Sender, oneshot};
+use tokio::sync::{
+    mpsc::Sender,
+    oneshot::{self, Receiver},
+};
 
 use crate::{logger::LogSender, messaging::MessageType, users::UserManager};
 
@@ -327,20 +330,22 @@ impl SandstormContext {
         self.state.users.try_login(username, password).map(|u| u == UserRole::Admin)
     }
 
-    pub async fn request_shutdown(&self) {
+    pub async fn request_shutdown(&self) -> Receiver<()> {
         log!(self, LogEventType::SandstormRequestedShutdown(self.manager_id));
         let (result_tx, result_rx) = oneshot::channel();
         let _ = self.state.message_sender.send(MessageType::ShutdownRequest(result_tx)).await;
-        let _ = result_rx.await;
+
+        result_rx
     }
 
-    pub async fn list_socks5_sockets(&self) -> Result<Vec<SocketAddr>, ()> {
+    pub async fn list_socks5_sockets(&self) -> Receiver<Vec<SocketAddr>> {
         let (result_tx, result_rx) = oneshot::channel();
         let _ = self.state.message_sender.send(MessageType::ListSocks5Sockets(result_tx)).await;
-        result_rx.await.map_err(|_| ())
+
+        result_rx
     }
 
-    pub async fn add_socks5_socket(&self, socket_address: SocketAddr) -> Result<Result<(), io::Error>, ()> {
+    pub async fn add_socks5_socket(&self, socket_address: SocketAddr) -> Receiver<Result<(), io::Error>> {
         log!(
             self,
             LogEventType::NewSocksSocketRequestedByManager(self.manager_id, socket_address)
@@ -352,10 +357,11 @@ impl SandstormContext {
             .message_sender
             .send(MessageType::AddSocks5Socket(socket_address, result_tx))
             .await;
-        result_rx.await.map_err(|_| ())
+
+        result_rx
     }
 
-    pub async fn remove_socks5_socket(&self, socket_address: SocketAddr) -> Result<bool, ()> {
+    pub async fn remove_socks5_socket(&self, socket_address: SocketAddr) -> Receiver<bool> {
         log!(
             self,
             LogEventType::RemoveSocksSocketRequestedByManager(self.manager_id, socket_address)
@@ -367,16 +373,18 @@ impl SandstormContext {
             .message_sender
             .send(MessageType::RemoveSocks5Socket(socket_address, result_tx))
             .await;
-        result_rx.await.map_err(|_| ())
+
+        result_rx
     }
 
-    pub async fn list_sandstorm_sockets(&self) -> Result<Vec<SocketAddr>, ()> {
+    pub async fn list_sandstorm_sockets(&self) -> Receiver<Vec<SocketAddr>> {
         let (result_tx, result_rx) = oneshot::channel();
         let _ = self.state.message_sender.send(MessageType::ListSandstormSockets(result_tx)).await;
-        result_rx.await.map_err(|_| ())
+
+        result_rx
     }
 
-    pub async fn add_sandstorm_socket(&self, socket_address: SocketAddr) -> Result<Result<(), io::Error>, ()> {
+    pub async fn add_sandstorm_socket(&self, socket_address: SocketAddr) -> Receiver<Result<(), io::Error>> {
         log!(
             self,
             LogEventType::NewSandstormSocketRequestedByManager(self.manager_id, socket_address)
@@ -388,10 +396,11 @@ impl SandstormContext {
             .message_sender
             .send(MessageType::AddSandstormSocket(socket_address, result_tx))
             .await;
-        result_rx.await.map_err(|_| ())
+
+        result_rx
     }
 
-    pub async fn remove_sandstorm_socket(&self, socket_address: SocketAddr) -> Result<bool, ()> {
+    pub async fn remove_sandstorm_socket(&self, socket_address: SocketAddr) -> Receiver<bool> {
         log!(
             self,
             LogEventType::RemoveSandstormSocketRequestedByManager(self.manager_id, socket_address)
@@ -403,7 +412,8 @@ impl SandstormContext {
             .message_sender
             .send(MessageType::RemoveSandstormSocket(socket_address, result_tx))
             .await;
-        result_rx.await.map_err(|_| ())
+
+        result_rx
     }
 
     pub fn get_users_snapshot(&self) -> Vec<(String, UserRole)> {
