@@ -8,10 +8,16 @@ use std::{
 };
 
 use dust_devil_core::{
-    logging::LogEvent,
-    sandstorm::{Metrics, SandstormCommandType},
-    serialize::{ByteWrite, SmallWriteList},
+    logging::Event,
+    sandstorm::{
+        AddSandstormSocketResponse, AddSocks5SocketResponse, CurrentMetricsResponse, EventStreamConfigResponse, EventStreamResponseRef,
+        GetBufferSizeResponse, ListAuthMethodsResponse, ListSandstormSocketsResponse, ListSocks5SocketsResponse, ListUsersResponse,
+        MeowResponse, Metrics, RemoveSandstormSocketResponse, RemoveSocketResponse, RemoveSocks5SocketResponse, SetBufferSizeResponse,
+        ShutdownRequest, ToggleAuthMethodResponse,
+    },
+    serialize::ByteWrite,
 };
+
 use tokio::{
     io::{AsyncWrite, AsyncWriteExt, BufWriter},
     select,
@@ -52,7 +58,10 @@ async fn get_first_optional<T>(receivers: &mut Vec<Option<oneshot::Receiver<T>>>
         if let Some(rx) = receivers.first_mut() {
             let rx = match rx {
                 Some(r) => r,
-                None => return Poll::Ready(Ok(None)),
+                None => {
+                    receivers.remove(0);
+                    return Poll::Ready(Ok(None));
+                }
             };
 
             if let Poll::Ready(result) = Pin::new(rx).poll(cx) {
@@ -66,6 +75,11 @@ async fn get_first_optional<T>(receivers: &mut Vec<Option<oneshot::Receiver<T>>>
     .await
 }
 
+/// If `maybe_receiver` is `Some(receiver)`, then this function returns the same as calling
+/// `receiver.recv()`. Otherwise, if `None`, returns a future that never completes. This function
+/// is intended for easy use within a `select!` block, as adding a
+/// `value = recv_if_some(&mut receiver) => {...}` to the `select!` will create a branch that only
+/// execute if the receiver is Some() and something has been received.
 async fn recv_if_some<T: Clone>(maybe_receiver: &mut Option<broadcast::Receiver<T>>) -> Result<T, broadcast::error::RecvError> {
     if let Some(receiver) = maybe_receiver {
         receiver.recv().await
@@ -117,12 +131,12 @@ where
 struct ResponseHandlerState {
     list_socks_receivers: Vec<oneshot::Receiver<Vec<SocketAddr>>>,
     add_socks_receivers: Vec<oneshot::Receiver<Result<(), io::Error>>>,
-    remove_socks_receivers: Vec<oneshot::Receiver<bool>>,
+    remove_socks_receivers: Vec<oneshot::Receiver<RemoveSocketResponse>>,
     list_sandstorm_receivers: Vec<oneshot::Receiver<Vec<SocketAddr>>>,
     add_sandstorm_receivers: Vec<oneshot::Receiver<Result<(), io::Error>>>,
-    remove_sandstorm_receivers: Vec<oneshot::Receiver<bool>>,
+    remove_sandstorm_receivers: Vec<oneshot::Receiver<RemoveSocketResponse>>,
     metrics_receivers: Vec<Option<oneshot::Receiver<Metrics>>>,
-    event_stream_receiver: Option<broadcast::Receiver<Arc<LogEvent>>>,
+    event_stream_receiver: Option<broadcast::Receiver<Arc<Event>>>,
 }
 
 pub async fn handle_responses<W>(
@@ -162,37 +176,35 @@ where
             }
             sockets = get_first(&mut handler_state.list_socks_receivers) => {
                 let sockets = sockets.map_err_to_io()?;
-                let sockets = sockets.as_slice();
-                (SandstormCommandType::ListSocks5Sockets, sockets).write(writer).await?;
+                ListSocks5SocketsResponse(sockets).write(writer).await?;
             }
             result = get_first(&mut handler_state.add_socks_receivers) => {
                 let result = result.map_err_to_io()?;
-                (SandstormCommandType::AddSocks5Socket, result).write(writer).await?;
+                AddSocks5SocketResponse(result).write(writer).await?;
             }
             result = get_first(&mut handler_state.remove_socks_receivers) => {
                 let result = result.map_err_to_io()?;
-                (SandstormCommandType::RemoveSocks5Socket, result).write(writer).await?;
+                RemoveSocks5SocketResponse(result).write(writer).await?;
             }
             sockets = get_first(&mut handler_state.list_sandstorm_receivers) => {
                 let sockets = sockets.map_err_to_io()?;
-                let sockets = sockets.as_slice();
-                (SandstormCommandType::ListSandstormSockets, sockets).write(writer).await?;
+                ListSandstormSocketsResponse(sockets).write(writer).await?;
             }
             result = get_first(&mut handler_state.add_sandstorm_receivers) => {
                 let result = result.map_err_to_io()?;
-                (SandstormCommandType::AddSandstormSocket, result).write(writer).await?;
+                AddSandstormSocketResponse(result).write(writer).await?;
             }
             result = get_first(&mut handler_state.remove_sandstorm_receivers) => {
                 let result = result.map_err_to_io()?;
-                (SandstormCommandType::RemoveSandstormSocket, result).write(writer).await?;
+                RemoveSandstormSocketResponse(result).write(writer).await?;
             }
             result = get_first_optional(&mut handler_state.metrics_receivers) => {
                 let result = result.map_err_to_io()?;
-                (SandstormCommandType::RequestCurrentMetrics, result).write(writer).await?;
+                CurrentMetricsResponse(result).write(writer).await?;
             }
             maybe_event = recv_if_some(&mut handler_state.event_stream_receiver) => {
                 match maybe_event {
-                    Ok(evt) => (SandstormCommandType::LogEventStream, evt.as_ref()).write(writer).await?,
+                    Ok(evt) => EventStreamResponseRef(evt.as_ref()).write(writer).await?,
                     Err(broadcast::error::RecvError::Closed) => return Ok(()),
                     Err(broadcast::error::RecvError::Lagged(count)) => return Err(io::Error::new(ErrorKind::Other, format!("Connection too slow to stream events, lagged behind {count} events!"))),
                 }
@@ -214,92 +226,86 @@ where
     match notification {
         ResponseNotification::Shutdown(receiver) => {
             let _ = receiver.await;
-            SandstormCommandType::Shutdown.write(writer).await?;
+            ShutdownRequest.write(writer).await?;
         }
         ResponseNotification::LogEventConfig(enabled) => {
-            let (result, maybe_metrics) = match (enabled, &handler_state.event_stream_receiver) {
+            let result = match (enabled, &handler_state.event_stream_receiver) {
                 (false, _) => {
                     handler_state.event_stream_receiver.take();
-                    (0u8, None)
+                    EventStreamConfigResponse::Disabled
                 }
-                (true, Some(_)) => (2, None),
+                (true, Some(_)) => EventStreamConfigResponse::WasAlreadyEnabled,
                 (true, None) => match context.request_metrics_and_subscribe().await {
                     Some(result_receiver) => {
                         let (metrics, event_receiver) = result_receiver.await.map_err_to_io()?;
                         handler_state.event_stream_receiver = Some(event_receiver);
-                        (1u8, Some(metrics))
+                        EventStreamConfigResponse::Enabled(metrics)
                     }
-                    None => (0u8, None),
+                    None => EventStreamConfigResponse::Disabled,
                 },
             };
 
-            (SandstormCommandType::LogEventConfig, result).write(writer).await?;
-            if let Some(metrics) = maybe_metrics {
-                metrics.write(writer).await?;
-            }
+            result.write(writer).await?;
         }
         ResponseNotification::ListSocks5Sockets(receiver) => {
             if handler_state.list_socks_receivers.len() == handler_state.list_socks_receivers.capacity() {
                 let sockets = handler_state.list_socks_receivers.remove(0).await.map_err_to_io()?;
-                let sockets = sockets.as_slice();
-                (SandstormCommandType::ListSocks5Sockets, sockets).write(writer).await?;
+                ListSocks5SocketsResponse(sockets).write(writer).await?;
             }
             handler_state.list_socks_receivers.push(receiver);
         }
         ResponseNotification::AddSocks5Socket(receiver) => {
             if handler_state.add_socks_receivers.len() == handler_state.add_socks_receivers.capacity() {
                 let result = handler_state.add_socks_receivers.remove(0).await.map_err_to_io()?;
-                (SandstormCommandType::AddSocks5Socket, result).write(writer).await?;
+                AddSocks5SocketResponse(result).write(writer).await?;
             }
             handler_state.add_socks_receivers.push(receiver);
         }
         ResponseNotification::RemoveSocks5Socket(receiver) => {
             if handler_state.remove_socks_receivers.len() == handler_state.remove_socks_receivers.capacity() {
                 let result = handler_state.remove_socks_receivers.remove(0).await.map_err_to_io()?;
-                (SandstormCommandType::RemoveSocks5Socket, !result).write(writer).await?;
+                RemoveSocks5SocketResponse(result).write(writer).await?;
             }
             handler_state.remove_socks_receivers.push(receiver);
         }
         ResponseNotification::ListSandstormSockets(receiver) => {
             if handler_state.list_sandstorm_receivers.len() == handler_state.list_sandstorm_receivers.capacity() {
                 let sockets = handler_state.list_sandstorm_receivers.remove(0).await.map_err_to_io()?;
-                let sockets = sockets.as_slice();
-                (SandstormCommandType::ListSandstormSockets, sockets).write(writer).await?;
+                ListSandstormSocketsResponse(sockets).write(writer).await?;
             }
             handler_state.list_sandstorm_receivers.push(receiver);
         }
         ResponseNotification::AddSandstormSocket(receiver) => {
             if handler_state.add_sandstorm_receivers.len() == handler_state.add_sandstorm_receivers.capacity() {
                 let result = handler_state.add_sandstorm_receivers.remove(0).await.map_err_to_io()?;
-                (SandstormCommandType::AddSandstormSocket, result).write(writer).await?;
+                AddSandstormSocketResponse(result).write(writer).await?;
             }
             handler_state.add_sandstorm_receivers.push(receiver);
         }
         ResponseNotification::RemoveSandstormSocket(receiver) => {
             if handler_state.remove_sandstorm_receivers.len() == handler_state.remove_sandstorm_receivers.capacity() {
                 let result = handler_state.remove_sandstorm_receivers.remove(0).await.map_err_to_io()?;
-                (SandstormCommandType::RemoveSandstormSocket, !result).write(writer).await?;
+                RemoveSandstormSocketResponse(result).write(writer).await?;
             }
             handler_state.remove_sandstorm_receivers.push(receiver);
         }
         ResponseNotification::ListUsers(snapshot) => {
-            (SandstormCommandType::ListUsers, snapshot.as_slice()).write(writer).await?;
+            ListUsersResponse(snapshot).write(writer).await?;
         }
         ResponseNotification::AddUser(result) => {
-            (SandstormCommandType::AddUser, result).write(writer).await?;
+            result.write(writer).await?;
         }
         ResponseNotification::UpdateUser(result) => {
-            (SandstormCommandType::UpdateUser, result).write(writer).await?;
+            result.write(writer).await?;
         }
         ResponseNotification::DeleteUser(result) => {
-            (SandstormCommandType::DeleteUser, result).write(writer).await?;
+            result.write(writer).await?;
         }
         ResponseNotification::ListAuthMethods(auth_methods) => {
-            let auth_methods = SmallWriteList(auth_methods.as_slice());
-            (SandstormCommandType::ListAuthMethods, auth_methods).write(writer).await?;
+            ListAuthMethodsResponse(auth_methods).write(writer).await?;
         }
         ResponseNotification::ToggleAuthMethod(result) => {
-            (SandstormCommandType::ToggleAuthMethod, result).write(writer).await?;
+            ToggleAuthMethodResponse(result).write(writer).await?;
         }
         ResponseNotification::RequestCurrentMetrics(maybe_receiver) => {
             if handler_state.metrics_receivers.len() == handler_state.metrics_receivers.capacity() {
@@ -308,20 +314,20 @@ where
                     Some(receiver) => Some(receiver.await.map_err_to_io()?),
                     None => None,
                 };
-                (SandstormCommandType::RequestCurrentMetrics, result).write(writer).await?;
+                CurrentMetricsResponse(result).write(writer).await?;
             }
 
             handler_state.metrics_receivers.push(maybe_receiver);
         }
         ResponseNotification::GetBufferSize(buffer_size) => {
-            (SandstormCommandType::GetBufferSize, buffer_size).write(writer).await?;
+            GetBufferSizeResponse(buffer_size).write(writer).await?;
         }
         ResponseNotification::SetBufferSize(result) => {
-            (SandstormCommandType::SetBufferSize, result).write(writer).await?;
+            SetBufferSizeResponse(result).write(writer).await?;
+            writer.flush().await?;
         }
         ResponseNotification::Meow => {
-            SandstormCommandType::Meow.write(writer).await?;
-            writer.write_all(b"MEOW").await?;
+            MeowResponse.write(writer).await?;
         }
     }
 

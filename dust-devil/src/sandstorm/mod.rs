@@ -1,6 +1,9 @@
 use std::io;
 
-use dust_devil_core::sandstorm::SandstormHandshakeStatus;
+use dust_devil_core::{
+    sandstorm::{ParseHandshakeError, SandstormHandshake, SandstormHandshakeStatus},
+    serialize::ByteWrite,
+};
 use tokio::{
     io::{AsyncWriteExt, BufReader, BufWriter},
     net::TcpStream,
@@ -15,17 +18,10 @@ use crate::{
     sandstorm::{request_handler::handle_requests, response_handler::handle_responses},
 };
 
-use self::{
-    parsers::{parse_handshake, ParseHandshakeError},
-    responses::send_handshake_response,
-};
-
 mod error_handling;
 mod messaging;
-mod parsers;
 mod request_handler;
 mod response_handler;
-mod responses;
 
 const SANDSTORM_READ_BUFFER_SIZE: usize = 1024;
 const SANDSTORM_WRITE_BUFFER_SIZE: usize = 1024;
@@ -42,12 +38,12 @@ async fn handle_sandstorm_inner(mut stream: TcpStream, context: &mut SandstormCo
     let (reader, mut writer) = stream.split();
     let mut reader = BufReader::with_capacity(SANDSTORM_READ_BUFFER_SIZE, reader);
 
-    let handshake = match parse_handshake(&mut reader).await {
+    let handshake = match SandstormHandshake::read_with_version_check(&mut reader).await {
         Ok(handshake) => handshake,
         Err(ParseHandshakeError::IO(error)) => return Err(error),
-        Err(parsers::ParseHandshakeError::InvalidVersion(ver)) => {
+        Err(ParseHandshakeError::InvalidVersion(ver)) => {
             log_sandstorm_unsupported_version!(context, ver);
-            send_handshake_response(&mut writer, SandstormHandshakeStatus::UnsupportedVersion).await?;
+            SandstormHandshakeStatus::UnsupportedVersion.write(&mut writer).await?;
             let _ = writer.shutdown().await;
             return Ok(());
         }
@@ -56,15 +52,12 @@ async fn handle_sandstorm_inner(mut stream: TcpStream, context: &mut SandstormCo
     let success = context.try_login(&handshake.username, &handshake.password);
     log_sandstorm_authenticated_as!(context, handshake.username, success == Some(true));
 
-    send_handshake_response(
-        &mut writer,
-        match success {
-            Some(true) => SandstormHandshakeStatus::Ok,
-            Some(false) => SandstormHandshakeStatus::PermissionDenied,
-            None => SandstormHandshakeStatus::InvalidUsernameOrPassword,
-        },
-    )
-    .await?;
+    let handshake_response = match success {
+        Some(true) => SandstormHandshakeStatus::Ok,
+        Some(false) => SandstormHandshakeStatus::PermissionDenied,
+        None => SandstormHandshakeStatus::InvalidUsernameOrPassword,
+    };
+    handshake_response.write(&mut writer).await?;
 
     let mut writer = BufWriter::with_capacity(SANDSTORM_WRITE_BUFFER_SIZE, writer);
     let (response_tx, response_rx) = mpsc::channel(RESPONSE_NOTIFICATION_CHANNEL_SIZE);

@@ -1,7 +1,8 @@
 use std::{collections::HashMap, io, net::SocketAddr, sync::Arc};
 
 use dust_devil_core::{
-    logging::LogEventType,
+    logging::EventData,
+    sandstorm::RemoveSocketResponse,
     users::{UserRole, DEFAULT_USER_PASSWORD, DEFAULT_USER_USERNAME},
 };
 use tokio::{net::TcpListener, select, sync::mpsc};
@@ -53,13 +54,13 @@ macro_rules! sendif {
 async fn run_server_inner(startup_args: StartupArguments, logger: Option<&LogManager>) {
     let log_sender = logger.map(|l| l.new_sender());
 
-    sendif!(log_sender, LogEventType::LoadingUsersFromFile(startup_args.users_file.clone()));
+    sendif!(log_sender, EventData::LoadingUsersFromFile(startup_args.users_file.clone()));
 
     let users = create_user_manager(&startup_args.users_file, startup_args.users, &log_sender).await;
 
     let mut socks_listeners = bind_socks_sockets(startup_args.verbose, startup_args.socks5_bind_sockets, &log_sender).await;
     if socks_listeners.is_empty() {
-        sendif!(log_sender, LogEventType::FailedBindAnySocketAborting);
+        sendif!(log_sender, EventData::FailedBindAnySocketAborting);
         return;
     }
 
@@ -90,7 +91,7 @@ async fn run_server_inner(startup_args: StartupArguments, logger: Option<&LogMan
             accept_result = accept_from_any(&socks_listeners) => {
                 match accept_result {
                     Ok((socket, address)) => {
-                        sendif!(log_sender, LogEventType::NewClientConnectionAccepted(client_id_counter, address));
+                        sendif!(log_sender, EventData::NewClientConnectionAccepted(client_id_counter, address));
                         let client_context = ClientContext::create(client_id_counter, &state, logger.map(|l| l.new_sender()));
                         client_id_counter += 1;
                         let cancel_token1 = client_cancel_token.clone();
@@ -99,14 +100,14 @@ async fn run_server_inner(startup_args: StartupArguments, logger: Option<&LogMan
                         });
                     },
                     Err((listener, err)) => {
-                        sendif!(log_sender, LogEventType::ClientConnectionAcceptFailed(listener.local_addr().ok(), err));
+                        sendif!(log_sender, EventData::ClientConnectionAcceptFailed(listener.local_addr().ok(), err));
                     },
                 }
             },
             accept_result = accept_from_any(&sandstorm_listeners) => {
                 match accept_result {
                     Ok((socket, address)) => {
-                        sendif!(log_sender, LogEventType::NewSandstormConnectionAccepted(manager_id_counter, address));
+                        sendif!(log_sender, EventData::NewSandstormConnectionAccepted(manager_id_counter, address));
                         let sandstorm_context = SandstormContext::create(manager_id_counter, &state, logger.map(|l| l.new_sender()));
                         manager_id_counter += 1;
                         let cancel_token1 = manager_cancel_token.clone();
@@ -115,7 +116,7 @@ async fn run_server_inner(startup_args: StartupArguments, logger: Option<&LogMan
                         });
                     },
                     Err((listener, err)) => {
-                        sendif!(log_sender, LogEventType::ClientConnectionAcceptFailed(listener.local_addr().ok(), err));
+                        sendif!(log_sender, EventData::ClientConnectionAcceptFailed(listener.local_addr().ok(), err));
                     },
                 }
             }
@@ -136,12 +137,12 @@ async fn run_server_inner(startup_args: StartupArguments, logger: Option<&LogMan
                     MessageType::AddSocks5Socket(socket_address, result_notifier) => match TcpListener::bind(socket_address).await {
                         Ok(result) => {
                             socks_listeners.push(result);
-                            sendif!(log_sender, LogEventType::NewSocks5Socket(socket_address));
+                            sendif!(log_sender, EventData::NewSocks5Socket(socket_address));
                             let _ = result_notifier.send(Ok(()));
                         }
                         Err(err) => {
                             let err2 = io::Error::new(err.kind(), err.to_string());
-                            sendif!(log_sender, LogEventType::FailedBindSocks5Socket(socket_address, err));
+                            sendif!(log_sender, EventData::FailedBindSocks5Socket(socket_address, err));
                             let _ = result_notifier.send(Err(err2));
                         }
                     },
@@ -152,12 +153,15 @@ async fn run_server_inner(startup_args: StartupArguments, logger: Option<&LogMan
                             .find(|(_, l)| l.local_addr().is_ok_and(|a| a == socket_address))
                             .map(|(i, _)| i);
 
-                        if let Some(listener_index) = maybe_listener_index {
+                        let result = if let Some(listener_index) = maybe_listener_index {
                             socks_listeners.swap_remove(listener_index);
-                            sendif!(log_sender, LogEventType::RemovedSocks5Socket(socket_address));
-                        }
+                            sendif!(log_sender, EventData::RemovedSocks5Socket(socket_address));
+                            RemoveSocketResponse::Ok
+                        } else {
+                            RemoveSocketResponse::SocketNotFound
+                        };
 
-                        let _ = result_notifier.send(maybe_listener_index.is_some());
+                        let _ = result_notifier.send(result);
                     }
                     MessageType::ListSandstormSockets(result_notifier) => {
                         let _ = result_notifier.send(sandstorm_listeners.iter().filter_map(|l| l.local_addr().ok()).collect());
@@ -165,12 +169,12 @@ async fn run_server_inner(startup_args: StartupArguments, logger: Option<&LogMan
                     MessageType::AddSandstormSocket(socket_address, result_notifier) => match TcpListener::bind(socket_address).await {
                         Ok(result) => {
                             sandstorm_listeners.push(result);
-                            sendif!(log_sender, LogEventType::NewSandstormSocket(socket_address));
+                            sendif!(log_sender, EventData::NewSandstormSocket(socket_address));
                             let _ = result_notifier.send(Ok(()));
                         }
                         Err(err) => {
                             let err2 = io::Error::new(err.kind(), err.to_string());
-                            sendif!(log_sender, LogEventType::FailedBindSandstormSocket(socket_address, err));
+                            sendif!(log_sender, EventData::FailedBindSandstormSocket(socket_address, err));
                             let _ = result_notifier.send(Err(err2));
                         }
                     },
@@ -181,18 +185,21 @@ async fn run_server_inner(startup_args: StartupArguments, logger: Option<&LogMan
                             .find(|(_, l)| l.local_addr().is_ok_and(|a| a == socket_address))
                             .map(|(i, _)| i);
 
-                        if let Some(listener_index) = maybe_listener_index {
+                        let result = if let Some(listener_index) = maybe_listener_index {
                             sandstorm_listeners.swap_remove(listener_index);
-                            sendif!(log_sender, LogEventType::RemovedSandstormSocket(socket_address));
-                        }
+                            sendif!(log_sender, EventData::RemovedSandstormSocket(socket_address));
+                            RemoveSocketResponse::Ok
+                        } else {
+                            RemoveSocketResponse::SocketNotFound
+                        };
 
-                        let _ = result_notifier.send(maybe_listener_index.is_some());
+                        let _ = result_notifier.send(result);
                     }
                 }
             }
             _ = tokio::signal::ctrl_c() => {
                 eprintln!("Received shutdown signal, shutting down gracefully. Signal again to shut down ungracefully.");
-                sendif!(log_sender, LogEventType::ShutdownSignalReceived);
+                sendif!(log_sender, EventData::ShutdownSignalReceived);
                 break;
             },
         }
@@ -206,11 +213,11 @@ async fn run_server_inner(startup_args: StartupArguments, logger: Option<&LogMan
     manager_cancel_token.cancel();
     client_cancel_token.cancel();
 
-    sendif!(log_sender, LogEventType::SavingUsersToFile(startup_args.users_file.clone()));
+    sendif!(log_sender, EventData::SavingUsersToFile(startup_args.users_file.clone()));
     let save_to_file_result = state.users().save_to_file(&startup_args.users_file).await;
     sendif!(
         log_sender,
-        LogEventType::UsersSavedToFile(startup_args.users_file, save_to_file_result)
+        EventData::UsersSavedToFile(startup_args.users_file, save_to_file_result)
     );
 }
 
@@ -219,28 +226,28 @@ async fn create_user_manager(users_file: &String, mut new_users: HashMap<String,
         Ok(users) => {
             sendif!(
                 log_sender,
-                LogEventType::UsersLoadedFromFile(users_file.clone(), Ok(users.count() as u64))
+                EventData::UsersLoadedFromFile(users_file.clone(), Ok(users.count() as u64))
             );
             users
         }
         Err(err) => {
-            sendif!(log_sender, LogEventType::UsersLoadedFromFile(users_file.clone(), Err(err)));
+            sendif!(log_sender, EventData::UsersLoadedFromFile(users_file.clone(), Err(err)));
             UserManager::new()
         }
     };
 
     for (username, userdata) in new_users.drain() {
         if users.insert_or_update(username.clone(), userdata.password, userdata.role) {
-            sendif!(log_sender, LogEventType::UserReplacedByArgs(username, userdata.role));
+            sendif!(log_sender, EventData::UserReplacedByArgs(username, userdata.role));
         } else {
-            sendif!(log_sender, LogEventType::UserRegisteredByArgs(username, userdata.role));
+            sendif!(log_sender, EventData::UserRegisteredByArgs(username, userdata.role));
         }
     }
 
     if users.admin_count() == 0 {
         sendif!(
             log_sender,
-            LogEventType::StartingUpWithSingleDefaultUser(format!("{DEFAULT_USER_PASSWORD}:{DEFAULT_USER_PASSWORD}"))
+            EventData::StartingUpWithSingleDefaultUser(format!("{DEFAULT_USER_PASSWORD}:{DEFAULT_USER_PASSWORD}"))
         );
         users.insert(
             String::from(DEFAULT_USER_USERNAME),
@@ -260,10 +267,10 @@ async fn bind_socks_sockets(verbose: bool, addresses: Vec<SocketAddr>, log_sende
         match TcpListener::bind(bind_address).await {
             Ok(result) => {
                 socks_listeners.push(result);
-                sendif!(log_sender, LogEventType::NewSocks5Socket(bind_address));
+                sendif!(log_sender, EventData::NewSocks5Socket(bind_address));
             }
             Err(err) => {
-                sendif!(log_sender, LogEventType::FailedBindSocks5Socket(bind_address, err));
+                sendif!(log_sender, EventData::FailedBindSocks5Socket(bind_address, err));
             }
         }
     }
@@ -279,10 +286,10 @@ async fn bind_sandstorm_sockets(verbose: bool, addresses: Vec<SocketAddr>, log_s
         match TcpListener::bind(bind_address).await {
             Ok(result) => {
                 sandstorm_listeners.push(result);
-                sendif!(log_sender, LogEventType::NewSandstormSocket(bind_address));
+                sendif!(log_sender, EventData::NewSandstormSocket(bind_address));
             }
             Err(err) => {
-                sendif!(log_sender, LogEventType::FailedBindSandstormSocket(bind_address, err));
+                sendif!(log_sender, EventData::FailedBindSandstormSocket(bind_address, err));
             }
         }
     }

@@ -1,7 +1,7 @@
 use std::{io, path::PathBuf, sync::Arc};
 
 use dust_devil_core::{
-    logging::{LogEvent, LogEventType},
+    logging::{Event, EventData},
     sandstorm::Metrics,
 };
 use time::{OffsetDateTime, UtcOffset};
@@ -27,7 +27,7 @@ const PARSE_VEC_SIZE: usize = 0x100;
 const METRICS_REQUEST_CHANNEL_SIZE: usize = 0x10;
 
 pub struct LogManager {
-    log_sender: Sender<Arc<LogEvent>>,
+    log_sender: Sender<Arc<Event>>,
     metrics_request_sender: mpsc::Sender<MetricsRequest>,
     metrics_task_handle: JoinHandle<()>,
     log_stdout_task_handle: Option<JoinHandle<()>>,
@@ -35,12 +35,12 @@ pub struct LogManager {
 }
 
 pub struct LogSender {
-    log_sender: Sender<Arc<LogEvent>>,
+    log_sender: Sender<Arc<Event>>,
 }
 
 enum MetricsRequest {
     Metrics(oneshot::Sender<Metrics>),
-    MetricsAndSubscribe(oneshot::Sender<(Metrics, Receiver<Arc<LogEvent>>)>),
+    MetricsAndSubscribe(oneshot::Sender<(Metrics, Receiver<Arc<Event>>)>),
 }
 
 pub struct MetricsRequester {
@@ -49,7 +49,7 @@ pub struct MetricsRequester {
 
 async fn logger_task<W>(
     verbose: bool,
-    mut log_receiver: Receiver<Arc<LogEvent>>,
+    mut log_receiver: Receiver<Arc<Event>>,
     utc_offset: UtcOffset,
     writer: &mut W,
     name: &str,
@@ -98,7 +98,7 @@ where
     Ok(())
 }
 
-async fn logger_task_wrapper<W>(verbose: bool, log_receiver: Receiver<Arc<LogEvent>>, utc_offset: UtcOffset, mut writer: W, name: &str)
+async fn logger_task_wrapper<W>(verbose: bool, log_receiver: Receiver<Arc<Event>>, utc_offset: UtcOffset, mut writer: W, name: &str)
 where
     W: AsyncWrite + Unpin,
 {
@@ -110,7 +110,7 @@ where
     }
 }
 
-async fn metrics_task(verbose: bool, mut log_receiver: Receiver<Arc<LogEvent>>, mut request_receiver: mpsc::Receiver<MetricsRequest>) {
+async fn metrics_task(verbose: bool, mut log_receiver: Receiver<Arc<Event>>, mut request_receiver: mpsc::Receiver<MetricsRequest>) {
     printlnif!(verbose, "Metrics tracker task started");
 
     let mut current_client_connections: u32 = 0;
@@ -134,24 +134,24 @@ async fn metrics_task(verbose: bool, mut log_receiver: Receiver<Arc<LogEvent>>, 
                 };
 
                 match event.data {
-                    LogEventType::NewClientConnectionAccepted(_, _) => {
+                    EventData::NewClientConnectionAccepted(_, _) => {
                         current_client_connections += 1;
                         historic_client_connections += 1;
                     }
-                    LogEventType::ClientConnectionFinished(_, _, _, _) => {
+                    EventData::ClientConnectionFinished(_, _, _, _) => {
                         current_client_connections -= 1;
                     }
-                    LogEventType::ClientBytesSent(_, count) => {
+                    EventData::ClientBytesSent(_, count) => {
                         client_bytes_sent += count;
                     }
-                    LogEventType::ClientBytesReceived(_, count) => {
+                    EventData::ClientBytesReceived(_, count) => {
                         client_bytes_received += count;
                     }
-                    LogEventType::NewSandstormConnectionAccepted(_, _) => {
+                    EventData::NewSandstormConnectionAccepted(_, _) => {
                         current_sandstorm_connections += 1;
                         historic_sandstorm_connections += 1;
                     }
-                    LogEventType::SandstormConnectionFinished(_, _) => {
+                    EventData::SandstormConnectionFinished(_, _) => {
                         current_sandstorm_connections -= 1;
                     }
                     _ => {}
@@ -199,7 +199,7 @@ async fn metrics_task(verbose: bool, mut log_receiver: Receiver<Arc<LogEvent>>, 
 
 fn setup_logger_tasks(
     verbose: bool,
-    log_receiver: Receiver<Arc<LogEvent>>,
+    log_receiver: Receiver<Arc<Event>>,
     metrics_request_receiver: mpsc::Receiver<MetricsRequest>,
     log_to_stdout: bool,
     file: Option<File>,
@@ -269,7 +269,7 @@ async fn create_file(verbose: bool, path: &str) -> Option<File> {
 
 impl LogManager {
     pub async fn new(verbose: bool, log_to_stdout: bool, log_to_file: Option<&str>) -> Self {
-        let (log_sender, log_receiver) = broadcast::channel::<Arc<LogEvent>>(EVENT_LOG_BUFFER);
+        let (log_sender, log_receiver) = broadcast::channel::<Arc<Event>>(EVENT_LOG_BUFFER);
 
         let file = if let Some(path) = log_to_file {
             create_file(verbose, path).await
@@ -323,13 +323,13 @@ impl LogManager {
 }
 
 impl LogSender {
-    fn new(log_sender: Sender<Arc<LogEvent>>) -> Self {
+    fn new(log_sender: Sender<Arc<Event>>) -> Self {
         LogSender { log_sender }
     }
 
-    pub fn send(&self, data: LogEventType) -> bool {
+    pub fn send(&self, data: EventData) -> bool {
         let timestamp = time::OffsetDateTime::now_utc().unix_timestamp();
-        self.log_sender.send(Arc::new(LogEvent::new(timestamp, data))).is_ok()
+        self.log_sender.send(Arc::new(Event::new(timestamp, data))).is_ok()
     }
 }
 
@@ -348,7 +348,7 @@ impl MetricsRequester {
         }
     }
 
-    pub async fn request_metrics_and_subscribe(&self) -> Option<oneshot::Receiver<(Metrics, broadcast::Receiver<Arc<LogEvent>>)>> {
+    pub async fn request_metrics_and_subscribe(&self) -> Option<oneshot::Receiver<(Metrics, broadcast::Receiver<Arc<Event>>)>> {
         let (result_tx, result_rx) = oneshot::channel();
 
         let result = self.request_sender.send(MetricsRequest::MetricsAndSubscribe(result_tx)).await;

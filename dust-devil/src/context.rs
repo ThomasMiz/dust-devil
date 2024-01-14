@@ -8,8 +8,8 @@ use std::{
 };
 
 use dust_devil_core::{
-    logging::{LogEvent, LogEventType},
-    sandstorm::{AddUserResponse, DeleteUserResponse, Metrics, UpdateUserResponse},
+    logging::{Event, EventData},
+    sandstorm::{AddUserResponse, DeleteUserResponse, Metrics, RemoveSocketResponse, UpdateUserResponse},
     socks5::AuthMethod,
     users::UserRole,
 };
@@ -104,12 +104,12 @@ impl ClientContext {
 
     pub fn register_bytes_sent(&mut self, count: u64) {
         self.bytes_sent += count;
-        log!(self, LogEventType::ClientBytesSent(self.client_id, count));
+        log!(self, EventData::ClientBytesSent(self.client_id, count));
     }
 
     pub fn register_bytes_received(&mut self, count: u64) {
         self.bytes_received += count;
-        log!(self, LogEventType::ClientBytesReceived(self.client_id, count));
+        log!(self, EventData::ClientBytesReceived(self.client_id, count));
     }
 }
 
@@ -117,7 +117,7 @@ impl ClientContext {
 macro_rules! log_socks_finished {
     ($cx:expr, $result:expr) => {
         if let Some(sender) = &$cx.log_sender {
-            sender.send(dust_devil_core::logging::LogEventType::ClientConnectionFinished(
+            sender.send(dust_devil_core::logging::EventData::ClientConnectionFinished(
                 $cx.client_id,
                 $cx.bytes_sent,
                 $cx.bytes_received,
@@ -131,7 +131,7 @@ macro_rules! log_socks_finished {
 macro_rules! log_socks_unsupported_version {
     ($cx:expr, $version:expr) => {
         if let Some(sender) = &$cx.log_sender {
-            sender.send(dust_devil_core::logging::LogEventType::ClientRequestedUnsupportedVersion(
+            sender.send(dust_devil_core::logging::EventData::ClientRequestedUnsupportedVersion(
                 $cx.client_id,
                 $version,
             ));
@@ -143,7 +143,7 @@ macro_rules! log_socks_unsupported_version {
 macro_rules! log_socks_unsupported_atyp {
     ($cx:expr, $atyp:expr) => {
         if let Some(sender) = &$cx.log_sender {
-            sender.send(dust_devil_core::logging::LogEventType::ClientRequestedUnsupportedAtyp(
+            sender.send(dust_devil_core::logging::EventData::ClientRequestedUnsupportedAtyp(
                 $cx.client_id,
                 $atyp,
             ));
@@ -155,7 +155,7 @@ macro_rules! log_socks_unsupported_atyp {
 macro_rules! log_socks_unsupported_command {
     ($cx:expr, $cmd:expr) => {
         if let Some(sender) = &$cx.log_sender {
-            sender.send(dust_devil_core::logging::LogEventType::ClientRequestedUnsupportedCommand(
+            sender.send(dust_devil_core::logging::EventData::ClientRequestedUnsupportedCommand(
                 $cx.client_id,
                 $cmd,
             ));
@@ -167,7 +167,7 @@ macro_rules! log_socks_unsupported_command {
 macro_rules! log_socks_selected_auth {
     ($cx:expr, $auth_method:expr) => {
         if let Some(sender) = &$cx.log_sender {
-            sender.send(dust_devil_core::logging::LogEventType::ClientSelectedAuthMethod(
+            sender.send(dust_devil_core::logging::EventData::ClientSelectedAuthMethod(
                 $cx.client_id,
                 $auth_method,
             ));
@@ -179,7 +179,7 @@ macro_rules! log_socks_selected_auth {
 macro_rules! log_socks_unsupported_userpass_version {
     ($cx:expr, $version:expr) => {
         if let Some(sender) = &$cx.log_sender {
-            sender.send(dust_devil_core::logging::LogEventType::ClientRequestedUnsupportedUserpassVersion(
+            sender.send(dust_devil_core::logging::EventData::ClientRequestedUnsupportedUserpassVersion(
                 $cx.client_id,
                 $version,
             ));
@@ -191,7 +191,7 @@ macro_rules! log_socks_unsupported_userpass_version {
 macro_rules! log_socks_authenticated_with_userpass {
     ($cx:expr, $username:expr, $success:expr) => {
         if let Some(sender) = &$cx.log_sender {
-            sender.send(dust_devil_core::logging::LogEventType::ClientAuthenticatedWithUserpass(
+            sender.send(dust_devil_core::logging::EventData::ClientAuthenticatedWithUserpass(
                 $cx.client_id,
                 $username,
                 $success,
@@ -204,7 +204,7 @@ macro_rules! log_socks_authenticated_with_userpass {
 macro_rules! log_socks_dns_lookup {
     ($cx:expr, $domainname:expr) => {
         if let Some(sender) = &$cx.log_sender {
-            sender.send(dust_devil_core::logging::LogEventType::ClientDnsLookup($cx.client_id, $domainname));
+            sender.send(dust_devil_core::logging::EventData::ClientDnsLookup($cx.client_id, $domainname));
         }
     };
 }
@@ -213,7 +213,7 @@ macro_rules! log_socks_dns_lookup {
 macro_rules! log_socks_connection_attempt {
     ($cx:expr, $address:expr) => {
         if let Some(sender) = &$cx.log_sender {
-            sender.send(dust_devil_core::logging::LogEventType::ClientAttemptingConnect(
+            sender.send(dust_devil_core::logging::EventData::ClientAttemptingConnect(
                 $cx.client_id,
                 $address,
             ));
@@ -225,7 +225,7 @@ macro_rules! log_socks_connection_attempt {
 macro_rules! log_socks_connection_attempt_bind_failed {
     ($cx:expr, $error:expr) => {
         if let Some(sender) = &$cx.log_sender {
-            sender.send(dust_devil_core::logging::LogEventType::ClientConnectionAttemptBindFailed(
+            sender.send(dust_devil_core::logging::EventData::ClientConnectionAttemptBindFailed(
                 $cx.client_id,
                 $error,
             ));
@@ -237,7 +237,7 @@ macro_rules! log_socks_connection_attempt_bind_failed {
 macro_rules! log_socks_connection_attempt_connect_failed {
     ($cx:expr, $error:expr) => {
         if let Some(sender) = &$cx.log_sender {
-            sender.send(dust_devil_core::logging::LogEventType::ClientConnectionAttemptConnectFailed(
+            sender.send(dust_devil_core::logging::EventData::ClientConnectionAttemptConnectFailed(
                 $cx.client_id,
                 $error,
             ));
@@ -249,7 +249,7 @@ macro_rules! log_socks_connection_attempt_connect_failed {
 macro_rules! log_socks_connect_to_destination_failed {
     ($cx:expr) => {
         if let Some(sender) = &$cx.log_sender {
-            sender.send(dust_devil_core::logging::LogEventType::ClientFailedToConnectToDestination(
+            sender.send(dust_devil_core::logging::EventData::ClientFailedToConnectToDestination(
                 $cx.client_id,
             ));
         }
@@ -260,7 +260,7 @@ macro_rules! log_socks_connect_to_destination_failed {
 macro_rules! log_socks_connected_to_destination {
     ($cx:expr, $address:expr) => {
         if let Some(sender) = &$cx.log_sender {
-            sender.send(dust_devil_core::logging::LogEventType::ClientConnectedToDestination(
+            sender.send(dust_devil_core::logging::EventData::ClientConnectedToDestination(
                 $cx.client_id,
                 $address,
             ));
@@ -272,7 +272,7 @@ macro_rules! log_socks_connected_to_destination {
 macro_rules! log_socks_source_shutdown {
     ($cx:expr) => {
         if let Some(sender) = &$cx.log_sender {
-            sender.send(dust_devil_core::logging::LogEventType::ClientSourceShutdown($cx.client_id));
+            sender.send(dust_devil_core::logging::EventData::ClientSourceShutdown($cx.client_id));
         }
     };
 }
@@ -281,7 +281,7 @@ macro_rules! log_socks_source_shutdown {
 macro_rules! log_socks_destination_shutdown {
     ($cx:expr) => {
         if let Some(sender) = &$cx.log_sender {
-            sender.send(dust_devil_core::logging::LogEventType::ClientDestinationShutdown($cx.client_id));
+            sender.send(dust_devil_core::logging::EventData::ClientDestinationShutdown($cx.client_id));
         }
     };
 }
@@ -306,7 +306,7 @@ impl SandstormContext {
     }
 
     pub async fn request_shutdown(&self) -> Receiver<()> {
-        log!(self, LogEventType::SandstormRequestedShutdown(self.manager_id));
+        log!(self, EventData::SandstormRequestedShutdown(self.manager_id));
         let (result_tx, result_rx) = oneshot::channel();
         let _ = self.state.message_sender.send(MessageType::ShutdownRequest(result_tx)).await;
 
@@ -321,10 +321,7 @@ impl SandstormContext {
     }
 
     pub async fn add_socks5_socket(&self, socket_address: SocketAddr) -> Receiver<Result<(), io::Error>> {
-        log!(
-            self,
-            LogEventType::NewSocksSocketRequestedByManager(self.manager_id, socket_address)
-        );
+        log!(self, EventData::NewSocksSocketRequestedByManager(self.manager_id, socket_address));
 
         let (result_tx, result_rx) = oneshot::channel();
         let _ = self
@@ -336,10 +333,10 @@ impl SandstormContext {
         result_rx
     }
 
-    pub async fn remove_socks5_socket(&self, socket_address: SocketAddr) -> Receiver<bool> {
+    pub async fn remove_socks5_socket(&self, socket_address: SocketAddr) -> Receiver<RemoveSocketResponse> {
         log!(
             self,
-            LogEventType::RemoveSocksSocketRequestedByManager(self.manager_id, socket_address)
+            EventData::RemoveSocksSocketRequestedByManager(self.manager_id, socket_address)
         );
 
         let (result_tx, result_rx) = oneshot::channel();
@@ -362,7 +359,7 @@ impl SandstormContext {
     pub async fn add_sandstorm_socket(&self, socket_address: SocketAddr) -> Receiver<Result<(), io::Error>> {
         log!(
             self,
-            LogEventType::NewSandstormSocketRequestedByManager(self.manager_id, socket_address)
+            EventData::NewSandstormSocketRequestedByManager(self.manager_id, socket_address)
         );
 
         let (result_tx, result_rx) = oneshot::channel();
@@ -375,10 +372,10 @@ impl SandstormContext {
         result_rx
     }
 
-    pub async fn remove_sandstorm_socket(&self, socket_address: SocketAddr) -> Receiver<bool> {
+    pub async fn remove_sandstorm_socket(&self, socket_address: SocketAddr) -> Receiver<RemoveSocketResponse> {
         log!(
             self,
-            LogEventType::RemoveSandstormSocketRequestedByManager(self.manager_id, socket_address)
+            EventData::RemoveSandstormSocketRequestedByManager(self.manager_id, socket_address)
         );
 
         let (result_tx, result_rx) = oneshot::channel();
@@ -395,14 +392,9 @@ impl SandstormContext {
         self.state.users.take_snapshot()
     }
 
-    pub fn add_user(&self, username: String, password: String, role: u8) -> AddUserResponse {
-        let role = match UserRole::from_u8(role) {
-            Some(r) => r,
-            None => return AddUserResponse::InvalidValues,
-        };
-
+    pub fn add_user(&self, username: String, password: String, role: UserRole) -> AddUserResponse {
         if self.state.users.insert(username.clone(), password, role) {
-            log!(self, LogEventType::UserRegisteredByManager(self.manager_id, username, role));
+            log!(self, EventData::UserRegisteredByManager(self.manager_id, username, role));
 
             AddUserResponse::Ok
         } else {
@@ -418,10 +410,7 @@ impl SandstormContext {
         let has_password = password.is_some();
         match self.state.users.update(username.clone(), password, role) {
             Ok(Some(role)) => {
-                log!(
-                    self,
-                    LogEventType::UserUpdatedByManager(self.manager_id, username, role, has_password)
-                );
+                log!(self, EventData::UserUpdatedByManager(self.manager_id, username, role, has_password));
                 UpdateUserResponse::Ok
             }
             Ok(None) => UpdateUserResponse::CannotRemoveOnlyAdmin,
@@ -432,7 +421,7 @@ impl SandstormContext {
     pub fn delete_user(&self, username: String) -> DeleteUserResponse {
         match self.state.users.delete(username) {
             Ok(Some((username, role))) => {
-                log!(self, LogEventType::UserDeletedByManager(self.manager_id, username, role));
+                log!(self, EventData::UserDeletedByManager(self.manager_id, username, role));
                 DeleteUserResponse::Ok
             }
             Ok(None) => DeleteUserResponse::CannotRemoveOnlyAdmin,
@@ -450,19 +439,14 @@ impl SandstormContext {
         ]
     }
 
-    pub fn toggle_auth_method(&self, auth_method: u8, state: bool) -> bool {
-        let auth_method = match AuthMethod::from_u8(auth_method) {
-            Some(a) => a,
-            None => return false,
-        };
-
+    pub fn toggle_auth_method(&self, auth_method: AuthMethod, state: bool) -> bool {
         match auth_method {
             AuthMethod::NoAuth => self.state.no_auth_enabled.store(state, Ordering::Relaxed),
             AuthMethod::UsernameAndPassword => self.state.userpass_auth_enabled.store(state, Ordering::Relaxed),
             _ => return false,
         }
 
-        log!(self, LogEventType::AuthMethodToggledByManager(self.manager_id, auth_method, state));
+        log!(self, EventData::AuthMethodToggledByManager(self.manager_id, auth_method, state));
         true
     }
 
@@ -473,7 +457,7 @@ impl SandstormContext {
         }
     }
 
-    pub async fn request_metrics_and_subscribe(&self) -> Option<Receiver<(Metrics, broadcast::Receiver<Arc<LogEvent>>)>> {
+    pub async fn request_metrics_and_subscribe(&self) -> Option<Receiver<(Metrics, broadcast::Receiver<Arc<Event>>)>> {
         match &self.state.metrics_requester {
             Some(requester) => requester.request_metrics_and_subscribe().await,
             None => None,
@@ -489,7 +473,7 @@ impl SandstormContext {
             return false;
         }
 
-        log!(self, LogEventType::BufferSizeChangedByManager(self.manager_id, value));
+        log!(self, EventData::BufferSizeChangedByManager(self.manager_id, value));
 
         self.state.buffer_size.store(value, Ordering::Relaxed);
         true
@@ -500,7 +484,7 @@ impl SandstormContext {
 macro_rules! log_sandstorm_finished {
     ($cx:expr, $result:expr) => {
         if let Some(sender) = &$cx.log_sender {
-            sender.send(dust_devil_core::logging::LogEventType::SandstormConnectionFinished(
+            sender.send(dust_devil_core::logging::EventData::SandstormConnectionFinished(
                 $cx.manager_id,
                 $result,
             ));
@@ -512,7 +496,7 @@ macro_rules! log_sandstorm_finished {
 macro_rules! log_sandstorm_unsupported_version {
     ($cx:expr, $version:expr) => {
         if let Some(sender) = &$cx.log_sender {
-            sender.send(dust_devil_core::logging::LogEventType::SandstormRequestedUnsupportedVersion(
+            sender.send(dust_devil_core::logging::EventData::SandstormRequestedUnsupportedVersion(
                 $cx.manager_id,
                 $version,
             ));
@@ -524,7 +508,7 @@ macro_rules! log_sandstorm_unsupported_version {
 macro_rules! log_sandstorm_authenticated_as {
     ($cx:expr, $username:expr, $success:expr) => {
         if let Some(sender) = &$cx.log_sender {
-            sender.send(dust_devil_core::logging::LogEventType::SandstormAuthenticatedAs(
+            sender.send(dust_devil_core::logging::EventData::SandstormAuthenticatedAs(
                 $cx.manager_id,
                 $username,
                 $success,

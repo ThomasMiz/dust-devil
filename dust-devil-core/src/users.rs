@@ -1,4 +1,14 @@
-use std::{fmt, io};
+use std::{
+    fmt,
+    io::{self, ErrorKind},
+};
+
+use tokio::io::{AsyncRead, AsyncWrite};
+
+use crate::{
+    serialize::{ByteRead, ByteWrite},
+    u8_repr_enum::U8ReprEnum,
+};
 
 pub const COMMENT_PREFIX_CHAR: char = '!';
 pub const ADMIN_PREFIX_CHAR: char = '@';
@@ -11,16 +21,35 @@ pub const DEFAULT_USER_PASSWORD: &str = "admin";
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum UserRole {
-    Admin = 1,
-    Regular = 2,
+    Admin = 0x01,
+    Regular = 0x02,
 }
 
-impl UserRole {
-    pub fn from_u8(value: u8) -> Option<UserRole> {
+impl U8ReprEnum for UserRole {
+    fn from_u8(value: u8) -> Option<Self> {
         match value {
-            1 => Some(UserRole::Admin),
-            2 => Some(UserRole::Regular),
+            0x01 => Some(Self::Admin),
+            0x02 => Some(Self::Regular),
             _ => None,
+        }
+    }
+
+    fn into_u8(self) -> u8 {
+        self as u8
+    }
+}
+
+impl ByteWrite for UserRole {
+    async fn write<W: AsyncWrite + Unpin + ?Sized>(&self, writer: &mut W) -> Result<(), io::Error> {
+        self.into_u8().write(writer).await
+    }
+}
+
+impl ByteRead for UserRole {
+    async fn read<R: AsyncRead + Unpin + ?Sized>(reader: &mut R) -> Result<Self, io::Error> {
+        match UserRole::from_u8(u8::read(reader).await?) {
+            Some(role) => Ok(role),
+            None => Err(io::Error::new(ErrorKind::InvalidData, "Invalid UserRole type byte")),
         }
     }
 }
@@ -104,6 +133,67 @@ impl fmt::Display for UsersLoadingError {
             UsersLoadingError::EmptyPassword(line_number, char_at) => write!(f, "Empty password field at {line_number}:{char_at}"),
             UsersLoadingError::PasswordTooLong(line_number, char_at) => write!(f, "Password too long at {line_number}:{char_at}"),
             UsersLoadingError::NoUsers => write!(f, "No users"),
+        }
+    }
+}
+
+impl ByteWrite for UsersLoadingError {
+    async fn write<W: AsyncWrite + Unpin + ?Sized>(&self, writer: &mut W) -> Result<(), io::Error> {
+        match self {
+            UsersLoadingError::IO(io_error) => (1u8, io_error).write(writer).await,
+            UsersLoadingError::InvalidUtf8 { line_number, byte_at } => (2u8, line_number, byte_at).write(writer).await,
+            UsersLoadingError::LineTooLong { line_number, byte_at } => (3u8, line_number, byte_at).write(writer).await,
+            UsersLoadingError::ExpectedRoleCharGotEOF(line_number, char_at) => (4u8, line_number, char_at).write(writer).await,
+            UsersLoadingError::InvalidRoleChar(line_number, char_at, char) => (5u8, line_number, char_at, *char).write(writer).await,
+            UsersLoadingError::ExpectedColonGotEOF(line_number, char_at) => (6u8, line_number, char_at).write(writer).await,
+            UsersLoadingError::EmptyUsername(line_number, char_at) => (7u8, line_number, char_at).write(writer).await,
+            UsersLoadingError::UsernameTooLong(line_number, char_at) => (8u8, line_number, char_at).write(writer).await,
+            UsersLoadingError::EmptyPassword(line_number, char_at) => (9u8, line_number, char_at).write(writer).await,
+            UsersLoadingError::PasswordTooLong(line_number, char_at) => (10u8, line_number, char_at).write(writer).await,
+            UsersLoadingError::NoUsers => 11u8.write(writer).await,
+        }
+    }
+}
+
+impl ByteRead for UsersLoadingError {
+    async fn read<R: AsyncRead + Unpin + ?Sized>(reader: &mut R) -> Result<Self, io::Error> {
+        let t = u8::read(reader).await?;
+
+        match t {
+            1 => Ok(UsersLoadingError::IO(io::Error::read(reader).await?)),
+            2 => Ok(UsersLoadingError::InvalidUtf8 {
+                line_number: u32::read(reader).await?,
+                byte_at: u64::read(reader).await?,
+            }),
+            3 => Ok(UsersLoadingError::LineTooLong {
+                line_number: u32::read(reader).await?,
+                byte_at: u64::read(reader).await?,
+            }),
+            4 => Ok(UsersLoadingError::ExpectedRoleCharGotEOF(
+                u32::read(reader).await?,
+                u32::read(reader).await?,
+            )),
+            5 => Ok(UsersLoadingError::InvalidRoleChar(
+                u32::read(reader).await?,
+                u32::read(reader).await?,
+                char::read(reader).await?,
+            )),
+            6 => Ok(UsersLoadingError::ExpectedColonGotEOF(
+                u32::read(reader).await?,
+                u32::read(reader).await?,
+            )),
+            7 => Ok(UsersLoadingError::EmptyUsername(u32::read(reader).await?, u32::read(reader).await?)),
+            8 => Ok(UsersLoadingError::UsernameTooLong(
+                u32::read(reader).await?,
+                u32::read(reader).await?,
+            )),
+            9 => Ok(UsersLoadingError::EmptyPassword(u32::read(reader).await?, u32::read(reader).await?)),
+            10 => Ok(UsersLoadingError::PasswordTooLong(
+                u32::read(reader).await?,
+                u32::read(reader).await?,
+            )),
+            11 => Ok(UsersLoadingError::NoUsers),
+            _ => Err(io::Error::new(ErrorKind::InvalidData, "Invalid UsersLoadingError type byte")),
         }
     }
 }

@@ -40,7 +40,7 @@ shutdown the socket to indicate it will not send any further data.
 If the status code is 0x00 OK, the connection proceeds to enter monitoring mode. In this mode, the
 client and server send asynchronous messages between each other. The client can send messages that
 request actions to the server, and the server will send messages with responses to said actions, as
-well as a real time stream of log events and metrics.
+well as possibly a real time stream of events and metrics.
 
 The server's messages will follow the following format:
 
@@ -50,7 +50,7 @@ The server's messages will follow the following format:
     |   1   | Variable |
     +-------+----------+
 
-The client can request actions to the server by sending the following message:
+The client can request actions to the server by sending messages in the following format:
 
     +-------+----------+
     | ATYPE | APAYLOAD |
@@ -62,12 +62,12 @@ Since most of the protocol follows a request-response format, most valid values 
 corresponding value for MTYPE indicating the server's response to that request. For convenience,
 these corresponding values will be equal (MTYPE = ATYPE). For better clarity, in this document I
 will organize these by value, indicating for each possible value what it means on each side and
-what payload it carries.
+what payload it carries on each side.
 
-Many of the payload specify serializing structs defined in the Rust programming language. Instead
+Many of the payloads specify serializing structs defined in the Rust programming language. Instead
 of describing how to serialize each of these structs, I will simply indicate that the format of
-how these structs are serialized is as indicated by the implementation in the file, which from now
-on I will refer to as the "serialization file", at "dust-devil-core/src/serialize.rs".
+how these structs are serialized is as indicated by the implementation in Rust code, which can be
+found at "dust-devil-core/src/". Note that all strings must be valid UTF-8.
 
 I'm lazy, deal with it.
 
@@ -78,34 +78,34 @@ The following ATYPE/MTYPE values are possible:
     Neither of these carries a payload. The server is not required to send the response before
     shutting down.
 
-- 0x01: Log Event Configuration
-    - Client-sent: Requests enabling or disabling streaming of log events. The payload consists of
-        a single byte, indicating 1 for enabling and 0 for disabling.
-    - Server-sent: Acknowledges the enabling or disabling of streaming of log events. The payload
+- 0x01: Event Stream Configuration
+    - Client-sent: Requests enabling or disabling streaming of events. The payload consists of a
+        single byte, indicating 1 for enabling and 0 for disabling.
+    - Server-sent: Acknowledges the enabling or disabling of streaming of events. The payload
         starts with a single byte:
-        - 0 the log stream is now disabled.
-        - 1 the log event stream is now enabled. This value is followed by a `Metrics` struct, that
-            contains the metrics at the moment the log stream started.
-        - 2 the log event stream was already enabled.
-    At the start of the connection, log event streaming is disabled. To start, it must be
-    explicitly enabled by the client. The server can also refuse to enable log event streaming, for
+        - 0x00 the event stream is now disabled.
+        - 0x01 the event stream is now enabled. This value is followed by a `Metrics` struct, that
+            contains the metrics at the moment the event stream started.
+        - 0x02 the event stream was already enabled.
+    At the start of the connection, event streaming is disabled. To start, it must be
+    explicitly enabled by the client. The server can also refuse to enable event streaming, for
     example if it doesn't support it, by returning a 0 to a request of 1.
 
-- 0x02: Log Event Stream
+- 0x02: Event Stream
     - Client-sent: Invalid, the client should never send this ATYPE.
-    - Server-sent: Indicates a new log event. The payload contains the log event, serialized with
-        the variable-length format implemented in the serialization file for the `LogEvent` struct.
-    The log events must be sent in the order in which they ocurred. The server should not, for
-    example, indicate that a client X failed to connect to example.org before indicating that
-    client X requested to be connected to example.org.
+    - Server-sent: Indicates a new event. The payload contains the event, serialized with the
+        variable-length format implemented in the serialization code for the `Event` struct.
+    The events must be sent in the order in which they ocurred. The server should not, for example,
+    indicate that a client X failed to connect to example.org before indicating that client X
+    requested to be connected to example.org.
 
-    The client can infer real-time metrics through log events, as this includes bytes sent and
-    received for each client, new connections, closed connections, etc.
+    The client can infer real-time metrics through events, as this includes bytes sent and received
+    for each client, new connections, closed connections, etc.
 
 - 0x03: List SOCKS5 Sockets
     - Client-sent: Requests the server sends a list of the addresses of all sockets listening for
         incoming SOCKS5 client connections. No payload.
-    - Server-sent: Indicates the list of sockets. The payload starts with an u16 which indicates
+    - Server-sent: Indicates the list of sockets. The payload starts with an `u16` which indicates
         the amount of socket addresses, followed by said amount of `SocketAddr` structs.
 
 - 0x04: Add SOCKS5 Socket
@@ -118,7 +118,7 @@ The following ATYPE/MTYPE values are possible:
 - 0x05: Remove SOCKS5 Socket
     - Client-sent: Requests the server closes a socket that is currently listening for incoming
         SOCKS5 clients. The payload contains said socket's address as a `SocketAddr`.
-    - Server-sent: Indicates the status of the request. Consists of a single u8 that specifies:
+    - Server-sent: Indicates the status of the request. Consists of a single byte that specifies:
         - 0x00: OK
         - 0x01: Socket not found
     Note: It is possible to disable all SOCKS5 sockets. Doing so will stop any new clients from
@@ -127,7 +127,7 @@ The following ATYPE/MTYPE values are possible:
 - 0x06: List Sandstorm Sockets
     - Client-sent: Requests the server sends a list of the addresses of all sockets listening for
         incoming Sandstorm client connections. No payload.
-    - Server-sent: Indicates the list of sockets. The payload starts with an u16 which indicates
+    - Server-sent: Indicates the list of sockets. The payload starts with an `u16` which indicates
         the amount of socket addresses, followed by said amount of `SocketAddr` structs.
 
 - 0x07: Add Sandstorm Socket
@@ -140,7 +140,7 @@ The following ATYPE/MTYPE values are possible:
 - 0x08: Remove Sandstorm Socket
     - Client-sent: Requests the server closes a socket that is currently listening for incoming
         Sandstorm clients. The payload contains said socket's address as a `SocketAddr`.
-    - Server-sent: Indicates the status of the request. Consists of a single u8 that specifies:
+    - Server-sent: Indicates the status of the request. Consists of a single byte that specifies:
         - 0x00: OK
         - 0x01: Socket not found
     Note: It is possible to disable all Sandstorm sockets. Doing so and closing any remaining
@@ -148,13 +148,13 @@ The following ATYPE/MTYPE values are possible:
 
 - 0x09 List Users
     - Client-sent: Requests the server sends a list of all users. No payload.
-    - Server-sent: Indicates the list of all users. The payload starts with an u16 which indicates
-        the amount of users, followed by said amount of `(String, UserRole)` tuples indicating the
-        username and role of each user. The users may be listed in any order.
+    - Server-sent: Indicates the list of all users. The payload starts with an `u16` which
+        indicates the amount of users, followed by said amount of `(String, UserRole)` tuples
+        indicating the username and role of each user. The users may be listed in any order.
 
 - 0x0A Add User
     - Client-sent: Requests a new user to be added. The payload specifies the new user's username,
-        and password, which must be valid UTF-8 strings, as well as the role, as a `UserRole`:
+        and password, as well as the role, as a `UserRole`:
             +------+------+------+-------+------+
             | ULEN | USER | PLEN | UPASS | ROLE |
             +------+------+------+-------+------+
@@ -175,8 +175,8 @@ The following ATYPE/MTYPE values are possible:
             |  1   | ULEN |   1   |           |  1   | PLEN  |     |   1   |           |  1   |
             +------+------+-------+           +------+-------+     +-------+           +------+
         The HPASS field indicates whether the request has a new password, in which case it is
-        followed by the password, which must be a valid UTF-8 string. The HROLE field indicates
-        whether the requets has a new role, in which case it is followed by the new `UserRole`.
+        followed by the password. The HROLE field indicates whether the requets has a new role, in
+        which case it is followed by the new `UserRole`.
     - Server-sent: Indicates the result of the operation. The payload contains a single byte which
         specifies:
             - 0x00 OK
@@ -201,31 +201,30 @@ The following ATYPE/MTYPE values are possible:
     - Client-sent: Requests the server sends a list of supported authentication methods and whether
         each one is enabled or disabled. No payload.
     - Server-sent: Indicates the list of authentication methods and their states. The payload
-        starts with an u8 indicating the length of the list, followed by said amount of
-        (AuthMethod, bool) tuples.
+        starts with an `u8` indicating the length of the list, followed by said amount of
+        `(AuthMethod, bool)` tuples.
 
 - 0x0E Enable/Disable Authentication Method
     - Client-sent: Requests the server enables or disables an authentication method. The payload
-        contains an AuthMethod and a bool, indicating the auth method and the desired state.
-    - Server-sent: Indicates the result of the operation. The payload contains a single bool, which
-        will be true when the operation succeeds, and false otherwise (not found / not supported).
+        contains an `AuthMethod` and a `bool`, indicating the auth method and the desired state.
+    - Server-sent: Indicates the result of the operation. The payload contains a single byte, a 1
+        if the operation succeeded and 0 otherwise (not found / not supported).
 
-- 0x0F Request Current Metrics
+- 0x0F Current Metrics
     - Client-sent: Requests the server sends the current metrics. No payload.
-    - Server-sent: Indicates the result of the operation. The payload starts with an u8 which,
+    - Server-sent: Indicates the result of the operation. The payload starts with a byte which,
         if 0, the server doesn't support metrics. If 1, then the rest payload is composed of a
-        `Metrics` struct. These values may not be synchronized with the log
-        event stream.
+        `Metrics` struct. These values may not be synchronized with the event stream.
 
 - 0x10 Get Buffer Size
     - Client-sent: Requests the server sends the current buffer size used for clients. No payload.
-    - Server-sent: Indicates the current buffer size. The payload consists of a single u32 that
+    - Server-sent: Indicates the current buffer size. The payload consists of a single `u32` that
         indicates the current buffer size.
 
 - 0x11 Set Buffer Size
     - Client-sent: Requests the server sets the current buffer size used for clients. The payload
-        consists of a single u32, which indicates the requested new buffer size in bytes.
-    - Server-sent: Indicates the result of the operation. The payload starts with an u8 which is
+        consists of a single `u32`, which indicates the requested new buffer size in bytes.
+    - Server-sent: Indicates the result of the operation. The payload starts with a byte which is
         0 for error (if the requested buffer size is invalid, such as 0) and 1 for ok.
     Note: This must affect new connections established after the change, but may or may not affect
     existing connections.

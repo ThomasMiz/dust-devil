@@ -1,252 +1,223 @@
-use std::{net::{Ipv4Addr, SocketAddr, SocketAddrV4}, io::{self, stdin}};
+use std::{
+    io::{self, stdin, ErrorKind},
+    net::{Ipv4Addr, SocketAddr, SocketAddrV4},
+};
 
 use dust_devil_core::{
-    sandstorm::{AddUserResponse, DeleteUserResponse, SandstormCommandType, SandstormHandshakeStatus, UpdateUserResponse, Metrics},
-    serialize::{ByteRead, ByteWrite, SmallReadList, SmallWriteString},
+    sandstorm::{
+        AddSandstormSocketRequest, AddSandstormSocketResponse, AddSocks5SocketRequest, AddSocks5SocketResponse, AddUserRequestRef,
+        AddUserResponse, CurrentMetricsRequest, CurrentMetricsResponse, DeleteUserRequestRef, DeleteUserResponse, EventStreamConfigRequest,
+        EventStreamConfigResponse, EventStreamResponse, GetBufferSizeRequest, GetBufferSizeResponse, ListAuthMethodsRequest,
+        ListAuthMethodsResponse, ListSandstormSocketsRequest, ListSandstormSocketsResponse, ListSocks5SocketsRequest,
+        ListSocks5SocketsResponse, ListUsersRequest, ListUsersResponse, MeowRequest, MeowResponse, RemoveSandstormSocketRequest,
+        RemoveSandstormSocketResponse, RemoveSocks5SocketRequest, RemoveSocks5SocketResponse, SandstormCommandType, SandstormHandshakeRef,
+        SandstormHandshakeStatus, SetBufferSizeRequest, SetBufferSizeResponse, ShutdownRequest, ToggleAuthMethodRequest,
+        ToggleAuthMethodResponse, UpdateUserRequestRef, UpdateUserResponse,
+    },
+    serialize::{ByteRead, ByteWrite},
     socks5::AuthMethod,
-    users::UserRole, logging::LogEvent,
+    users::UserRole,
 };
 use time::{OffsetDateTime, UtcOffset};
-use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt, BufReader, BufWriter},
-    net::TcpSocket,
-};
+use tokio::{io::BufReader, net::TcpSocket};
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
-    let socket = TcpSocket::new_v4().expect("TcpSocket::new_v4() failed");
-
-    let mut stream = socket
-        .connect(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 2222)))
-        .await
-        .expect("Failed to connect to server");
-
-    let (reader, writer) = stream.split();
-    let mut writer = BufWriter::new(writer);
-    let mut reader = BufReader::new(reader);
-
-    let username = "drope".as_bytes();
-    let password = "pedro1234".as_bytes();
-
-    writer.write_u8(1).await.expect("Failed write");
-    writer.write_u8(username.len() as u8).await.expect("Failed write");
-    writer.write_all(username).await.expect("Failed write");
-    writer.write_u8(password.len() as u8).await.expect("Failed write");
-    writer.write_all(password).await.expect("Failed write");
-    writer.flush().await.expect("Failed flush");
-
-    let status = reader.read_u8().await.expect("Failed read");
-    let status = SandstormHandshakeStatus::from_u8(status);
-
-    match status {
-        Some(status) => println!("Handshake status: {status:?}"),
-        None => {
-            println!("handshake status: wtf");
-            return;
-        }
+    match run().await {
+        Ok(()) => println!("Goodbye!"),
+        Err(error) => println!("Error encountered! {error}"),
     }
+}
+
+async fn run() -> Result<(), io::Error> {
+    let socket = TcpSocket::new_v4()?;
+    let mut stream = socket.connect(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 2222))).await?;
+
+    let (reader_half, mut writer_half) = stream.split();
+    let mut reader_buf = BufReader::new(reader_half);
+
+    let writer = &mut writer_half;
+    let reader = &mut reader_buf;
+
+    SandstormHandshakeRef::new("drope", "pedro1234").write(writer).await?;
+    let status = SandstormHandshakeStatus::read(reader).await?;
+
+    if status != SandstormHandshakeStatus::Ok {
+        println!("Handshake status is not ok: {status:?}");
+        return Ok(());
+    }
+    println!("Handshake status ok 👍");
     println!();
 
     for _ in 0..5 {
-        SandstormCommandType::Meow.write(&mut writer).await.expect("Write failed");
-        writer.flush().await.expect("Flush failed");
+        MeowRequest.write(writer).await?;
         println!("Meow sent");
 
-        let resp = SandstormCommandType::read(&mut reader).await.expect("Read failed");
+        let resp = SandstormCommandType::read(reader).await?;
         if resp != SandstormCommandType::Meow {
             panic!("Server didn't meow back!!");
         }
 
-        let mut meow = [0u8; 4];
-        reader.read_exact(&mut meow).await.expect("Read failed");
-        if &meow == b"MEOW" {
-            println!("The server meowed back 🐈‍⬛")
-        } else {
-            println!("The server didn't meow back properly! {meow:?}");
-        }
+        MeowResponse::read(reader).await?;
+        println!("The server meowed back 🐈‍⬛");
         println!();
     }
 
-    SandstormCommandType::ListUsers.write(&mut writer).await.expect("Write failed");
-    writer.flush().await.expect("Flush failed");
-    let resp = SandstormCommandType::read(&mut reader).await.expect("Read failed");
+    ListUsersRequest.write(writer).await?;
+    let resp = SandstormCommandType::read(reader).await?;
     if resp != SandstormCommandType::ListUsers {
         panic!("Server did not respond with ListUsers!!");
     }
-    let list = <Vec<(String, UserRole)> as ByteRead>::read(&mut reader).await.expect("Read failed");
+    let list = ListUsersResponse::read(reader).await?.0;
     println!("User list: {list:?}");
     println!();
 
-    SandstormCommandType::ListAuthMethods.write(&mut writer).await.expect("Write failed");
-    writer.flush().await.expect("Flush failed");
-    let resp = SandstormCommandType::read(&mut reader).await.expect("Read failed");
+    ListAuthMethodsRequest.write(writer).await?;
+    let resp = SandstormCommandType::read(reader).await?;
     if resp != SandstormCommandType::ListAuthMethods {
         panic!("Server did not respond with ListAuthMethods!!");
     }
-    let list = SmallReadList::<(AuthMethod, bool)>::read(&mut reader).await.expect("Read failed").0;
+    let list = ListAuthMethodsResponse::read(reader).await?.0;
     println!("Auth methods list: {list:?}");
     println!();
 
     println!("Turning off AuthMethod NoAuth");
-    SandstormCommandType::ToggleAuthMethod.write(&mut writer).await.expect("Write failed");
-    AuthMethod::NoAuth.write(&mut writer).await.expect("Write failed");
-    false.write(&mut writer).await.expect("Write failed");
-    writer.flush().await.expect("Flush failed");
-    let resp = SandstormCommandType::read(&mut reader).await.expect("Read failed");
+    ToggleAuthMethodRequest(AuthMethod::NoAuth, false).write(writer).await?;
+    let resp = SandstormCommandType::read(reader).await?;
     if resp != SandstormCommandType::ToggleAuthMethod {
         panic!("Server did not respond with ToggleAuthMethod!!");
     }
-    let status = bool::read(&mut reader).await.expect("Read failed");
+    let status = ToggleAuthMethodResponse::read(reader).await?.0;
     println!("{}", if status { "Success!" } else { "Failed 💀💀" });
     println!();
 
-    SandstormCommandType::ListAuthMethods.write(&mut writer).await.expect("Write failed");
-    writer.flush().await.expect("Flush failed");
-    let resp = SandstormCommandType::read(&mut reader).await.expect("Read failed");
+    ListAuthMethodsRequest.write(writer).await?;
+    let resp = SandstormCommandType::read(reader).await?;
     if resp != SandstormCommandType::ListAuthMethods {
         panic!("Server did not respond with ListAuthMethods!!");
     }
-    let list = SmallReadList::<(AuthMethod, bool)>::read(&mut reader).await.expect("Read failed").0;
+    let list =ListAuthMethodsResponse::read(reader).await?.0;
     println!("Auth methods list: {list:?}");
     println!();
 
-    SandstormCommandType::GetBufferSize.write(&mut writer).await.expect("Write failed");
-    writer.flush().await.expect("Flush failed");
-    let resp = SandstormCommandType::read(&mut reader).await.expect("Read failed");
+    GetBufferSizeRequest.write(writer).await?;
+    let resp = SandstormCommandType::read(reader).await?;
     if resp != SandstormCommandType::GetBufferSize {
         panic!("Server did not respond with GetBufferSize!!");
     }
-    let bufsize = reader.read_u32().await.expect("Read failed");
+    let bufsize = GetBufferSizeResponse::read(reader).await?.0;
     println!("The current buffer size is {bufsize}");
     println!();
 
     println!("Setting buffer size to 1234");
-    SandstormCommandType::SetBufferSize.write(&mut writer).await.expect("Write failed");
-    writer.write_u32(1234).await.expect("Write failed");
-    writer.flush().await.expect("Flush failed");
-    let resp = SandstormCommandType::read(&mut reader).await.expect("Read failed");
+    SetBufferSizeRequest(1234).write(writer).await?;
+    let resp = SandstormCommandType::read(reader).await?;
     if resp != SandstormCommandType::SetBufferSize {
         panic!("Server did not respond with SetBufferSize!!");
     }
-    let status = bool::read(&mut reader).await.expect("Read failed");
+    let status = SetBufferSizeResponse::read(reader).await?.0;
     println!("Set buffer size status: {status}");
     println!();
 
     println!("Setting buffer size to 0");
-    SandstormCommandType::SetBufferSize.write(&mut writer).await.expect("Write failed");
-    writer.write_u32(0).await.expect("Write failed");
-    writer.flush().await.expect("Flush failed");
-    let resp = SandstormCommandType::read(&mut reader).await.expect("Read failed");
+    SetBufferSizeRequest(0).write(writer).await?;
+    let resp = SandstormCommandType::read(reader).await?;
     if resp != SandstormCommandType::SetBufferSize {
         panic!("Server did not respond with SetBufferSize!!");
     }
-    let status = bool::read(&mut reader).await.expect("Read failed");
+    let status = SetBufferSizeResponse::read(reader).await?.0;
     println!("Set buffer size status: {status}");
     println!();
 
-    SandstormCommandType::GetBufferSize.write(&mut writer).await.expect("Write failed");
-    writer.flush().await.expect("Flush failed");
-    let resp = SandstormCommandType::read(&mut reader).await.expect("Read failed");
+    GetBufferSizeRequest.write(writer).await?;
+    let resp = SandstormCommandType::read(reader).await?;
     if resp != SandstormCommandType::GetBufferSize {
         panic!("Server did not respond with GetBufferSize!!");
     }
-    let bufsize = reader.read_u32().await.expect("Read failed");
+    let bufsize = GetBufferSizeResponse::read(reader).await?.0;
     println!("The current buffer size is {bufsize}");
     println!();
 
     println!("--------------------------------------------------------------------------------");
 
-    SandstormCommandType::ListUsers.write(&mut writer).await.expect("Write failed");
-    writer.flush().await.expect("Flush failed");
-    let resp = SandstormCommandType::read(&mut reader).await.expect("Read failed");
+    ListUsersRequest.write(writer).await?;
+    let resp = SandstormCommandType::read(reader).await?;
     if resp != SandstormCommandType::ListUsers {
         panic!("Server did not respond with ListUsers!!");
     }
-    let list = <Vec<(String, UserRole)> as ByteRead>::read(&mut reader).await.expect("Read failed");
+    let list = ListUsersResponse::read(reader).await?.0;
     println!("User list: {list:?}");
     println!();
 
-    SandstormCommandType::AddUser.write(&mut writer).await.expect("Write failed");
-    (SmallWriteString("marcelo"), SmallWriteString("machelo"), UserRole::Regular).write(&mut writer).await.expect("Write failed");
-    writer.flush().await.expect("Flush failed");
-    let resp = SandstormCommandType::read(&mut reader).await.expect("Read failed");
+    AddUserRequestRef("marcelo", "machelo", UserRole::Regular).write(writer).await?;
+    let resp = SandstormCommandType::read(reader).await?;
     if resp != SandstormCommandType::AddUser {
         panic!("Server did not respond with AddUser!!");
     }
-    let status = AddUserResponse::read(&mut reader).await.expect("Read failed");
+    let status = AddUserResponse::read(reader).await?;
     println!("Add user result: {status:?}");
     println!();
 
-    SandstormCommandType::ListUsers.write(&mut writer).await.expect("Write failed");
-    writer.flush().await.expect("Flush failed");
-    let resp = SandstormCommandType::read(&mut reader).await.expect("Read failed");
+    ListUsersRequest.write(writer).await?;
+    let resp = SandstormCommandType::read(reader).await?;
     if resp != SandstormCommandType::ListUsers {
         panic!("Server did not respond with ListUsers!!");
     }
-    let list = <Vec<(String, UserRole)> as ByteRead>::read(&mut reader).await.expect("Read failed");
+    let list = ListUsersResponse::read(reader).await?.0;
     println!("User list: {list:?}");
     println!();
 
-    SandstormCommandType::UpdateUser.write(&mut writer).await.expect("Write failed");
-    (SmallWriteString("marcelo"), None::<SmallWriteString>, Some(UserRole::Admin)).write(&mut writer).await.expect("Write failed");
-    writer.flush().await.expect("Flush failed");
-    let resp = SandstormCommandType::read(&mut reader).await.expect("Read failed");
+    UpdateUserRequestRef("marcelo", None, Some(UserRole::Admin)).write(writer).await?;
+    let resp = SandstormCommandType::read(reader).await?;
     if resp != SandstormCommandType::UpdateUser {
         panic!("Server did not respond with UpdateUser!!");
     }
-    let status = UpdateUserResponse::read(&mut reader).await.expect("Read failed");
+    let status = UpdateUserResponse::read(reader).await?;
     println!("Add update result: {status:?}");
     println!();
 
-    SandstormCommandType::ListUsers.write(&mut writer).await.expect("Write failed");
-    writer.flush().await.expect("Flush failed");
-    let resp = SandstormCommandType::read(&mut reader).await.expect("Read failed");
+    ListUsersRequest.write(writer).await?;
+    let resp = SandstormCommandType::read(reader).await?;
     if resp != SandstormCommandType::ListUsers {
         panic!("Server did not respond with ListUsers!!");
     }
-    let list = <Vec<(String, UserRole)> as ByteRead>::read(&mut reader).await.expect("Read failed");
+    let list = ListUsersResponse::read(reader).await?.0;
     println!("User list: {list:?}");
     println!();
 
-    SandstormCommandType::UpdateUser.write(&mut writer).await.expect("Write failed");
-    (SmallWriteString("marcelo"), Some(SmallWriteString("jajas!!")), None::<UserRole>).write(&mut writer).await.expect("Write failed");
-    writer.flush().await.expect("Flush failed");
-    let resp = SandstormCommandType::read(&mut reader).await.expect("Read failed");
+    UpdateUserRequestRef("marcelo", Some("jajas!!"), None).write(writer).await?;
+    let resp = SandstormCommandType::read(reader).await?;
     if resp != SandstormCommandType::UpdateUser {
         panic!("Server did not respond with UpdateUser!!");
     }
-    let status = UpdateUserResponse::read(&mut reader).await.expect("Read failed");
+    let status = UpdateUserResponse::read(reader).await?;
     println!("Add update result: {status:?}");
     println!();
 
-    SandstormCommandType::ListUsers.write(&mut writer).await.expect("Write failed");
-    writer.flush().await.expect("Flush failed");
-    let resp = SandstormCommandType::read(&mut reader).await.expect("Read failed");
+    ListUsersRequest.write(writer).await?;
+    let resp = SandstormCommandType::read(reader).await?;
     if resp != SandstormCommandType::ListUsers {
         panic!("Server did not respond with ListUsers!!");
     }
-    let list = <Vec<(String, UserRole)> as ByteRead>::read(&mut reader).await.expect("Read failed");
+    let list = ListUsersResponse::read(reader).await?.0;
     println!("User list: {list:?}");
     println!();
 
-    SandstormCommandType::DeleteUser.write(&mut writer).await.expect("Write failed");
-    SmallWriteString("marcelo").write(&mut writer).await.expect("Write failed");
-    writer.flush().await.expect("Flush failed");
-    let resp = SandstormCommandType::read(&mut reader).await.expect("Read failed");
+    DeleteUserRequestRef("marcelo").write(writer).await?;
+    let resp = SandstormCommandType::read(reader).await?;
     if resp != SandstormCommandType::DeleteUser {
         panic!("Server did not respond with DeleteUser!!");
     }
-    let status = DeleteUserResponse::read(&mut reader).await.expect("Read failed");
+    let status = DeleteUserResponse::read(reader).await?;
     println!("Add delete result: {status:?}");
     println!();
 
-    SandstormCommandType::ListUsers.write(&mut writer).await.expect("Write failed");
-    writer.flush().await.expect("Flush failed");
-    let resp = SandstormCommandType::read(&mut reader).await.expect("Read failed");
+    ListUsersRequest.write(writer).await?;
+    let resp = SandstormCommandType::read(reader).await?;
     if resp != SandstormCommandType::ListUsers {
         panic!("Server did not respond with ListUsers!!");
     }
-    let list = <Vec<(String, UserRole)> as ByteRead>::read(&mut reader).await.expect("Read failed");
+    let list = ListUsersResponse::read(reader).await?.0;
     println!("User list: {list:?}");
     println!();
 
@@ -254,202 +225,172 @@ async fn main() {
 
 
 
-    SandstormCommandType::ListSocks5Sockets.write(&mut writer).await.expect("Write failed");
-    writer.flush().await.expect("Flush failed");
-    let resp = SandstormCommandType::read(&mut reader).await.expect("Read failed");
+    ListSocks5SocketsRequest.write(writer).await?;
+    let resp = SandstormCommandType::read(reader).await?;
     if resp != SandstormCommandType::ListSocks5Sockets {
         panic!("Server did not respond with ListSocks5Sockets!!");
     }
-    let list = <Vec<SocketAddr> as ByteRead>::read(&mut reader).await.expect("Read failed");
+    let list = ListSocks5SocketsResponse::read(reader).await?.0;
     println!("Socket list: {list:?}");
     println!();
 
-    SandstormCommandType::AddSocks5Socket.write(&mut writer).await.expect("Write failed");
-    SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 1234)).write(&mut writer).await.expect("Write failed");
-    writer.flush().await.expect("Flush failed");
-    let resp = SandstormCommandType::read(&mut reader).await.expect("Read failed");
+    AddSocks5SocketRequest(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 1234))).write(writer).await?;
+    let resp = SandstormCommandType::read(reader).await?;
     if resp != SandstormCommandType::AddSocks5Socket {
         panic!("Server did not respond with AddSocks5Socket!!");
     }
-    let result = <Result<(), io::Error> as ByteRead>::read(&mut reader).await.expect("Read failed");
+    let result = AddSocks5SocketResponse::read(reader).await?.0;
     println!("Add socket list: {result:?}");
     println!();
 
-    SandstormCommandType::ListSocks5Sockets.write(&mut writer).await.expect("Write failed");
-    writer.flush().await.expect("Flush failed");
-    let resp = SandstormCommandType::read(&mut reader).await.expect("Read failed");
+    ListSocks5SocketsRequest.write(writer).await?;
+    let resp = SandstormCommandType::read(reader).await?;
     if resp != SandstormCommandType::ListSocks5Sockets {
         panic!("Server did not respond with ListSocks5Sockets!!");
     }
-    let list = <Vec<SocketAddr> as ByteRead>::read(&mut reader).await.expect("Read failed");
+    let list = ListSocks5SocketsResponse::read(reader).await?.0;
     println!("Socket list: {list:?}");
     println!();
 
-    SandstormCommandType::RemoveSocks5Socket.write(&mut writer).await.expect("Write failed");
-    SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 1235)).write(&mut writer).await.expect("Write failed");
-    writer.flush().await.expect("Flush failed");
-    let resp = SandstormCommandType::read(&mut reader).await.expect("Read failed");
+    RemoveSocks5SocketRequest(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 1235))).write(writer).await?;
+    let resp = SandstormCommandType::read(reader).await?;
     if resp != SandstormCommandType::RemoveSocks5Socket {
         panic!("Server did not respond with RemoveSocks5Socket!!");
     }
-    let result = reader.read_u8().await.expect("Read failed");
-    println!("Remove socket list: {}", if result == 0 {"OK"} else {"Not found"});
+    let result = RemoveSocks5SocketResponse::read(reader).await?.0;
+    println!("Remove socket list: {result:?}");
     println!();
 
-    SandstormCommandType::RemoveSocks5Socket.write(&mut writer).await.expect("Write failed");
-    SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 1234)).write(&mut writer).await.expect("Write failed");
-    writer.flush().await.expect("Flush failed");
-    let resp = SandstormCommandType::read(&mut reader).await.expect("Read failed");
+    RemoveSocks5SocketRequest(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 1234))).write(writer).await?;
+    let resp = SandstormCommandType::read(reader).await?;
     if resp != SandstormCommandType::RemoveSocks5Socket {
         panic!("Server did not respond with RemoveSocks5Socket!!");
     }
-    let result = reader.read_u8().await.expect("Read failed");
-    println!("Remove socket list: {}", if result == 0 {"OK"} else {"Not found"});
+    let result = RemoveSocks5SocketResponse::read(reader).await?.0;
+    println!("Remove socket list: {result:?}");
     println!();
 
-    SandstormCommandType::RemoveSocks5Socket.write(&mut writer).await.expect("Write failed");
-    SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 1234)).write(&mut writer).await.expect("Write failed");
-    writer.flush().await.expect("Flush failed");
-    let resp = SandstormCommandType::read(&mut reader).await.expect("Read failed");
+    RemoveSocks5SocketRequest(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 1234))).write(writer).await?;
+    let resp = SandstormCommandType::read(reader).await?;
     if resp != SandstormCommandType::RemoveSocks5Socket {
         panic!("Server did not respond with RemoveSocks5Socket!!");
     }
-    let result = reader.read_u8().await.expect("Read failed");
-    println!("Remove socket list: {}", if result == 0 {"OK"} else {"Not found"});
+    let result = RemoveSocks5SocketResponse::read(reader).await?.0;
+    println!("Remove socket list: {result:?}");
     println!();
 
-    SandstormCommandType::ListSocks5Sockets.write(&mut writer).await.expect("Write failed");
-    writer.flush().await.expect("Flush failed");
-    let resp = SandstormCommandType::read(&mut reader).await.expect("Read failed");
+    ListSocks5SocketsRequest.write(writer).await?;
+    let resp = SandstormCommandType::read(reader).await?;
     if resp != SandstormCommandType::ListSocks5Sockets {
         panic!("Server did not respond with ListSocks5Sockets!!");
     }
-    let list = <Vec<SocketAddr> as ByteRead>::read(&mut reader).await.expect("Read failed");
+    let list = ListSocks5SocketsResponse::read(reader).await?.0;
     println!("Socket list: {list:?}");
+    println!();
 
 
 
 
 
-    SandstormCommandType::ListSandstormSockets.write(&mut writer).await.expect("Write failed");
-    writer.flush().await.expect("Flush failed");
-    let resp = SandstormCommandType::read(&mut reader).await.expect("Read failed");
+    ListSandstormSocketsRequest.write(writer).await?;
+    let resp = SandstormCommandType::read(reader).await?;
     if resp != SandstormCommandType::ListSandstormSockets {
         panic!("Server did not respond with ListSandstormSockets!!");
     }
-    let list = <Vec<SocketAddr> as ByteRead>::read(&mut reader).await.expect("Read failed");
+    let list = ListSandstormSocketsResponse::read(reader).await?.0;
     println!("Sandstorm socket list: {list:?}");
     println!();
 
-    SandstormCommandType::AddSandstormSocket.write(&mut writer).await.expect("Write failed");
-    SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 1234)).write(&mut writer).await.expect("Write failed");
-    writer.flush().await.expect("Flush failed");
-    let resp = SandstormCommandType::read(&mut reader).await.expect("Read failed");
+    AddSandstormSocketRequest(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 1234))).write(writer).await?;
+    let resp = SandstormCommandType::read(reader).await?;
     if resp != SandstormCommandType::AddSandstormSocket {
         panic!("Server did not respond with AddSandstormSocket!!");
     }
-    let result = <Result<(), io::Error> as ByteRead>::read(&mut reader).await.expect("Read failed");
+    let result = AddSandstormSocketResponse::read(reader).await?.0;
     println!("Add sandstorm socket list: {result:?}");
     println!();
 
-    SandstormCommandType::ListSandstormSockets.write(&mut writer).await.expect("Write failed");
-    writer.flush().await.expect("Flush failed");
-    let resp = SandstormCommandType::read(&mut reader).await.expect("Read failed");
+    ListSandstormSocketsRequest.write(writer).await?;
+    let resp = SandstormCommandType::read(reader).await?;
     if resp != SandstormCommandType::ListSandstormSockets {
         panic!("Server did not respond with ListSandstormSockets!!");
     }
-    let list = <Vec<SocketAddr> as ByteRead>::read(&mut reader).await.expect("Read failed");
+    let list = ListSandstormSocketsResponse::read(reader).await?.0;
     println!("Sandstorm socket list: {list:?}");
     println!();
 
-    SandstormCommandType::RemoveSandstormSocket.write(&mut writer).await.expect("Write failed");
-    SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 1235)).write(&mut writer).await.expect("Write failed");
-    writer.flush().await.expect("Flush failed");
-    let resp = SandstormCommandType::read(&mut reader).await.expect("Read failed");
+    RemoveSandstormSocketRequest(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 1235))).write(writer).await?;
+    let resp = SandstormCommandType::read(reader).await?;
     if resp != SandstormCommandType::RemoveSandstormSocket {
         panic!("Server did not respond with RemoveSandstormSocket!!");
     }
-    let result = reader.read_u8().await.expect("Read failed");
-    println!("Remove sandstorm socket list: {}", if result == 0 {"OK"} else {"Not found"});
+    let result = RemoveSandstormSocketResponse::read(reader).await?.0;
+    println!("Remove sandstorm socket list: {result:?}");
     println!();
 
-    SandstormCommandType::RemoveSandstormSocket.write(&mut writer).await.expect("Write failed");
-    SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 1234)).write(&mut writer).await.expect("Write failed");
-    writer.flush().await.expect("Flush failed");
-    let resp = SandstormCommandType::read(&mut reader).await.expect("Read failed");
+    RemoveSandstormSocketRequest(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 1234))).write(writer).await?;
+    let resp = SandstormCommandType::read(reader).await?;
     if resp != SandstormCommandType::RemoveSandstormSocket {
         panic!("Server did not respond with RemoveSandstormSocket!!");
     }
-    let result = reader.read_u8().await.expect("Read failed");
-    println!("Remove sandstorm socket list: {}", if result == 0 {"OK"} else {"Not found"});
+    let result = RemoveSandstormSocketResponse::read(reader).await?.0;
+    println!("Remove sandstorm socket list: {result:?}");
     println!();
 
-    SandstormCommandType::RemoveSandstormSocket.write(&mut writer).await.expect("Write failed");
-    SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 1234)).write(&mut writer).await.expect("Write failed");
-    writer.flush().await.expect("Flush failed");
-    let resp = SandstormCommandType::read(&mut reader).await.expect("Read failed");
+    RemoveSandstormSocketRequest(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 1234))).write(writer).await?;
+    let resp = SandstormCommandType::read(reader).await?;
     if resp != SandstormCommandType::RemoveSandstormSocket {
         panic!("Server did not respond with RemoveSandstormSocket!!");
     }
-    let result = reader.read_u8().await.expect("Read failed");
-    println!("Remove sandstorm socket list: {}", if result == 0 {"OK"} else {"Not found"});
+    let result = RemoveSandstormSocketResponse::read(reader).await?.0;
+    println!("Remove sandstorm socket list: {result:?}");
     println!();
 
-    SandstormCommandType::ListSandstormSockets.write(&mut writer).await.expect("Write failed");
-    writer.flush().await.expect("Flush failed");
-    let resp = SandstormCommandType::read(&mut reader).await.expect("Read failed");
+    ListSandstormSocketsRequest.write(writer).await?;
+    let resp = SandstormCommandType::read(reader).await?;
     if resp != SandstormCommandType::ListSandstormSockets {
         panic!("Server did not respond with ListSandstormSockets!!");
     }
-    let list = <Vec<SocketAddr> as ByteRead>::read(&mut reader).await.expect("Read failed");
-    println!("Socket sandstorm list: {list:?}");
+    let list = ListSandstormSocketsResponse::read(reader).await?.0;
+    println!("Sandstorm socket list: {list:?}");
     println!();
 
 
 
 
     println!("Disabling event stream (even though it's not enabled)");
-    SandstormCommandType::LogEventConfig.write(&mut writer).await.expect("Write failed");
-    false.write(&mut writer).await.expect("Write failed");
-    writer.flush().await.expect("Flush failed");
-    let resp = SandstormCommandType::read(&mut reader).await.expect("Read failed");
-    if resp != SandstormCommandType::LogEventConfig {
-        panic!("Server did not respond with LogEventConfig!!");
+    EventStreamConfigRequest(false).write(writer).await?;
+    let resp = SandstormCommandType::read(reader).await?;
+    if resp != SandstormCommandType::EventStreamConfig {
+        panic!("Server did not respond with EventStreamConfig!!");
     }
-    let status = reader.read_u8().await.expect("Read failed");
-    if status != 0 {
-        panic!("Failed to enable metrics! Server responded with status {status}!");
-    }
-    println!("Event stream remains disabled.");
+    let response = EventStreamConfigResponse::read(reader).await?;
+    println!("Event stream response: {response:?}");
     println!();
 
 
 
 
     println!("Turning on AuthMethod NoAuth");
-    SandstormCommandType::ToggleAuthMethod.write(&mut writer).await.expect("Write failed");
-    AuthMethod::NoAuth.write(&mut writer).await.expect("Write failed");
-    true.write(&mut writer).await.expect("Write failed");
-    writer.flush().await.expect("Flush failed");
-    let resp = SandstormCommandType::read(&mut reader).await.expect("Read failed");
+    ToggleAuthMethodRequest(AuthMethod::NoAuth, true).write(writer).await?;
+    let resp = SandstormCommandType::read(reader).await?;
     if resp != SandstormCommandType::ToggleAuthMethod {
         panic!("Server did not respond with ToggleAuthMethod!!");
     }
-    let status = bool::read(&mut reader).await.expect("Read failed");
-    println!("{}", if status { "Success!" } else { "Failed 💀💀" });
+    let status = ToggleAuthMethodResponse::read(reader).await?.0;
+    println!("Toggle auth method status: {status}");
     println!();
 
 
 
 
     println!("Getting current metrics");
-    SandstormCommandType::RequestCurrentMetrics.write(&mut writer).await.expect("Write failed");
-    writer.flush().await.expect("Flush failed");
-    let resp = SandstormCommandType::read(&mut reader).await.expect("Read failed");
+    CurrentMetricsRequest.write(writer).await?;
+    let resp = SandstormCommandType::read(reader).await?;
     if resp != SandstormCommandType::RequestCurrentMetrics {
         panic!("Server did not respond with RequestCurrentMetrics!!");
     }
-    let result = <Option<Metrics> as ByteRead>::read(&mut reader).await.expect("Read failed");
+    let result = CurrentMetricsResponse::read(reader).await?.0;
     println!("Current metrics: {result:?}");
     println!();
 
@@ -464,30 +405,32 @@ async fn main() {
         stdin().read_line(&mut linebuf).expect("Read line from stdin failed");
         if linebuf.trim().eq_ignore_ascii_case("y") {
             println!("Sending shutdown request");
-            SandstormCommandType::Shutdown.write(&mut writer).await.expect("Write failed");
-            writer.flush().await.expect("Flush failed");
-            let resp = SandstormCommandType::read(&mut reader).await.expect("Read failed");
+            ShutdownRequest.write(writer).await?;
+            let resp = match SandstormCommandType::read(reader).await {
+                Ok(r) => r,
+                Err(error) if error.kind() == ErrorKind::UnexpectedEof => return Ok(()),
+                Err(error) => return Err(error),
+            };
+
             if resp != SandstormCommandType::Shutdown {
                 panic!("Server did not respond with Shutdown!!");
             }
         }
-        println!("Goodbye!");
-        return;
+        return Ok(());
     }
 
     println!("Enabling event stream");
-    SandstormCommandType::LogEventConfig.write(&mut writer).await.expect("Write failed");
-    true.write(&mut writer).await.expect("Write failed");
-    writer.flush().await.expect("Flush failed");
-    let resp = SandstormCommandType::read(&mut reader).await.expect("Read failed");
-    if resp != SandstormCommandType::LogEventConfig {
-        panic!("Server did not respond with LogEventConfig!!");
+    EventStreamConfigRequest(true).write(writer).await?;
+    let resp = SandstormCommandType::read(reader).await?;
+    if resp != SandstormCommandType::EventStreamConfig {
+        panic!("Server did not respond with EventStreamConfig!! {resp:?}");
     }
-    let status = reader.read_u8().await.expect("Read failed");
-    if status != 1 {
-        panic!("Failed to enable metrics! Server responded with status {status}!");
-    }
-    let metrics = Metrics::read(&mut reader).await.expect("Read failed");
+    let response = EventStreamConfigResponse::read(reader).await?;
+    let metrics = if let EventStreamConfigResponse::Enabled(m) = response {
+        m
+    } else {
+        panic!("Failed to enable metrics! Server responded with {response:?}!");
+    };
     println!("Current metrics: {metrics:?}");
     println!();
 
@@ -500,12 +443,12 @@ async fn main() {
     };
 
     loop {
-        let resp = SandstormCommandType::read(&mut reader).await.expect("Read failed");
-        if resp != SandstormCommandType::LogEventStream {
-            panic!("Server did not respond with LogEventStream!!");
+        let resp = SandstormCommandType::read(reader).await?;
+        if resp != SandstormCommandType::EventStream {
+            panic!("Server did not respond with EventStream!!");
         }
 
-        let event = LogEvent::read(&mut reader).await.expect("Read failed");
+        let event = EventStreamResponse::read(reader).await?.0;
 
         let t = OffsetDateTime::from_unix_timestamp(event.timestamp)
                     .map(|t| t.to_offset(utc_offset))
