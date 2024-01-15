@@ -1,6 +1,6 @@
 use std::{env, process::exit};
 
-use crate::args::{ArgumentsRequest, get_version_string, get_help_string};
+use crate::args::{get_help_string, get_version_string, ArgumentsRequest};
 
 mod args;
 mod utils;

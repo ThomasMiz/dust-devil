@@ -1,7 +1,8 @@
 use std::{
-    future::{poll_fn, Future},
+    future::{self, Future},
     io::{self, ErrorKind},
     net::SocketAddr,
+    ops::DerefMut,
     pin::Pin,
     sync::Arc,
     task::Poll,
@@ -28,51 +29,75 @@ use crate::context::SandstormContext;
 
 use super::{error_handling::ToIoResult, messaging::ResponseNotification};
 
-/// The maximum amount requests for a specific message type (e.g. "list socks5 sockets") that can
-/// pile up before the response handler starts waiting on them to be completed synchronously.
+/// The maximum amount requests for a specific stream type (e.g. "socks5 sockets requests") that
+/// can pile up before the response handler starts waiting on them to be completed synchronously.
 ///
 /// This doesn't need to be a high value; why would anyone be asking to list/add/remove a socks5 or
 /// sandstorm sockets over and over again repeatedly without delay? 4 is more than enough.
 const RECEIVER_BUFFER_SIZE: usize = 4;
 
-/// Waits for the first first receiver on the vector to receive a value, or stalls indefinitely if
-/// the vector is empty. Upon completion, the receiver in question is removed from the vector.
-async fn get_first<T>(receivers: &mut Vec<oneshot::Receiver<T>>) -> Result<T, oneshot::error::RecvError> {
-    poll_fn(|cx| {
-        if let Some(rx) = receivers.first_mut() {
-            if let Poll::Ready(result) = Pin::new(rx).poll(cx) {
-                receivers.remove(0);
-                return Poll::Ready(result);
-            }
-        }
-
-        Poll::Pending
-    })
-    .await
+enum SocketRequestReceiver {
+    List(oneshot::Receiver<Vec<SocketAddr>>),
+    Add(oneshot::Receiver<Result<(), io::Error>>),
+    Remove(oneshot::Receiver<RemoveSocketResponse>),
 }
 
-/// Same as get_first(), but instead of a plain receiver, it's an optional receiver. If a value is
-/// None, it gets returned immediately.
-async fn get_first_optional<T>(receivers: &mut Vec<Option<oneshot::Receiver<T>>>) -> Result<Option<T>, oneshot::error::RecvError> {
-    poll_fn(|cx| {
-        if let Some(rx) = receivers.first_mut() {
-            let rx = match rx {
-                Some(r) => r,
-                None => {
-                    receivers.remove(0);
-                    return Poll::Ready(Ok(None));
-                }
-            };
+enum SocketRequestResult {
+    List(Vec<SocketAddr>),
+    Add(Result<(), io::Error>),
+    Remove(RemoveSocketResponse),
+}
 
-            if let Poll::Ready(result) = Pin::new(rx).poll(cx) {
-                receivers.remove(0);
-                return Poll::Ready(result.map(|v| Some(v)));
-            }
+/// Awaiting a SocketRequestReceiver will return a SocketRequestResult with the result of calling
+/// `.await` on the oneshot::Receiver contaiend within the enum variant of the same name.
+impl Future for SocketRequestReceiver {
+    type Output = Result<SocketRequestResult, oneshot::error::RecvError>;
+    fn poll(mut self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
+        match self.deref_mut() {
+            Self::List(receiver) => Pin::new(receiver).poll(cx).map(|r| r.map(SocketRequestResult::List)),
+            Self::Add(receiver) => Pin::new(receiver).poll(cx).map(|r| r.map(SocketRequestResult::Add)),
+            Self::Remove(receiver) => Pin::new(receiver).poll(cx).map(|r| r.map(SocketRequestResult::Remove)),
         }
+    }
+}
 
-        Poll::Pending
-    })
-    .await
+/// If the vector is empty, returns a future that stalls indefinitely. Otherwise, waits for the
+/// first future in the vector to complete, removes it from the vector, and returns its result.
+async fn get_first_if<F: Future<Output = R> + Unpin, R>(receivers: &mut Vec<F>) -> R {
+    if let Some(receiver) = receivers.first_mut() {
+        let result = receiver.await;
+        receivers.remove(0);
+        result
+    } else {
+        future::pending().await
+    }
+}
+
+/// If the vector is empty, returns a future that stalls indefinitely. If the first element of the
+/// vector is None, completes with Ok(None) immediately. If the first element of the vector is
+/// Some(receiver), then waits for the receiver to receive a value (if it hasn't already done so)
+/// and completes with Ok(Some()) containing said received value. Whenever a None is found in the
+/// vector or a receiver completes, it gets taken out of the vector.
+///
+/// This is a wrapper function that simplifies processing receivers in a vector, in the order in
+/// which they are in the vector.
+async fn get_first_optional<T>(receivers: &mut Vec<Option<oneshot::Receiver<T>>>) -> Result<Option<T>, oneshot::error::RecvError> {
+    let maybe_receiver = match receivers.first_mut() {
+        Some(r) => r,
+        None => future::pending().await,
+    };
+
+    match maybe_receiver {
+        Some(receiver) => {
+            let result = receiver.await.map(|v| Some(v));
+            receivers.remove(0);
+            result
+        }
+        None => {
+            receivers.remove(0);
+            Ok(None)
+        }
+    }
 }
 
 /// If `maybe_receiver` is `Some(receiver)`, then this function returns the same as calling
@@ -84,7 +109,7 @@ async fn recv_if_some<T: Clone>(maybe_receiver: &mut Option<broadcast::Receiver<
     if let Some(receiver) = maybe_receiver {
         receiver.recv().await
     } else {
-        poll_fn(|_| Poll::Pending).await
+        future::pending().await
     }
 }
 
@@ -118,23 +143,14 @@ async fn stall_if_empty<W>(writer: &BufWriter<W>)
 where
     W: AsyncWrite + Unpin,
 {
-    poll_fn(|_| {
-        if writer.buffer().is_empty() {
-            Poll::Pending
-        } else {
-            Poll::Ready(())
-        }
-    })
-    .await;
+    if writer.buffer().is_empty() {
+        future::pending().await
+    }
 }
 
 struct ResponseHandlerState {
-    list_socks_receivers: Vec<oneshot::Receiver<Vec<SocketAddr>>>,
-    add_socks_receivers: Vec<oneshot::Receiver<Result<(), io::Error>>>,
-    remove_socks_receivers: Vec<oneshot::Receiver<RemoveSocketResponse>>,
-    list_sandstorm_receivers: Vec<oneshot::Receiver<Vec<SocketAddr>>>,
-    add_sandstorm_receivers: Vec<oneshot::Receiver<Result<(), io::Error>>>,
-    remove_sandstorm_receivers: Vec<oneshot::Receiver<RemoveSocketResponse>>,
+    socks_receivers: Vec<SocketRequestReceiver>,
+    sandstorm_receivers: Vec<SocketRequestReceiver>,
     metrics_receivers: Vec<Option<oneshot::Receiver<Metrics>>>,
     event_stream_receiver: Option<broadcast::Receiver<Arc<Event>>>,
 }
@@ -148,12 +164,8 @@ where
     W: AsyncWrite + Unpin,
 {
     let mut handler_state = ResponseHandlerState {
-        list_socks_receivers: Vec::with_capacity(RECEIVER_BUFFER_SIZE),
-        add_socks_receivers: Vec::with_capacity(RECEIVER_BUFFER_SIZE),
-        remove_socks_receivers: Vec::with_capacity(RECEIVER_BUFFER_SIZE),
-        list_sandstorm_receivers: Vec::with_capacity(RECEIVER_BUFFER_SIZE),
-        add_sandstorm_receivers: Vec::with_capacity(RECEIVER_BUFFER_SIZE),
-        remove_sandstorm_receivers: Vec::with_capacity(RECEIVER_BUFFER_SIZE),
+        socks_receivers: Vec::with_capacity(RECEIVER_BUFFER_SIZE),
+        sandstorm_receivers: Vec::with_capacity(RECEIVER_BUFFER_SIZE),
         metrics_receivers: Vec::with_capacity(RECEIVER_BUFFER_SIZE),
         event_stream_receiver: None,
     };
@@ -174,29 +186,13 @@ where
                     &mut handler_state
                 ).await?;
             }
-            sockets = get_first(&mut handler_state.list_socks_receivers) => {
-                let sockets = sockets.map_err_to_io()?;
-                ListSocks5SocketsResponse(sockets).write(writer).await?;
+            result = get_first_if(&mut handler_state.socks_receivers) => {
+                let socket_result = result.map_err_to_io()?;
+                handle_socks5_response(socket_result, writer).await?;
             }
-            result = get_first(&mut handler_state.add_socks_receivers) => {
-                let result = result.map_err_to_io()?;
-                AddSocks5SocketResponse(result).write(writer).await?;
-            }
-            result = get_first(&mut handler_state.remove_socks_receivers) => {
-                let result = result.map_err_to_io()?;
-                RemoveSocks5SocketResponse(result).write(writer).await?;
-            }
-            sockets = get_first(&mut handler_state.list_sandstorm_receivers) => {
-                let sockets = sockets.map_err_to_io()?;
-                ListSandstormSocketsResponse(sockets).write(writer).await?;
-            }
-            result = get_first(&mut handler_state.add_sandstorm_receivers) => {
-                let result = result.map_err_to_io()?;
-                AddSandstormSocketResponse(result).write(writer).await?;
-            }
-            result = get_first(&mut handler_state.remove_sandstorm_receivers) => {
-                let result = result.map_err_to_io()?;
-                RemoveSandstormSocketResponse(result).write(writer).await?;
+            result = get_first_if(&mut handler_state.sandstorm_receivers) => {
+                let socket_result = result.map_err_to_io()?;
+                handle_sandstorm_response(socket_result, writer).await?;
             }
             result = get_first_optional(&mut handler_state.metrics_receivers) => {
                 let result = result.map_err_to_io()?;
@@ -211,6 +207,28 @@ where
             }
             _ = stall_if_empty(writer) => writer.flush().await?,
         }
+    }
+}
+
+async fn handle_socks5_response<W>(socket_result: SocketRequestResult, writer: &mut W) -> Result<(), io::Error>
+where
+    W: AsyncWrite + Unpin + ?Sized,
+{
+    match socket_result {
+        SocketRequestResult::List(result) => ListSocks5SocketsResponse(result).write(writer).await,
+        SocketRequestResult::Add(result) => AddSocks5SocketResponse(result).write(writer).await,
+        SocketRequestResult::Remove(result) => RemoveSocks5SocketResponse(result).write(writer).await,
+    }
+}
+
+async fn handle_sandstorm_response<W>(socket_result: SocketRequestResult, writer: &mut W) -> Result<(), io::Error>
+where
+    W: AsyncWrite + Unpin + ?Sized,
+{
+    match socket_result {
+        SocketRequestResult::List(result) => ListSandstormSocketsResponse(result).write(writer).await,
+        SocketRequestResult::Add(result) => AddSandstormSocketResponse(result).write(writer).await,
+        SocketRequestResult::Remove(result) => RemoveSandstormSocketResponse(result).write(writer).await,
     }
 }
 
@@ -248,46 +266,46 @@ where
             result.write(writer).await?;
         }
         ResponseNotification::ListSocks5Sockets(receiver) => {
-            if handler_state.list_socks_receivers.len() == handler_state.list_socks_receivers.capacity() {
-                let sockets = handler_state.list_socks_receivers.remove(0).await.map_err_to_io()?;
-                ListSocks5SocketsResponse(sockets).write(writer).await?;
+            if handler_state.socks_receivers.len() == handler_state.socks_receivers.capacity() {
+                let result = handler_state.socks_receivers.remove(0).await.map_err_to_io()?;
+                handle_socks5_response(result, writer).await?;
             }
-            handler_state.list_socks_receivers.push(receiver);
+            handler_state.socks_receivers.push(SocketRequestReceiver::List(receiver));
         }
         ResponseNotification::AddSocks5Socket(receiver) => {
-            if handler_state.add_socks_receivers.len() == handler_state.add_socks_receivers.capacity() {
-                let result = handler_state.add_socks_receivers.remove(0).await.map_err_to_io()?;
-                AddSocks5SocketResponse(result).write(writer).await?;
+            if handler_state.socks_receivers.len() == handler_state.socks_receivers.capacity() {
+                let result = handler_state.socks_receivers.remove(0).await.map_err_to_io()?;
+                handle_socks5_response(result, writer).await?;
             }
-            handler_state.add_socks_receivers.push(receiver);
+            handler_state.socks_receivers.push(SocketRequestReceiver::Add(receiver));
         }
         ResponseNotification::RemoveSocks5Socket(receiver) => {
-            if handler_state.remove_socks_receivers.len() == handler_state.remove_socks_receivers.capacity() {
-                let result = handler_state.remove_socks_receivers.remove(0).await.map_err_to_io()?;
-                RemoveSocks5SocketResponse(result).write(writer).await?;
+            if handler_state.socks_receivers.len() == handler_state.socks_receivers.capacity() {
+                let result = handler_state.socks_receivers.remove(0).await.map_err_to_io()?;
+                handle_socks5_response(result, writer).await?;
             }
-            handler_state.remove_socks_receivers.push(receiver);
+            handler_state.socks_receivers.push(SocketRequestReceiver::Remove(receiver));
         }
         ResponseNotification::ListSandstormSockets(receiver) => {
-            if handler_state.list_sandstorm_receivers.len() == handler_state.list_sandstorm_receivers.capacity() {
-                let sockets = handler_state.list_sandstorm_receivers.remove(0).await.map_err_to_io()?;
-                ListSandstormSocketsResponse(sockets).write(writer).await?;
+            if handler_state.sandstorm_receivers.len() == handler_state.sandstorm_receivers.capacity() {
+                let result = handler_state.sandstorm_receivers.remove(0).await.map_err_to_io()?;
+                handle_sandstorm_response(result, writer).await?;
             }
-            handler_state.list_sandstorm_receivers.push(receiver);
+            handler_state.sandstorm_receivers.push(SocketRequestReceiver::List(receiver));
         }
         ResponseNotification::AddSandstormSocket(receiver) => {
-            if handler_state.add_sandstorm_receivers.len() == handler_state.add_sandstorm_receivers.capacity() {
-                let result = handler_state.add_sandstorm_receivers.remove(0).await.map_err_to_io()?;
-                AddSandstormSocketResponse(result).write(writer).await?;
+            if handler_state.sandstorm_receivers.len() == handler_state.sandstorm_receivers.capacity() {
+                let result = handler_state.sandstorm_receivers.remove(0).await.map_err_to_io()?;
+                handle_sandstorm_response(result, writer).await?;
             }
-            handler_state.add_sandstorm_receivers.push(receiver);
+            handler_state.sandstorm_receivers.push(SocketRequestReceiver::Add(receiver));
         }
         ResponseNotification::RemoveSandstormSocket(receiver) => {
-            if handler_state.remove_sandstorm_receivers.len() == handler_state.remove_sandstorm_receivers.capacity() {
-                let result = handler_state.remove_sandstorm_receivers.remove(0).await.map_err_to_io()?;
-                RemoveSandstormSocketResponse(result).write(writer).await?;
+            if handler_state.sandstorm_receivers.len() == handler_state.sandstorm_receivers.capacity() {
+                let result = handler_state.sandstorm_receivers.remove(0).await.map_err_to_io()?;
+                handle_sandstorm_response(result, writer).await?;
             }
-            handler_state.remove_sandstorm_receivers.push(receiver);
+            handler_state.sandstorm_receivers.push(SocketRequestReceiver::Remove(receiver));
         }
         ResponseNotification::ListUsers(snapshot) => {
             ListUsersResponse(snapshot).write(writer).await?;

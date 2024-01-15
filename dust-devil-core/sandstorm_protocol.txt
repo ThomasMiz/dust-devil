@@ -204,7 +204,7 @@ The following ATYPE/MTYPE values are possible:
         starts with an `u8` indicating the length of the list, followed by said amount of
         `(AuthMethod, bool)` tuples.
 
-- 0x0E Enable/Disable Authentication Method
+- 0x0E Toggle Authentication Method
     - Client-sent: Requests the server enables or disables an authentication method. The payload
         contains an `AuthMethod` and a `bool`, indicating the auth method and the desired state.
     - Server-sent: Indicates the result of the operation. The payload contains a single byte, a 1
@@ -245,3 +245,13 @@ sent separately. The response messages of each request don't need to be sent in 
 requested, as the client will be able to tell them apart by their MTYPE, but multiple requests of
 the same ATYPE must be answered in order, as the client would otherwise be unable to distinguish
 which response corresponds to which request.
+
+Additionally, if the client requested, for example, adding a socks5 socket and then listing all
+socks5 sockets, then it would be prudent for those requests to be processed in the same order, and
+for the responses to also come in the same other, even though these messages have different ATYPs.
+That's why the messages on each entry in the following list must be synchronized in this way:
+    - List Socks5 Sockets / Add Socks5 Socket / Remove Socks5 Socket
+    - List Sandstorm Sockets / Add Sandstorm Socket / Remove Sandstorm Socket
+    - List Users / Add User / Update User / Delete User
+    - Get Buffer Size / Set Buffer Size
+    - List Authentication Methods / Toggle Authentication Method
