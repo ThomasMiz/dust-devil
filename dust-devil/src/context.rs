@@ -165,12 +165,19 @@ macro_rules! log_socks_unsupported_command {
 
 #[macro_export]
 macro_rules! log_socks_selected_auth {
-    ($cx:expr, $auth_method:expr) => {
+    ($cx:expr, $maybe_auth_method:expr) => {
         if let Some(sender) = &$cx.log_sender {
-            sender.send(dust_devil_core::logging::EventData::ClientSelectedAuthMethod(
-                $cx.client_id,
-                $auth_method,
-            ));
+            match $maybe_auth_method {
+                Some(auth_method) => {
+                    sender.send(dust_devil_core::logging::EventData::ClientSelectedAuthMethod(
+                        $cx.client_id,
+                        auth_method,
+                    ));
+                }
+                None => {
+                    sender.send(dust_devil_core::logging::EventData::ClientNoAcceptableAuthMethod($cx.client_id));
+                }
+            }
         }
     };
 }
@@ -413,7 +420,7 @@ impl SandstormContext {
                 log!(self, EventData::UserUpdatedByManager(self.manager_id, username, role, has_password));
                 UpdateUserResponse::Ok
             }
-            Ok(None) => UpdateUserResponse::CannotRemoveOnlyAdmin,
+            Ok(None) => UpdateUserResponse::CannotDeleteOnlyAdmin,
             Err(()) => UpdateUserResponse::UserNotFound,
         }
     }
@@ -424,7 +431,7 @@ impl SandstormContext {
                 log!(self, EventData::UserDeletedByManager(self.manager_id, username, role));
                 DeleteUserResponse::Ok
             }
-            Ok(None) => DeleteUserResponse::CannotRemoveOnlyAdmin,
+            Ok(None) => DeleteUserResponse::CannotDeleteOnlyAdmin,
             Err(()) => DeleteUserResponse::UserNotFound,
         }
     }
@@ -443,7 +450,7 @@ impl SandstormContext {
         match auth_method {
             AuthMethod::NoAuth => self.state.no_auth_enabled.store(state, Ordering::Relaxed),
             AuthMethod::UsernameAndPassword => self.state.userpass_auth_enabled.store(state, Ordering::Relaxed),
-            _ => return false,
+            // _ => return false,
         }
 
         log!(self, EventData::AuthMethodToggledByManager(self.manager_id, auth_method, state));

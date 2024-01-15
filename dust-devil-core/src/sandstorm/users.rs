@@ -132,7 +132,7 @@ pub struct UpdateUserRequestRef<'a>(pub &'a str, pub Option<&'a str>, pub Option
 pub enum UpdateUserResponse {
     Ok = 0x00,
     UserNotFound = 0x01,
-    CannotRemoveOnlyAdmin = 0x02,
+    CannotDeleteOnlyAdmin = 0x02,
     NothingWasRequested = 0x03,
 }
 
@@ -147,7 +147,7 @@ impl U8ReprEnum for UpdateUserResponse {
         match value {
             0x00 => Some(Self::Ok),
             0x01 => Some(Self::UserNotFound),
-            0x02 => Some(Self::CannotRemoveOnlyAdmin),
+            0x02 => Some(Self::CannotDeleteOnlyAdmin),
             0x03 => Some(Self::NothingWasRequested),
             _ => None,
         }
@@ -215,7 +215,7 @@ pub struct DeleteUserRequestRef<'a>(pub &'a str);
 pub enum DeleteUserResponse {
     Ok = 0x00,
     UserNotFound = 0x01,
-    CannotRemoveOnlyAdmin = 0x02,
+    CannotDeleteOnlyAdmin = 0x02,
 }
 
 impl DeleteUserRequest {
@@ -229,7 +229,7 @@ impl U8ReprEnum for DeleteUserResponse {
         match value {
             0x00 => Some(Self::Ok),
             0x01 => Some(Self::UserNotFound),
-            0x02 => Some(Self::CannotRemoveOnlyAdmin),
+            0x02 => Some(Self::CannotDeleteOnlyAdmin),
             _ => None,
         }
     }

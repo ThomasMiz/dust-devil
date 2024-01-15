@@ -181,7 +181,7 @@ The following ATYPE/MTYPE values are possible:
         specifies:
             - 0x00 OK
             - 0x01 User not found
-            - 0x02 Cannot remove only admin
+            - 0x02 Cannot delete only admin
             - 0x03 Nothing was requested (if neither a password nor a role is specified)
 
 - 0x0C Delete User
@@ -195,7 +195,7 @@ The following ATYPE/MTYPE values are possible:
         specifies:
             - 0x00 OK
             - 0x01 User not found
-            - 0x02 Cannot remove only admin
+            - 0x02 Cannot delete only admin
 
 - 0x0D List Authentication Methods
     - Client-sent: Requests the server sends a list of supported authentication methods and whether

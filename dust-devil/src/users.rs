@@ -202,7 +202,7 @@ impl UserManager {
         T: AsyncWrite + Unpin + ?Sized,
     {
         let mut is_first = true;
-        let mut count = 0u64;
+        let mut count = 0;
         for ele in self.users.iter() {
             if !is_first {
                 writer.write_u8(b'\n').await?;
@@ -210,11 +210,7 @@ impl UserManager {
                 is_first = false;
             }
 
-            let role_char = match ele.role {
-                UserRole::Admin => ADMIN_PREFIX_CHAR as u8,
-                UserRole::Regular => REGULAR_PREFIX_CHAR as u8,
-            };
-            writer.write_u8(role_char).await?;
+            writer.write_u8(ele.role.into_role_char() as u8).await?;
 
             for &c in ele.key().as_bytes() {
                 if c == b'\\' || c == b':' {

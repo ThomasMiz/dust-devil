@@ -19,10 +19,19 @@ pub const DEFAULT_USER_USERNAME: &str = "admin";
 pub const DEFAULT_USER_PASSWORD: &str = "admin";
 
 #[repr(u8)]
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UserRole {
     Admin = 0x01,
     Regular = 0x02,
+}
+
+impl UserRole {
+    pub fn into_role_char(self) -> char {
+        match self {
+            Self::Admin => ADMIN_PREFIX_CHAR,
+            Self::Regular => REGULAR_PREFIX_CHAR,
+        }
+    }
 }
 
 impl U8ReprEnum for UserRole {

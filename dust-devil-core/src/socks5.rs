@@ -10,6 +10,7 @@ use crate::{
     u8_repr_enum::U8ReprEnum,
 };
 
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SocksRequestAddress {
     IPv4(Ipv4Addr),
     IPv6(Ipv6Addr),
@@ -84,12 +85,11 @@ impl ByteRead for SocksRequest {
 }
 
 #[repr(u8)]
-#[derive(Debug, PartialEq, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AuthMethod {
     NoAuth = 0x00,
     // GSSAPI = 0x01,
     UsernameAndPassword = 0x02,
-    NoAcceptableMethod = 0xFF,
 }
 
 impl U8ReprEnum for AuthMethod {
@@ -98,7 +98,6 @@ impl U8ReprEnum for AuthMethod {
             0x00 => Some(AuthMethod::NoAuth),
             // 0x01 => Some(AuthMethod::GSSAPI),
             0x02 => Some(AuthMethod::UsernameAndPassword),
-            0xFF => Some(AuthMethod::NoAcceptableMethod),
             _ => None,
         }
     }
@@ -128,7 +127,6 @@ impl std::fmt::Display for AuthMethod {
         match self {
             Self::NoAuth => write!(f, "noauth"),
             Self::UsernameAndPassword => write!(f, "userpass"),
-            Self::NoAcceptableMethod => write!(f, "unacceptable"),
         }
     }
 }

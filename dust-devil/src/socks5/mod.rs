@@ -3,7 +3,10 @@ use std::{
     net::{SocketAddr, SocketAddrV4, SocketAddrV6},
 };
 
-use dust_devil_core::socks5::{AuthMethod, SocksRequestAddress};
+use dust_devil_core::{
+    socks5::{AuthMethod, SocksRequestAddress},
+    u8_repr_enum::U8ReprEnum,
+};
 use tokio::{
     io::BufReader,
     net::{TcpSocket, TcpStream},
@@ -65,23 +68,23 @@ pub async fn handle_socks5(stream: TcpStream, mut context: ClientContext, cancel
 async fn handle_socks5_inner(mut stream: TcpStream, context: &mut ClientContext) -> Result<(), io::Error> {
     let (reader, mut writer) = stream.split();
     let mut reader = BufReader::with_capacity(context.buffer_size(), reader);
-    let auth_method = match parse_handshake(&mut reader).await {
+    let maybe_auth_method = match parse_handshake(&mut reader).await {
         Ok(handshake) => select_auth_method(context, &handshake.methods),
         Err(ParseHandshakeError::IO(error)) => return Err(error),
         Err(ParseHandshakeError::InvalidVersion(ver)) => {
             log_socks_unsupported_version!(context, ver);
-            send_handshake_response(&mut writer, AuthMethod::NoAcceptableMethod).await?;
+            send_handshake_response(&mut writer, None).await?;
             return Ok(());
         }
     };
 
-    log_socks_selected_auth!(context, auth_method);
-    send_handshake_response(&mut writer, auth_method).await?;
+    log_socks_selected_auth!(context, maybe_auth_method);
+    send_handshake_response(&mut writer, maybe_auth_method).await?;
 
-    let auth_status = match auth_method {
-        AuthMethod::NoAuth => true,
-        AuthMethod::UsernameAndPassword => handle_userpass_auth(&mut reader, &mut writer, context).await?,
-        _ => false,
+    let auth_status = match maybe_auth_method {
+        Some(AuthMethod::NoAuth) => true,
+        Some(AuthMethod::UsernameAndPassword) => handle_userpass_auth(&mut reader, &mut writer, context).await?,
+        None => false,
     };
 
     if !auth_status {
@@ -140,13 +143,13 @@ async fn handle_socks5_inner(mut stream: TcpStream, context: &mut ClientContext)
     copy::copy_bidirectional(&mut reader, &mut writer, &mut dst_reader, &mut dst_writer, context).await
 }
 
-fn select_auth_method(state: &ClientContext, methods: &[u8]) -> AuthMethod {
-    if state.is_noauth_enabled() && methods.contains(&(AuthMethod::NoAuth as u8)) {
-        AuthMethod::NoAuth
-    } else if state.is_userpass_enabled() && methods.contains(&(AuthMethod::UsernameAndPassword as u8)) {
-        AuthMethod::UsernameAndPassword
+fn select_auth_method(state: &ClientContext, methods: &[u8]) -> Option<AuthMethod> {
+    if state.is_noauth_enabled() && methods.contains(&AuthMethod::NoAuth.into_u8()) {
+        Some(AuthMethod::NoAuth)
+    } else if state.is_userpass_enabled() && methods.contains(&AuthMethod::UsernameAndPassword.into_u8()) {
+        Some(AuthMethod::UsernameAndPassword)
     } else {
-        AuthMethod::NoAcceptableMethod
+        None
     }
 }
 

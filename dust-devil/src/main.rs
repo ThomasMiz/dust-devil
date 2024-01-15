@@ -1,5 +1,7 @@
 use std::{env, process::exit};
 
+use crate::args::{get_help_string, get_version_string, ArgumentsRequest};
+
 mod args;
 mod context;
 mod logger;
@@ -10,15 +12,13 @@ mod socks5;
 mod users;
 mod utils;
 
-use args::*;
-
 #[cfg(test)]
 mod tests;
 
 fn main() {
     let arguments = match args::parse_arguments(env::args()) {
         Err(err) => {
-            eprintln!("{}\n\nType 'dust-devil --help' for a help menu", err);
+            eprintln!("{err}\n\nType 'dust-devil --help' for a help menu");
             exit(1);
         }
         Ok(arguments) => arguments,

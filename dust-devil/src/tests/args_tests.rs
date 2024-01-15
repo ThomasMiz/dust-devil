@@ -11,7 +11,7 @@ use crate::{
 };
 
 use crate::args::{
-    parse_arguments, ArgumentsError, ArgumentsRequest, AuthToggleErrorType, FileErrorType, ListenErrorType, NewUserErrorType,
+    parse_arguments, ArgumentsError, ArgumentsRequest, AuthToggleErrorType, FileErrorType, NewUserErrorType, SocketErrorType,
     StartupArguments, DEFAULT_SOCKS5_PORT,
 };
 
@@ -258,13 +258,13 @@ fn test_listen_unexpected_end() {
     let result = args("-l");
     assert_eq!(
         result,
-        Err(ArgumentsError::Socks5ListenError(ListenErrorType::UnexpectedEnd("-l".to_string())))
+        Err(ArgumentsError::Socks5ListenError(SocketErrorType::UnexpectedEnd("-l".to_string())))
     );
 
     let result = args("--listen");
     assert_eq!(
         result,
-        Err(ArgumentsError::Socks5ListenError(ListenErrorType::UnexpectedEnd(
+        Err(ArgumentsError::Socks5ListenError(SocketErrorType::UnexpectedEnd(
             "--listen".to_string()
         )))
     );
@@ -275,7 +275,7 @@ fn test_listen_bad_format() {
     let result = args("-l 127.420.666.0");
     assert_eq!(
         result,
-        Err(ArgumentsError::Socks5ListenError(ListenErrorType::InvalidSocketAddress(
+        Err(ArgumentsError::Socks5ListenError(SocketErrorType::InvalidSocketAddress(
             "-l".to_string(),
             "127.420.666.0".to_string()
         )))
@@ -284,7 +284,7 @@ fn test_listen_bad_format() {
     let result = args("--listen [fafa::fefe:fifi:fofo:fufu]");
     assert_eq!(
         result,
-        Err(ArgumentsError::Socks5ListenError(ListenErrorType::InvalidSocketAddress(
+        Err(ArgumentsError::Socks5ListenError(SocketErrorType::InvalidSocketAddress(
             "--listen".to_string(),
             "[fafa::fefe:fifi:fofo:fufu]".to_string()
         )))
@@ -293,7 +293,7 @@ fn test_listen_bad_format() {
     let result = args_vec(&["--listen", "alto chori ameo 🤩🤩"]);
     assert_eq!(
         result,
-        Err(ArgumentsError::Socks5ListenError(ListenErrorType::InvalidSocketAddress(
+        Err(ArgumentsError::Socks5ListenError(SocketErrorType::InvalidSocketAddress(
             "--listen".to_string(),
             "alto chori ameo 🤩🤩".to_string()
         )))
@@ -366,7 +366,7 @@ fn test_listen_sandstorm_unexpected_end() {
     let result = args("-m");
     assert_eq!(
         result,
-        Err(ArgumentsError::SandstormListenError(ListenErrorType::UnexpectedEnd(
+        Err(ArgumentsError::SandstormListenError(SocketErrorType::UnexpectedEnd(
             "-m".to_string()
         )))
     );
@@ -374,7 +374,7 @@ fn test_listen_sandstorm_unexpected_end() {
     let result = args("--management");
     assert_eq!(
         result,
-        Err(ArgumentsError::SandstormListenError(ListenErrorType::UnexpectedEnd(
+        Err(ArgumentsError::SandstormListenError(SocketErrorType::UnexpectedEnd(
             "--management".to_string()
         )))
     );
@@ -385,7 +385,7 @@ fn test_listen_sandstorm_bad_format() {
     let result = args("-m 127.420.666.0");
     assert_eq!(
         result,
-        Err(ArgumentsError::SandstormListenError(ListenErrorType::InvalidSocketAddress(
+        Err(ArgumentsError::SandstormListenError(SocketErrorType::InvalidSocketAddress(
             "-m".to_string(),
             "127.420.666.0".to_string()
         )))
@@ -394,7 +394,7 @@ fn test_listen_sandstorm_bad_format() {
     let result = args("--management [fafa::fefe:fifi:fofo:fufu]");
     assert_eq!(
         result,
-        Err(ArgumentsError::SandstormListenError(ListenErrorType::InvalidSocketAddress(
+        Err(ArgumentsError::SandstormListenError(SocketErrorType::InvalidSocketAddress(
             "--management".to_string(),
             "[fafa::fefe:fifi:fofo:fufu]".to_string()
         )))
@@ -403,7 +403,7 @@ fn test_listen_sandstorm_bad_format() {
     let result = args_vec(&["--management", "alto chori ameo 🤩🤩"]);
     assert_eq!(
         result,
-        Err(ArgumentsError::SandstormListenError(ListenErrorType::InvalidSocketAddress(
+        Err(ArgumentsError::SandstormListenError(SocketErrorType::InvalidSocketAddress(
             "--management".to_string(),
             "alto chori ameo 🤩🤩".to_string()
         )))
