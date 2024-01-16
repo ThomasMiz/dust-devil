@@ -170,21 +170,35 @@ where
         event_stream_receiver: None,
     };
 
+    let mut closed = false;
+
     loop {
+        if closed
+            && writer.buffer().is_empty()
+            && handler_state.socks_receivers.is_empty()
+            && handler_state.sandstorm_receivers.is_empty()
+            && handler_state.metrics_receivers.is_empty()
+        {
+            break;
+        }
+
         select! {
             biased;
-            maybe_notification = response_notifier.recv() => {
-                let notification = match maybe_notification {
-                    Some(notif) => notif,
-                    None => return Ok(()),
+            maybe_notification = response_notifier.recv(), if !closed => {
+                match maybe_notification {
+                    Some(notification) => {
+                        handle_notification(
+                            notification,
+                            writer,
+                            context,
+                            &mut handler_state
+                        ).await?;
+                    },
+                    None => {
+                        closed = true;
+                    },
                 };
 
-                handle_notification(
-                    notification,
-                    writer,
-                    context,
-                    &mut handler_state
-                ).await?;
             }
             result = get_first_if(&mut handler_state.socks_receivers) => {
                 let socket_result = result.map_err_to_io()?;
@@ -201,13 +215,15 @@ where
             maybe_event = recv_if_some(&mut handler_state.event_stream_receiver) => {
                 match maybe_event {
                     Ok(evt) => EventStreamResponseRef(evt.as_ref()).write(writer).await?,
-                    Err(broadcast::error::RecvError::Closed) => return Ok(()),
+                    Err(broadcast::error::RecvError::Closed) => break,
                     Err(broadcast::error::RecvError::Lagged(count)) => return Err(io::Error::new(ErrorKind::Other, format!("Connection too slow to stream events, lagged behind {count} events!"))),
                 }
             }
             _ = stall_if_empty(writer) => writer.flush().await?,
         }
     }
+
+    Ok(())
 }
 
 async fn handle_socks5_response<W>(socket_result: SocketRequestResult, writer: &mut W) -> Result<(), io::Error>

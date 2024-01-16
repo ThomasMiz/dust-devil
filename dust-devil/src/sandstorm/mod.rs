@@ -9,6 +9,7 @@ use tokio::{
     net::TcpStream,
     select,
     sync::mpsc,
+    try_join,
 };
 use tokio_util::sync::CancellationToken;
 
@@ -62,9 +63,10 @@ async fn handle_sandstorm_inner(mut stream: TcpStream, context: &mut SandstormCo
     let mut writer = BufWriter::with_capacity(SANDSTORM_WRITE_BUFFER_SIZE, writer);
     let (response_tx, response_rx) = mpsc::channel(RESPONSE_NOTIFICATION_CHANNEL_SIZE);
 
-    select! {
-        biased;
-        request_result = handle_requests(&mut reader, context, response_tx) => request_result,
-        request_response = handle_responses(&mut writer, context, response_rx) => request_response,
-    }
+    try_join! {
+        handle_requests(&mut reader, context, response_tx),
+        handle_responses(&mut writer, context, response_rx),
+    }?;
+
+    Ok(())
 }

@@ -159,12 +159,9 @@ async fn connect_socket(request_addresses: Vec<SocketAddr>, context: &ClientCont
     for address in request_addresses {
         log_socks_connection_attempt!(context, address);
 
-        let destination_socket = if address.is_ipv4() {
-            TcpSocket::new_v4()
-        } else if address.is_ipv6() {
-            TcpSocket::new_v6()
-        } else {
-            continue;
+        let destination_socket = match address {
+            SocketAddr::V4(_) => TcpSocket::new_v4(),
+            SocketAddr::V6(_) => TcpSocket::new_v6(),
         };
 
         let destination_socket = match destination_socket {

@@ -255,3 +255,10 @@ That's why the messages on each entry in the following list must be synchronized
     - List Users / Add User / Update User / Delete User
     - Get Buffer Size / Set Buffer Size
     - List Authentication Methods / Toggle Authentication Method
+
+
+Closing the connection
+
+The client may shutdown the write half of their socket to indicate they will not be sending any
+more requests to the server. The server must finish processing any remaining requessts and then
+close their write end and finish the connection, even if event streaming is enabled.

@@ -31,6 +31,7 @@ pub fn get_help_string() -> &'static str {
         "  -s, --silent                    Do not print to stdout\n",
         "  -x, --host <address>            Specify the server to connect to\n",
         "  -c, --credentials <creds>       Specify the user to log in as, in user:password format\n",
+        "  -S, --shutdown                  Requests the server to shut down\n",
         "  -l, --list-socks5               Requests the server sends a list of socks5 sockets\n",
         "  -k, --add-socks5 <address>      Requests the server opens a new socks5 socket\n",
         "  -r, --remove-socks5 <address>   Requests the server removes an existing socks5 socket\n",
@@ -70,7 +71,10 @@ pub fn get_help_string() -> &'static str {
         "if you respect your computer, please don't) but may not be equal to nor larger than 4GBs.\n",
         "\n",
         "The requests are done in the order in which they're specified and their results printed to stdout (unless ",
-        "-s/--silent is specified). Pipelining will be used.\n"
+        "-s/--silent is specified). Pipelining will be used, so the requests are not guaranteed to come back in the same ",
+        "order. The only ordering guarantees are those defined in the Sandstorm protocol (so, for example, list/add/remove ",
+        "socks5 sockets operations are guaranteed to be handled in order and answered in order, but an add user request in ",
+        "the middle of all that may not come back in the same order.\n"
     )
 }
 
@@ -83,6 +87,7 @@ pub enum ArgumentsRequest {
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum CommandRequest {
+    Shutdown,
     ListSocks5Sockets,
     AddSocks5Socket(SocketAddr),
     RemoveSocks5Socket(SocketAddr),
@@ -684,6 +689,8 @@ where
             result.silent = true;
         } else if arg.eq("-x") || arg.eq_ignore_ascii_case("--host") {
             parse_socket_arg(&mut result.server_address, arg, args.next(), DEFAULT_SANDSTORM_PORT).map_err(ArgumentsError::HostError)?;
+        } else if arg.eq("-S") || arg.eq_ignore_ascii_case("--shutdown") {
+            result.requests.push(CommandRequest::Shutdown);
         } else if arg.eq("-c") || arg.eq_ignore_ascii_case("--credentials") {
             parse_credentials(&mut result.login_credentials, arg, args.next())?;
         } else if arg.eq("-l") || arg.eq_ignore_ascii_case("--list-socks5") {

@@ -40,7 +40,6 @@ fn main() {
     printlnif!(startup_args.verbose, "Starting up Tokio runtime");
     let start_result = tokio::runtime::Builder::new_multi_thread().enable_all().build();
 
-    printlnif!(startup_args.verbose, "Entering runtime");
     match start_result {
         Ok(runtime) => runtime.block_on(server::run_server(startup_args)),
         Err(err) => eprintln!("Failed to start Tokio runtime: {err}"),

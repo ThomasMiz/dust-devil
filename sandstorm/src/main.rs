@@ -3,6 +3,9 @@ use std::{env, process::exit};
 use crate::args::{get_help_string, get_version_string, ArgumentsRequest};
 
 mod args;
+mod client;
+mod requests;
+mod responses;
 mod utils;
 
 fn main() {
@@ -27,14 +30,11 @@ fn main() {
         ArgumentsRequest::Run(startup_args) => startup_args,
     };
 
-    println!("Startup args: {startup_args:?}");
+    printlnif!(startup_args.verbose, "Starting up Tokio runtime");
+    let start_result = tokio::runtime::Builder::new_current_thread().enable_all().build();
 
-    /*printlnif!(startup_args.verbose, "Starting up Tokio runtime");
-    let start_result = tokio::runtime::Builder::new_multi_thread().enable_all().build();
-
-    printlnif!(startup_args.verbose, "Entering runtime");
     match start_result {
-        Ok(_runtime) => {},
+        Ok(runtime) => runtime.block_on(client::run_client(startup_args)),
         Err(err) => eprintln!("Failed to start Tokio runtime: {err}"),
-    }*/
+    }
 }
