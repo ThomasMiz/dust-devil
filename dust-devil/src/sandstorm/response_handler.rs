@@ -1,4 +1,5 @@
 use std::{
+    collections::VecDeque,
     future::{self, Future},
     io::{self, ErrorKind},
     net::SocketAddr,
@@ -63,8 +64,8 @@ impl Future for SocketRequestReceiver {
 
 /// If the vector is empty, returns a future that stalls indefinitely. Otherwise, waits for the
 /// first future in the vector to complete, removes it from the vector, and returns its result.
-async fn get_first_if<F: Future<Output = R> + Unpin, R>(receivers: &mut Vec<F>) -> R {
-    if let Some(receiver) = receivers.first_mut() {
+async fn get_first_if<F: Future<Output = R> + Unpin, R>(receivers: &mut VecDeque<F>) -> R {
+    if let Some(receiver) = receivers.front_mut() {
         let result = receiver.await;
         receivers.remove(0);
         result
@@ -81,8 +82,8 @@ async fn get_first_if<F: Future<Output = R> + Unpin, R>(receivers: &mut Vec<F>) 
 ///
 /// This is a wrapper function that simplifies processing receivers in a vector, in the order in
 /// which they are in the vector.
-async fn get_first_optional<T>(receivers: &mut Vec<Option<oneshot::Receiver<T>>>) -> Result<Option<T>, oneshot::error::RecvError> {
-    let maybe_receiver = match receivers.first_mut() {
+async fn get_first_optional<T>(receivers: &mut VecDeque<Option<oneshot::Receiver<T>>>) -> Result<Option<T>, oneshot::error::RecvError> {
+    let maybe_receiver = match receivers.front_mut() {
         Some(r) => r,
         None => future::pending().await,
     };
@@ -149,9 +150,9 @@ where
 }
 
 struct ResponseHandlerState {
-    socks_receivers: Vec<SocketRequestReceiver>,
-    sandstorm_receivers: Vec<SocketRequestReceiver>,
-    metrics_receivers: Vec<Option<oneshot::Receiver<Metrics>>>,
+    socks_receivers: VecDeque<SocketRequestReceiver>,
+    sandstorm_receivers: VecDeque<SocketRequestReceiver>,
+    metrics_receivers: VecDeque<Option<oneshot::Receiver<Metrics>>>,
     event_stream_receiver: Option<broadcast::Receiver<Arc<Event>>>,
 }
 
@@ -164,9 +165,9 @@ where
     W: AsyncWrite + Unpin,
 {
     let mut handler_state = ResponseHandlerState {
-        socks_receivers: Vec::with_capacity(RECEIVER_BUFFER_SIZE),
-        sandstorm_receivers: Vec::with_capacity(RECEIVER_BUFFER_SIZE),
-        metrics_receivers: Vec::with_capacity(RECEIVER_BUFFER_SIZE),
+        socks_receivers: VecDeque::with_capacity(RECEIVER_BUFFER_SIZE),
+        sandstorm_receivers: VecDeque::with_capacity(RECEIVER_BUFFER_SIZE),
+        metrics_receivers: VecDeque::with_capacity(RECEIVER_BUFFER_SIZE),
         event_stream_receiver: None,
     };
 
@@ -283,45 +284,45 @@ where
         }
         ResponseNotification::ListSocks5Sockets(receiver) => {
             if handler_state.socks_receivers.len() == handler_state.socks_receivers.capacity() {
-                let result = handler_state.socks_receivers.remove(0).await.map_err_to_io()?;
+                let result = handler_state.socks_receivers.pop_front().unwrap().await.map_err_to_io()?;
                 handle_socks5_response(result, writer).await?;
             }
-            handler_state.socks_receivers.push(SocketRequestReceiver::List(receiver));
+            handler_state.socks_receivers.push_back(SocketRequestReceiver::List(receiver));
         }
         ResponseNotification::AddSocks5Socket(receiver) => {
             if handler_state.socks_receivers.len() == handler_state.socks_receivers.capacity() {
-                let result = handler_state.socks_receivers.remove(0).await.map_err_to_io()?;
+                let result = handler_state.socks_receivers.pop_front().unwrap().await.map_err_to_io()?;
                 handle_socks5_response(result, writer).await?;
             }
-            handler_state.socks_receivers.push(SocketRequestReceiver::Add(receiver));
+            handler_state.socks_receivers.push_back(SocketRequestReceiver::Add(receiver));
         }
         ResponseNotification::RemoveSocks5Socket(receiver) => {
             if handler_state.socks_receivers.len() == handler_state.socks_receivers.capacity() {
-                let result = handler_state.socks_receivers.remove(0).await.map_err_to_io()?;
+                let result = handler_state.socks_receivers.pop_front().unwrap().await.map_err_to_io()?;
                 handle_socks5_response(result, writer).await?;
             }
-            handler_state.socks_receivers.push(SocketRequestReceiver::Remove(receiver));
+            handler_state.socks_receivers.push_back(SocketRequestReceiver::Remove(receiver));
         }
         ResponseNotification::ListSandstormSockets(receiver) => {
             if handler_state.sandstorm_receivers.len() == handler_state.sandstorm_receivers.capacity() {
-                let result = handler_state.sandstorm_receivers.remove(0).await.map_err_to_io()?;
+                let result = handler_state.sandstorm_receivers.pop_front().unwrap().await.map_err_to_io()?;
                 handle_sandstorm_response(result, writer).await?;
             }
-            handler_state.sandstorm_receivers.push(SocketRequestReceiver::List(receiver));
+            handler_state.sandstorm_receivers.push_back(SocketRequestReceiver::List(receiver));
         }
         ResponseNotification::AddSandstormSocket(receiver) => {
             if handler_state.sandstorm_receivers.len() == handler_state.sandstorm_receivers.capacity() {
-                let result = handler_state.sandstorm_receivers.remove(0).await.map_err_to_io()?;
+                let result = handler_state.sandstorm_receivers.pop_front().unwrap().await.map_err_to_io()?;
                 handle_sandstorm_response(result, writer).await?;
             }
-            handler_state.sandstorm_receivers.push(SocketRequestReceiver::Add(receiver));
+            handler_state.sandstorm_receivers.push_back(SocketRequestReceiver::Add(receiver));
         }
         ResponseNotification::RemoveSandstormSocket(receiver) => {
             if handler_state.sandstorm_receivers.len() == handler_state.sandstorm_receivers.capacity() {
-                let result = handler_state.sandstorm_receivers.remove(0).await.map_err_to_io()?;
+                let result = handler_state.sandstorm_receivers.pop_front().unwrap().await.map_err_to_io()?;
                 handle_sandstorm_response(result, writer).await?;
             }
-            handler_state.sandstorm_receivers.push(SocketRequestReceiver::Remove(receiver));
+            handler_state.sandstorm_receivers.push_back(SocketRequestReceiver::Remove(receiver));
         }
         ResponseNotification::ListUsers(snapshot) => {
             ListUsersResponse(snapshot).write(writer).await?;
@@ -343,7 +344,7 @@ where
         }
         ResponseNotification::RequestCurrentMetrics(maybe_receiver) => {
             if handler_state.metrics_receivers.len() == handler_state.metrics_receivers.capacity() {
-                let maybe_receiver = handler_state.metrics_receivers.remove(0);
+                let maybe_receiver = handler_state.metrics_receivers.pop_front().unwrap();
                 let result = match maybe_receiver {
                     Some(receiver) => Some(receiver.await.map_err_to_io()?),
                     None => None,
@@ -351,7 +352,7 @@ where
                 CurrentMetricsResponse(result).write(writer).await?;
             }
 
-            handler_state.metrics_receivers.push(maybe_receiver);
+            handler_state.metrics_receivers.push_back(maybe_receiver);
         }
         ResponseNotification::GetBufferSize(buffer_size) => {
             GetBufferSizeResponse(buffer_size).write(writer).await?;

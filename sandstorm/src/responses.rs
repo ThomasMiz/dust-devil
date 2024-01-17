@@ -67,7 +67,7 @@ where
             SandstormCommandType::ListSandstormSockets => {
                 let list = ListSandstormSocketsResponse::read(reader).await?.0;
                 if !silent {
-                    println!("ListSandstorm5Sockets ({})", list.len());
+                    println!("ListSandstormSockets ({})", list.len());
                     for addr in list {
                         println!("{addr}");
                     }
