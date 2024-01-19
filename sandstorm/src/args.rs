@@ -42,12 +42,14 @@ pub fn get_help_string() -> &'static str {
         "  -u, --add-user <user>           Requests the server adds a new user\n",
         "  -p, --update-user <updt_user>   Requests the server updates an existing user\n",
         "  -d, --delete-user <username>    Requests the server deletes an existing user\n",
+        "  -z, --list-auth                 Requests the server sends a list of auth methods\n",
         "  -A, --auth-enable <auth_type>   Requests the server enables an authentication method\n",
         "  -a, --auth-disable <auth_type>  Requests the server disables an authentication method\n",
         "  -m, --get-metrics               Requests the server sends the current metrics\n",
         "  -B, --get-buffer-size           Requests the server sends the current buffer size\n",
         "  -b, --set-buffer-size <size>    Requests the server changes its buffer size\n",
         "  -w, --meow                      Requests a meow ping to the server\n",
+        "  -o, --output-logs               Remain open and print the server's logs to stdout\n",
         "\n",
         "Socket addresses may be specified as an IPv4 or IPv6 address, or a domainname, and may include a port number. If ",
         "no port is specified, then the appropriate default will be used (1080 for Socks5 and 2222 for Sandstorm). If no ",
@@ -98,6 +100,7 @@ pub enum CommandRequest {
     AddUser(String, String, UserRole),
     UpdateUser(String, Option<String>, Option<UserRole>),
     DeleteUser(String),
+    ListAuthMethods,
     ToggleAuthMethod(AuthMethod, bool),
     GetMetrics,
     GetBufferSize,
@@ -112,6 +115,7 @@ pub struct StartupArguments {
     pub server_address: Vec<SocketAddr>,
     pub login_credentials: (String, String),
     pub requests: Vec<CommandRequest>,
+    pub output_logs: bool,
 }
 
 impl StartupArguments {
@@ -122,6 +126,7 @@ impl StartupArguments {
             server_address: Vec::new(),
             login_credentials: (String::new(), String::new()),
             requests: Vec::new(),
+            output_logs: false,
         }
     }
 
@@ -735,6 +740,8 @@ where
         } else if arg.eq("-d") || arg.eq_ignore_ascii_case("--delete-user") {
             let username = parse_delete_user(arg, args.next())?;
             result.requests.push(CommandRequest::DeleteUser(username));
+        } else if arg.eq("-z") || arg.eq_ignore_ascii_case("--list-auth") {
+            result.requests.push(CommandRequest::ListAuthMethods);
         } else if arg.eq("-A") || arg.eq_ignore_ascii_case("--auth-enable") {
             let auth_method = parse_auth_arg(arg, args.next())?;
             result.requests.push(CommandRequest::ToggleAuthMethod(auth_method, true));
@@ -750,6 +757,8 @@ where
             result.requests.push(CommandRequest::SetBufferSize(buffer_size));
         } else if arg.eq("-w") || arg.eq_ignore_ascii_case("--meow") {
             result.requests.push(CommandRequest::Meow);
+        } else if arg.eq("-o") || arg.eq_ignore_ascii_case("--output-logs") {
+            result.output_logs = true;
         } else {
             return Err(ArgumentsError::UnknownArgument(arg));
         }

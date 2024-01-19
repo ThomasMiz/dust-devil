@@ -1,11 +1,13 @@
 use std::{env, process::exit};
 
+use tokio::task::LocalSet;
+
 use crate::args::{get_help_string, get_version_string, ArgumentsRequest};
 
 mod args;
 mod client;
-mod requests;
-mod responses;
+mod handle_requests;
+mod sandstorm;
 mod utils;
 
 fn main() {
@@ -34,7 +36,7 @@ fn main() {
     let start_result = tokio::runtime::Builder::new_current_thread().enable_all().build();
 
     match start_result {
-        Ok(runtime) => runtime.block_on(client::run_client(startup_args)),
+        Ok(runtime) => LocalSet::new().block_on(&runtime, client::run_client(startup_args)),
         Err(err) => eprintln!("Failed to start Tokio runtime: {err}"),
     }
 }

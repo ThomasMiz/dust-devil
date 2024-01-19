@@ -7,13 +7,24 @@ use dust_devil_core::{
 use tokio::{
     io::{self, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader, BufWriter},
     net::{TcpSocket, TcpStream},
-    try_join,
+    select,
 };
 
-use crate::{args::StartupArguments, printlnif, requests::write_all_requests_and_shutdown, responses::print_all_responses};
+use crate::{args::StartupArguments, handle_requests::handle_requests, printlnif, sandstorm::SandstormRequestManager};
 
-const WRITE_BUFFER_SIZE: usize = 0x2000;
-const READ_BUFFER_SIZE: usize = 0x2000;
+fn choose_read_buffer_sizes(startup_args: &StartupArguments) -> (usize, usize) {
+    let read_buffer_size = match startup_args.output_logs {
+        true => 0x2000,
+        false => 0x1000,
+    };
+
+    let write_buffer_size = match startup_args.requests.len() {
+        len if len < 16 => 0x1000,
+        _ => 0x2000,
+    };
+
+    (read_buffer_size, write_buffer_size)
+}
 
 pub async fn run_client(startup_args: StartupArguments) {
     let verbose = startup_args.verbose;
@@ -26,7 +37,13 @@ pub async fn run_client(startup_args: StartupArguments) {
 }
 
 async fn run_client_inner(startup_args: StartupArguments) -> Result<(), io::Error> {
-    let mut socket = match connect(startup_args.verbose, startup_args.server_address).await {
+    let (read_buffer_size, write_buffer_size) = choose_read_buffer_sizes(&startup_args);
+    printlnif!(
+        startup_args.verbose,
+        "Will use read buffer size of {read_buffer_size} and write buffer size of {write_buffer_size}"
+    );
+
+    let socket = match connect(startup_args.verbose, startup_args.server_address).await {
         Ok((sock, addr)) => {
             printlnif!(!startup_args.silent, "Connected to {addr}");
             sock
@@ -37,16 +54,15 @@ async fn run_client_inner(startup_args: StartupArguments) -> Result<(), io::Erro
         }
     };
 
-    let (mut read_half, write_half) = socket.split();
-    let mut writer_buf = BufWriter::with_capacity(WRITE_BUFFER_SIZE, write_half);
-    let writer = &mut writer_buf;
+    let (mut read_half, write_half) = socket.into_split();
+    let mut writer_buf = BufWriter::with_capacity(write_buffer_size, write_half);
 
     let handshake_status = handshake(
         startup_args.verbose,
         startup_args.silent,
         &startup_args.login_credentials.0,
         &startup_args.login_credentials.1,
-        writer,
+        &mut writer_buf,
         &mut read_half,
     )
     .await?;
@@ -55,13 +71,23 @@ async fn run_client_inner(startup_args: StartupArguments) -> Result<(), io::Erro
         return Ok(());
     }
 
-    let mut reader_buf = BufReader::with_capacity(READ_BUFFER_SIZE, read_half);
-    let reader = &mut reader_buf;
+    let reader_buf = BufReader::with_capacity(read_buffer_size, read_half);
 
-    try_join!(
-        write_all_requests_and_shutdown(startup_args.requests, writer),
-        print_all_responses(startup_args.silent, reader),
-    )?;
+    let (mut manager, read_error_recevier) = SandstormRequestManager::new(reader_buf, writer_buf);
+
+    select! {
+        result = handle_requests(startup_args.verbose, startup_args.silent, &startup_args.requests, &mut manager, !startup_args.output_logs) => result?,
+        read_error_result = read_error_recevier => return Err(read_error_result.expect("SandstormRequestManager read_error_receiver is fucked smh")),
+    }
+
+    if !startup_args.output_logs {
+        printlnif!(startup_args.verbose, "Waiting for connection to close");
+        manager.close().await?;
+        return Ok(());
+    }
+
+    printlnif!(startup_args.verbose, "Shutting down and waiting for connection to close");
+    manager.shutdown_and_close().await?;
 
     Ok(())
 }
