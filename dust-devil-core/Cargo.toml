@@ -1,9 +1,11 @@
 [package]
 name = "dust-devil-core"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2021"
+description = "Shared sources used in the dust-devil socks5 server and monitoring clients."
+license = "MIT OR Apache-2.0"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-tokio = { version = "1", features = ["default"] }
+tokio = { version = "1", features = ["io-util"] }
