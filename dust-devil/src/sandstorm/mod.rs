@@ -24,8 +24,15 @@ mod messaging;
 mod request_handler;
 mod response_handler;
 
-const SANDSTORM_READ_BUFFER_SIZE: usize = 1024;
-const SANDSTORM_WRITE_BUFFER_SIZE: usize = 1024;
+/// The size of the reading buffer for sandstorm clients. Doesn't need to be too much, as sandstorm requests
+/// are typically very small.
+const SANDSTORM_READ_BUFFER_SIZE: usize = 0x400;
+
+/// The size of the writing buffer for sandstorm clients. This is higher than the read size, as the server
+/// might need to stream events to the client.
+const SANDSTORM_WRITE_BUFFER_SIZE: usize = 0x2000;
+
+/// The size of the mpsc channel used between the sandstorm request reader task and the response writer task.
 const RESPONSE_NOTIFICATION_CHANNEL_SIZE: usize = 16;
 
 pub async fn handle_sandstorm(stream: TcpStream, mut context: SandstormContext, cancel_token: CancellationToken) {

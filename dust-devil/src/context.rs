@@ -400,6 +400,12 @@ impl SandstormContext {
     }
 
     pub fn add_user(&self, username: String, password: String, role: UserRole) -> AddUserResponse {
+        for c in username.chars() {
+            if c.is_control() || (c.is_ascii() && !c.is_ascii_graphic()) {
+                return AddUserResponse::InvalidValues;
+            }
+        }
+
         if self.state.users.insert(username.clone(), password, role) {
             log!(self, EventData::UserRegisteredByManager(self.manager_id, username, role));
 
