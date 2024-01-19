@@ -173,16 +173,12 @@ where
 
     let mut closed = false;
 
-    loop {
-        if closed
-            && writer.buffer().is_empty()
-            && handler_state.socks_receivers.is_empty()
-            && handler_state.sandstorm_receivers.is_empty()
-            && handler_state.metrics_receivers.is_empty()
-        {
-            break;
-        }
-
+    while !closed
+        || !writer.buffer().is_empty()
+        || !handler_state.socks_receivers.is_empty()
+        || !handler_state.sandstorm_receivers.is_empty()
+        || !handler_state.metrics_receivers.is_empty()
+    {
         select! {
             biased;
             maybe_notification = response_notifier.recv(), if !closed => {

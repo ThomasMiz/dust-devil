@@ -1,16 +1,25 @@
-use std::net::SocketAddr;
+use std::{
+    io::{Error, ErrorKind},
+    net::SocketAddr,
+};
 
 use dust_devil_core::{
     sandstorm::{SandstormHandshakeRef, SandstormHandshakeStatus},
     serialize::{ByteRead, ByteWrite},
 };
 use tokio::{
-    io::{self, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader, BufWriter},
+    io::{AsyncRead, AsyncWrite, AsyncWriteExt, BufReader, BufWriter},
     net::{TcpSocket, TcpStream},
     select,
 };
 
-use crate::{args::StartupArguments, handle_requests::handle_requests, printlnif, sandstorm::SandstormRequestManager};
+use crate::{
+    args::{CommandRequest, StartupArguments},
+    handle_output::handle_output,
+    handle_requests::handle_requests,
+    printlnif,
+    sandstorm::SandstormRequestManager,
+};
 
 fn choose_read_buffer_sizes(startup_args: &StartupArguments) -> (usize, usize) {
     let read_buffer_size = match startup_args.output_logs {
@@ -36,7 +45,7 @@ pub async fn run_client(startup_args: StartupArguments) {
     printlnif!(verbose, "Goodbye!");
 }
 
-async fn run_client_inner(startup_args: StartupArguments) -> Result<(), io::Error> {
+async fn run_client_inner(startup_args: StartupArguments) -> Result<(), Error> {
     let (read_buffer_size, write_buffer_size) = choose_read_buffer_sizes(&startup_args);
     printlnif!(
         startup_args.verbose,
@@ -76,23 +85,20 @@ async fn run_client_inner(startup_args: StartupArguments) -> Result<(), io::Erro
     let (mut manager, read_error_recevier) = SandstormRequestManager::new(reader_buf, writer_buf);
 
     select! {
-        result = handle_requests(startup_args.verbose, startup_args.silent, &startup_args.requests, &mut manager, !startup_args.output_logs) => result?,
-        read_error_result = read_error_recevier => return Err(read_error_result.expect("SandstormRequestManager read_error_receiver is fucked smh")),
-    }
-
-    if !startup_args.output_logs {
-        printlnif!(startup_args.verbose, "Waiting for connection to close");
-        manager.close().await?;
-        return Ok(());
+        result = handle_connection(startup_args.verbose, startup_args.silent, &startup_args.requests, startup_args.output_logs, &mut manager) => result?,
+        read_error_result = read_error_recevier => {
+            match read_error_result {
+                Ok(error) => return Err(error),
+                Err(_) => return Err(Error::new(ErrorKind::ConnectionReset, "Server closed unexpectedly")),
+            }
+        },
     }
 
     printlnif!(startup_args.verbose, "Shutting down and waiting for connection to close");
-    manager.shutdown_and_close().await?;
-
-    Ok(())
+    manager.shutdown_and_close().await
 }
 
-async fn connect(verbose: bool, addresses: Vec<SocketAddr>) -> Result<(TcpStream, SocketAddr), io::Error> {
+async fn connect(verbose: bool, addresses: Vec<SocketAddr>) -> Result<(TcpStream, SocketAddr), Error> {
     let mut last_error = None;
 
     for address in addresses {
@@ -123,17 +129,10 @@ async fn connect(verbose: bool, addresses: Vec<SocketAddr>) -> Result<(TcpStream
         return Ok((stream, address));
     }
 
-    Err(last_error.unwrap_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "No addresses specified!")))
+    Err(last_error.unwrap_or_else(|| Error::new(ErrorKind::InvalidInput, "No addresses specified!")))
 }
 
-async fn handshake<R, W>(
-    verbose: bool,
-    silent: bool,
-    username: &str,
-    password: &str,
-    writer: &mut W,
-    reader: &mut R,
-) -> Result<bool, io::Error>
+async fn handshake<R, W>(verbose: bool, silent: bool, username: &str, password: &str, writer: &mut W, reader: &mut R) -> Result<bool, Error>
 where
     R: AsyncRead + Unpin + ?Sized,
     W: AsyncWrite + Unpin + ?Sized,
@@ -154,4 +153,26 @@ where
     }
 
     Ok(result == SandstormHandshakeStatus::Ok)
+}
+
+async fn handle_connection<W>(
+    verbose: bool,
+    silent: bool,
+    requests: &Vec<CommandRequest>,
+    output_logs: bool,
+    manager: &mut SandstormRequestManager<W>,
+) -> Result<(), Error>
+where
+    W: AsyncWrite + Unpin,
+{
+    handle_requests(silent, requests, manager).await?;
+
+    if output_logs {
+        printlnif!(verbose, "Waiting for responses");
+        manager.flush_and_wait().await?;
+        printlnif!(verbose, "Starting log output");
+        handle_output(verbose, manager).await?;
+    }
+
+    Ok(())
 }

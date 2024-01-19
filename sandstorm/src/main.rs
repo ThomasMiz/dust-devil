@@ -6,6 +6,7 @@ use crate::args::{get_help_string, get_version_string, ArgumentsRequest};
 
 mod args;
 mod client;
+mod handle_output;
 mod handle_requests;
 mod sandstorm;
 mod utils;

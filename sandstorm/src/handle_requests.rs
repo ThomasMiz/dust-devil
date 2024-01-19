@@ -3,7 +3,7 @@ use std::{fmt::Write, io::Error};
 
 use tokio::io::AsyncWrite;
 
-use crate::{args::CommandRequest, printlnif, sandstorm::SandstormRequestManager};
+use crate::{args::CommandRequest, sandstorm::SandstormRequestManager};
 
 const RESULT_SEPARATOR: &str = "----------";
 
@@ -21,13 +21,7 @@ impl<'a> fmt::Display for UserDisplayer<'a> {
     }
 }
 
-pub async fn handle_requests<W>(
-    verbose: bool,
-    silent: bool,
-    requests: &Vec<CommandRequest>,
-    manager: &mut SandstormRequestManager<W>,
-    shutdown_writer: bool,
-) -> Result<(), Error>
+pub async fn handle_requests<W>(silent: bool, requests: &Vec<CommandRequest>, manager: &mut SandstormRequestManager<W>) -> Result<(), Error>
 where
     W: AsyncWrite + Unpin,
 {
@@ -263,14 +257,5 @@ where
         }
     }
 
-    match shutdown_writer {
-        true => {
-            printlnif!(verbose, "Flushing requests and closing connection");
-            manager.shutdown_and_wait().await
-        }
-        false => {
-            printlnif!(verbose, "Flushing and waiting for responses");
-            manager.flush_and_wait().await
-        }
-    }
+    Ok(())
 }

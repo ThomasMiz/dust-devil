@@ -1,7 +1,7 @@
 use std::{
     cell::RefCell,
     collections::VecDeque,
-    io::{self, Error, ErrorKind},
+    io::{Error, ErrorKind},
     net::SocketAddr,
     ops::Deref,
     rc::Rc,
@@ -13,7 +13,7 @@ use dust_devil_core::{
         AddUserResponse, CurrentMetricsRequest, CurrentMetricsResponse, DeleteUserRequestRef, DeleteUserResponse, EventStreamConfigRequest,
         EventStreamConfigResponse, EventStreamResponse, GetBufferSizeRequest, GetBufferSizeResponse, ListAuthMethodsRequest,
         ListAuthMethodsResponse, ListSandstormSocketsRequest, ListSandstormSocketsResponse, ListSocks5SocketsRequest,
-        ListSocks5SocketsResponse, ListUsersRequest, ListUsersResponse, MeowRequest, MeowResponse, Metrics, RemoveSandstormSocketRequest,
+        ListSocks5SocketsResponse, ListUsersRequest, ListUsersResponse, MeowRequest, MeowResponse, RemoveSandstormSocketRequest,
         RemoveSandstormSocketResponse, RemoveSocks5SocketRequest, RemoveSocks5SocketResponse, SandstormCommandType, SetBufferSizeRequest,
         SetBufferSizeResponse, ShutdownRequest, ShutdownResponse, ToggleAuthMethodRequest, ToggleAuthMethodResponse, UpdateUserRequestRef,
         UpdateUserResponse,
@@ -24,17 +24,17 @@ use dust_devil_core::{
 };
 use tokio::{
     io::{AsyncRead, AsyncWrite, AsyncWriteExt},
-    sync::{mpsc, oneshot},
+    sync::oneshot,
     task::JoinHandle,
 };
 
-const EVENT_STREAM_CHANNEL_SIZE: usize = 512;
+type EventStreamConfigHandlerFn = dyn FnOnce(EventStreamConfigResponse) -> Option<Box<dyn FnMut(EventStreamResponse)>>;
 
 struct ResponseHandlers {
     remaining: usize,
     flush_notifier: Option<oneshot::Sender<()>>,
     shutdown_handlers: VecDeque<Box<dyn FnOnce(ShutdownResponse)>>,
-    event_stream_config_handlers: VecDeque<Box<dyn FnOnce(ToggleEventStreamResult)>>,
+    event_stream_config_handlers: VecDeque<Box<EventStreamConfigHandlerFn>>,
     list_socks5_handlers: VecDeque<Box<dyn FnOnce(ListSocks5SocketsResponse)>>,
     add_socks5_handlers: VecDeque<Box<dyn FnOnce(AddSocks5SocketResponse)>>,
     remove_socks5_handlers: VecDeque<Box<dyn FnOnce(RemoveSocks5SocketResponse)>>,
@@ -51,12 +51,6 @@ struct ResponseHandlers {
     get_buffer_size_handlers: VecDeque<Box<dyn FnOnce(GetBufferSizeResponse)>>,
     set_buffer_size_handlers: VecDeque<Box<dyn FnOnce(SetBufferSizeResponse)>>,
     meow_handlers: VecDeque<Box<dyn FnOnce(MeowResponse)>>,
-}
-
-pub enum ToggleEventStreamResult {
-    Disabled,
-    Enabled(Metrics, mpsc::Receiver<EventStreamResponse>),
-    WasAlreadyEnabled,
 }
 
 pub struct SandstormRequestManager<W>
@@ -113,25 +107,15 @@ where
                     Some(f) => f,
                     None => return Err(Error::new(ErrorKind::InvalidData, "Received unexpected EventStreamConfig response")),
                 };
-
                 handlers.remaining -= 1;
-                match result {
-                    EventStreamConfigResponse::Disabled => {
-                        event_stream_sender = None;
-                        handler(ToggleEventStreamResult::Disabled);
-                    }
-                    EventStreamConfigResponse::Enabled(metrics) => {
-                        let (sender, receiver) = mpsc::channel(EVENT_STREAM_CHANNEL_SIZE);
-                        event_stream_sender = Some(sender);
-                        handler(ToggleEventStreamResult::Enabled(metrics, receiver));
-                    }
-                    EventStreamConfigResponse::WasAlreadyEnabled => handler(ToggleEventStreamResult::WasAlreadyEnabled),
-                }
+                drop(handlers);
+
+                event_stream_sender = handler(result);
             }
             SandstormCommandType::EventStream => {
                 let event = EventStreamResponse::read(reader).await?;
-                if let Some(sender) = &event_stream_sender {
-                    let _ = sender.send(event).await;
+                if let Some(sender) = &mut event_stream_sender {
+                    sender(event);
                 }
             }
             SandstormCommandType::ListSocks5Sockets => {
@@ -417,11 +401,7 @@ where
         self.writer.flush().await
     }
 
-    pub async fn shutdown_writer(&mut self) -> Result<(), io::Error> {
-        self.writer.shutdown().await
-    }
-
-    pub async fn flush_and_wait(&mut self) -> Result<(), io::Error> {
+    pub async fn flush_and_wait(&mut self) -> Result<(), Error> {
         self.writer.flush().await?;
         let mut handlers = self.handlers.deref().borrow_mut();
         if handlers.remaining != 0 {
@@ -433,25 +413,8 @@ where
         Ok(())
     }
 
-    pub async fn shutdown_and_wait(&mut self) -> Result<(), io::Error> {
+    pub async fn shutdown_and_close(mut self) -> Result<(), Error> {
         self.writer.shutdown().await?;
-        let mut handlers = self.handlers.deref().borrow_mut();
-        if handlers.remaining != 0 {
-            let (tx, rx) = oneshot::channel();
-            handlers.flush_notifier = Some(tx);
-            drop(handlers);
-            let _ = rx.await;
-        }
-        Ok(())
-    }
-
-    pub async fn shutdown_and_close(mut self) -> Result<(), io::Error> {
-        self.writer.shutdown().await?;
-        let _ = self.reader_task_handle.await;
-        Ok(())
-    }
-
-    pub async fn close(self) -> Result<(), io::Error> {
         let _ = self.reader_task_handle.await;
         Ok(())
     }
@@ -464,12 +427,15 @@ where
         ShutdownRequest.write(&mut self.writer).await
     }
 
-    pub async fn event_stream_config_fn<F: FnOnce(ToggleEventStreamResult) + 'static>(&mut self, status: bool, f: F) -> Result<(), Error> {
-        self.handlers
-            .deref()
-            .borrow_mut()
-            .event_stream_config_handlers
-            .push_back(Box::new(f));
+    pub async fn event_stream_config_fn<F: FnOnce(EventStreamConfigResponse) -> Option<Box<dyn FnMut(EventStreamResponse)>> + 'static>(
+        &mut self,
+        status: bool,
+        f: F,
+    ) -> Result<(), Error> {
+        let mut handlers = self.handlers.deref().borrow_mut();
+        handlers.event_stream_config_handlers.push_back(Box::new(f));
+        handlers.remaining += 1;
+        drop(handlers);
         EventStreamConfigRequest(status).write(&mut self.writer).await
     }
 
