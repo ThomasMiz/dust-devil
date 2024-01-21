@@ -1,4 +1,4 @@
-use std::io::{self, ErrorKind};
+use std::io::{Error, ErrorKind};
 
 use dust_devil_core::{
     sandstorm::{
@@ -19,7 +19,7 @@ pub async fn handle_requests<R>(
     reader: &mut R,
     context: &SandstormContext,
     response_notifier: Sender<ResponseNotification>,
-) -> Result<(), io::Error>
+) -> Result<(), Error>
 where
     R: AsyncRead + Unpin + ?Sized,
 {
@@ -37,7 +37,7 @@ async fn run_command<R>(
     reader: &mut R,
     context: &SandstormContext,
     response_notifier: &Sender<ResponseNotification>,
-) -> Result<(), io::Error>
+) -> Result<(), Error>
 where
     R: AsyncRead + Unpin + ?Sized,
 {
@@ -182,7 +182,7 @@ where
             response_notifier.send(ResponseNotification::Meow).await.map_err_to_io()?;
         }
         c => {
-            return Err(io::Error::new(
+            return Err(Error::new(
                 ErrorKind::Unsupported,
                 format!("Unsupported or invalid sandstorm command {c:?}"),
             ));

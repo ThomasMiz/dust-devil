@@ -1,4 +1,4 @@
-use std::io;
+use std::io::Error;
 
 use tokio::io::{AsyncRead, AsyncWrite};
 
@@ -28,19 +28,19 @@ impl EventStreamResponse {
 }
 
 impl ByteRead for EventStreamResponse {
-    async fn read<R: AsyncRead + Unpin + ?Sized>(reader: &mut R) -> Result<Self, io::Error> {
+    async fn read<R: AsyncRead + Unpin + ?Sized>(reader: &mut R) -> Result<Self, Error> {
         Ok(Self(Event::read(reader).await?))
     }
 }
 
 impl ByteWrite for EventStreamResponse {
-    async fn write<W: AsyncWrite + Unpin + ?Sized>(&self, writer: &mut W) -> Result<(), io::Error> {
+    async fn write<W: AsyncWrite + Unpin + ?Sized>(&self, writer: &mut W) -> Result<(), Error> {
         self.as_ref().write(writer).await
     }
 }
 
 impl<'a> ByteWrite for EventStreamResponseRef<'a> {
-    async fn write<W: AsyncWrite + Unpin + ?Sized>(&self, writer: &mut W) -> Result<(), io::Error> {
+    async fn write<W: AsyncWrite + Unpin + ?Sized>(&self, writer: &mut W) -> Result<(), Error> {
         (SandstormCommandType::EventStream, &self.0).write(writer).await
     }
 }

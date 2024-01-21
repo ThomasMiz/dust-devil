@@ -1,4 +1,4 @@
-use std::{io, path::PathBuf, sync::Arc};
+use std::{io::Error, path::PathBuf, sync::Arc};
 
 use dust_devil_core::{
     logging::{Event, EventData},
@@ -53,7 +53,7 @@ async fn logger_task<W>(
     utc_offset: UtcOffset,
     writer: &mut W,
     name: &str,
-) -> Result<(), io::Error>
+) -> Result<(), Error>
 where
     W: AsyncWrite + Unpin + ?Sized,
 {

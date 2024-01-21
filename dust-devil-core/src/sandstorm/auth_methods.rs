@@ -1,4 +1,4 @@
-use std::io;
+use std::io::Error;
 
 use tokio::io::{AsyncRead, AsyncWrite};
 
@@ -31,31 +31,31 @@ impl ListAuthMethodsResponse {
 }
 
 impl ByteRead for ListAuthMethodsRequest {
-    async fn read<R: AsyncRead + Unpin + ?Sized>(_reader: &mut R) -> Result<Self, io::Error> {
+    async fn read<R: AsyncRead + Unpin + ?Sized>(_reader: &mut R) -> Result<Self, Error> {
         Ok(Self)
     }
 }
 
 impl ByteWrite for ListAuthMethodsRequest {
-    async fn write<W: AsyncWrite + Unpin + ?Sized>(&self, writer: &mut W) -> Result<(), io::Error> {
+    async fn write<W: AsyncWrite + Unpin + ?Sized>(&self, writer: &mut W) -> Result<(), Error> {
         SandstormCommandType::ListAuthMethods.write(writer).await
     }
 }
 
 impl ByteRead for ListAuthMethodsResponse {
-    async fn read<R: AsyncRead + Unpin + ?Sized>(reader: &mut R) -> Result<Self, io::Error> {
+    async fn read<R: AsyncRead + Unpin + ?Sized>(reader: &mut R) -> Result<Self, Error> {
         Ok(Self(<SmallReadList<(AuthMethod, bool)> as ByteRead>::read(reader).await?.0))
     }
 }
 
 impl ByteWrite for ListAuthMethodsResponse {
-    async fn write<W: AsyncWrite + Unpin + ?Sized>(&self, writer: &mut W) -> Result<(), io::Error> {
+    async fn write<W: AsyncWrite + Unpin + ?Sized>(&self, writer: &mut W) -> Result<(), Error> {
         self.as_ref().write(writer).await
     }
 }
 
 impl<'a> ByteWrite for ListAuthMethodsResponseRef<'a> {
-    async fn write<W: AsyncWrite + Unpin + ?Sized>(&self, writer: &mut W) -> Result<(), io::Error> {
+    async fn write<W: AsyncWrite + Unpin + ?Sized>(&self, writer: &mut W) -> Result<(), Error> {
         (SandstormCommandType::ListAuthMethods, SmallWriteList(self.0)).write(writer).await
     }
 }
@@ -75,25 +75,25 @@ pub struct ToggleAuthMethodResponse(
 );
 
 impl ByteRead for ToggleAuthMethodRequest {
-    async fn read<R: AsyncRead + Unpin + ?Sized>(reader: &mut R) -> Result<Self, io::Error> {
+    async fn read<R: AsyncRead + Unpin + ?Sized>(reader: &mut R) -> Result<Self, Error> {
         Ok(Self(AuthMethod::read(reader).await?, bool::read(reader).await?))
     }
 }
 
 impl ByteWrite for ToggleAuthMethodRequest {
-    async fn write<W: AsyncWrite + Unpin + ?Sized>(&self, writer: &mut W) -> Result<(), io::Error> {
+    async fn write<W: AsyncWrite + Unpin + ?Sized>(&self, writer: &mut W) -> Result<(), Error> {
         (SandstormCommandType::ToggleAuthMethod, self.0, self.1).write(writer).await
     }
 }
 
 impl ByteRead for ToggleAuthMethodResponse {
-    async fn read<R: AsyncRead + Unpin + ?Sized>(reader: &mut R) -> Result<Self, io::Error> {
+    async fn read<R: AsyncRead + Unpin + ?Sized>(reader: &mut R) -> Result<Self, Error> {
         Ok(Self(bool::read(reader).await?))
     }
 }
 
 impl ByteWrite for ToggleAuthMethodResponse {
-    async fn write<W: AsyncWrite + Unpin + ?Sized>(&self, writer: &mut W) -> Result<(), io::Error> {
+    async fn write<W: AsyncWrite + Unpin + ?Sized>(&self, writer: &mut W) -> Result<(), Error> {
         (SandstormCommandType::ToggleAuthMethod, self.0).write(writer).await
     }
 }

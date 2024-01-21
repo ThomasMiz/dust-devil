@@ -1,4 +1,4 @@
-use std::{collections::HashMap, io, net::SocketAddr, sync::Arc};
+use std::{collections::HashMap, io::Error, net::SocketAddr, sync::Arc};
 
 use dust_devil_core::{
     logging::EventData,
@@ -141,7 +141,7 @@ async fn run_server_inner(startup_args: StartupArguments, logger: Option<&LogMan
                             let _ = result_notifier.send(Ok(()));
                         }
                         Err(err) => {
-                            let err2 = io::Error::new(err.kind(), err.to_string());
+                            let err2 = Error::new(err.kind(), err.to_string());
                             sendif!(log_sender, EventData::FailedBindSocks5Socket(socket_address, err));
                             let _ = result_notifier.send(Err(err2));
                         }
@@ -173,7 +173,7 @@ async fn run_server_inner(startup_args: StartupArguments, logger: Option<&LogMan
                             let _ = result_notifier.send(Ok(()));
                         }
                         Err(err) => {
-                            let err2 = io::Error::new(err.kind(), err.to_string());
+                            let err2 = Error::new(err.kind(), err.to_string());
                             sendif!(log_sender, EventData::FailedBindSandstormSocket(socket_address, err));
                             let _ = result_notifier.send(Err(err2));
                         }

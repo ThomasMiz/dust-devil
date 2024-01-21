@@ -1,4 +1,4 @@
-use std::io;
+use std::io::Error;
 
 use tokio::io::{AsyncRead, AsyncReadExt};
 
@@ -6,14 +6,14 @@ pub const BUFFER_CAPACITY: usize = 0x2000;
 
 #[derive(Debug)]
 pub enum ProcessFileLinesError<T> {
-    IO(io::Error),
+    IO(Error),
     InvalidUtf8 { line_number: u32, byte_at: usize },
     LineTooLong { line_number: u32, byte_at: usize },
     Cancelled(u32, T),
 }
 
-impl<T> From<io::Error> for ProcessFileLinesError<T> {
-    fn from(value: io::Error) -> Self {
+impl<T> From<Error> for ProcessFileLinesError<T> {
+    fn from(value: Error) -> Self {
         ProcessFileLinesError::IO(value)
     }
 }

@@ -1,4 +1,4 @@
-use std::io::{self, ErrorKind};
+use std::io::{Error, ErrorKind};
 
 use tokio::io::{AsyncRead, AsyncWrite};
 
@@ -31,11 +31,11 @@ pub enum ParseHandshakeError {
     InvalidVersion(u8),
 
     /// Indicates that an IO error ocurred while reading the handshake.
-    IO(io::Error),
+    IO(Error),
 }
 
-impl From<io::Error> for ParseHandshakeError {
-    fn from(value: io::Error) -> Self {
+impl From<Error> for ParseHandshakeError {
+    fn from(value: Error) -> Self {
         ParseHandshakeError::IO(value)
     }
 }
@@ -72,26 +72,25 @@ impl<'a> SandstormHandshakeRef<'a> {
 }
 
 impl ByteRead for SandstormHandshake {
-    async fn read<R: AsyncRead + Unpin + ?Sized>(reader: &mut R) -> Result<Self, io::Error> {
+    async fn read<R: AsyncRead + Unpin + ?Sized>(reader: &mut R) -> Result<Self, Error> {
         match Self::read_with_version_check(reader).await {
             Ok(value) => Ok(value),
-            Err(ParseHandshakeError::InvalidVersion(version)) => Err(io::Error::new(
-                ErrorKind::InvalidInput,
-                format!("Invalid Sandstorm version: {version}"),
-            )),
+            Err(ParseHandshakeError::InvalidVersion(version)) => {
+                Err(Error::new(ErrorKind::InvalidInput, format!("Invalid Sandstorm version: {version}")))
+            }
             Err(ParseHandshakeError::IO(error)) => Err(error),
         }
     }
 }
 
 impl ByteWrite for SandstormHandshake {
-    async fn write<W: AsyncWrite + Unpin + ?Sized>(&self, writer: &mut W) -> Result<(), io::Error> {
+    async fn write<W: AsyncWrite + Unpin + ?Sized>(&self, writer: &mut W) -> Result<(), Error> {
         self.as_ref().write(writer).await
     }
 }
 
 impl<'a> ByteWrite for SandstormHandshakeRef<'a> {
-    async fn write<W: AsyncWrite + Unpin + ?Sized>(&self, writer: &mut W) -> Result<(), io::Error> {
+    async fn write<W: AsyncWrite + Unpin + ?Sized>(&self, writer: &mut W) -> Result<(), Error> {
         (0x01u8, SmallWriteString(self.username), SmallWriteString(self.password))
             .write(writer)
             .await
@@ -135,15 +134,15 @@ impl U8ReprEnum for SandstormHandshakeStatus {
 }
 
 impl ByteRead for SandstormHandshakeStatus {
-    async fn read<R: AsyncRead + Unpin + ?Sized>(reader: &mut R) -> Result<Self, io::Error> {
+    async fn read<R: AsyncRead + Unpin + ?Sized>(reader: &mut R) -> Result<Self, Error> {
         match Self::from_u8(u8::read(reader).await?) {
             Some(value) => Ok(value),
-            None => Err(io::Error::new(ErrorKind::InvalidData, "Invalid SandstormHandshakeStatus type byte")),
+            None => Err(Error::new(ErrorKind::InvalidData, "Invalid SandstormHandshakeStatus type byte")),
         }
     }
 }
 impl ByteWrite for SandstormHandshakeStatus {
-    async fn write<W: AsyncWrite + Unpin + ?Sized>(&self, writer: &mut W) -> Result<(), io::Error> {
+    async fn write<W: AsyncWrite + Unpin + ?Sized>(&self, writer: &mut W) -> Result<(), Error> {
         self.into_u8().write(writer).await
     }
 }

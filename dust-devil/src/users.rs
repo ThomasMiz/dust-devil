@@ -37,7 +37,7 @@
 //! ```
 
 use std::{
-    io,
+    io::Error,
     path::Path,
     sync::atomic::{AtomicU32, Ordering},
 };
@@ -197,7 +197,7 @@ impl UserManager {
         UserManager::from(&mut file).await
     }
 
-    pub async fn save_to<T>(&self, writer: &mut T) -> Result<u64, io::Error>
+    pub async fn save_to<T>(&self, writer: &mut T) -> Result<u64, Error>
     where
         T: AsyncWrite + Unpin + ?Sized,
     {
@@ -227,7 +227,7 @@ impl UserManager {
         Ok(count)
     }
 
-    pub async fn save_to_file<F: AsRef<Path>>(&self, filename: F) -> Result<u64, io::Error> {
+    pub async fn save_to_file<F: AsRef<Path>>(&self, filename: F) -> Result<u64, Error> {
         let file = File::create(filename).await?;
         let mut writer = BufWriter::new(file);
         let count = self.save_to(&mut writer).await?;

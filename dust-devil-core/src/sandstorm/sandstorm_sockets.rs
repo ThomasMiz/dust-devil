@@ -1,4 +1,4 @@
-use std::{io, net::SocketAddr};
+use std::{io::Error, net::SocketAddr};
 
 use tokio::io::{AsyncRead, AsyncWrite};
 
@@ -28,31 +28,31 @@ impl ListSandstormSocketsResponse {
 }
 
 impl ByteRead for ListSandstormSocketsRequest {
-    async fn read<R: AsyncRead + Unpin + ?Sized>(_reader: &mut R) -> Result<Self, io::Error> {
+    async fn read<R: AsyncRead + Unpin + ?Sized>(_reader: &mut R) -> Result<Self, Error> {
         Ok(Self)
     }
 }
 
 impl ByteWrite for ListSandstormSocketsRequest {
-    async fn write<W: AsyncWrite + Unpin + ?Sized>(&self, writer: &mut W) -> Result<(), io::Error> {
+    async fn write<W: AsyncWrite + Unpin + ?Sized>(&self, writer: &mut W) -> Result<(), Error> {
         SandstormCommandType::ListSandstormSockets.write(writer).await
     }
 }
 
 impl ByteRead for ListSandstormSocketsResponse {
-    async fn read<R: AsyncRead + Unpin + ?Sized>(reader: &mut R) -> Result<Self, io::Error> {
+    async fn read<R: AsyncRead + Unpin + ?Sized>(reader: &mut R) -> Result<Self, Error> {
         Ok(Self(<Vec<SocketAddr> as ByteRead>::read(reader).await?))
     }
 }
 
 impl ByteWrite for ListSandstormSocketsResponse {
-    async fn write<W: AsyncWrite + Unpin + ?Sized>(&self, writer: &mut W) -> Result<(), io::Error> {
+    async fn write<W: AsyncWrite + Unpin + ?Sized>(&self, writer: &mut W) -> Result<(), Error> {
         self.as_ref().write(writer).await
     }
 }
 
 impl<'a> ByteWrite for ListSandstormSocketsResponseRef<'a> {
-    async fn write<W: AsyncWrite + Unpin + ?Sized>(&self, writer: &mut W) -> Result<(), io::Error> {
+    async fn write<W: AsyncWrite + Unpin + ?Sized>(&self, writer: &mut W) -> Result<(), Error> {
         (SandstormCommandType::ListSandstormSockets, self.0).write(writer).await
     }
 }
@@ -66,13 +66,13 @@ pub struct AddSandstormSocketRequest(
 /// A Sandstorm add-sandstorm-socket response.
 pub struct AddSandstormSocketResponse(
     /// The result of the add socket operation.
-    pub Result<(), io::Error>,
+    pub Result<(), Error>,
 );
 
 /// A borrowed version of [`AddSandstormSocketResponse`].
 pub struct AddSandstormSocketResponseRef<'a>(
     /// The result of the add socket operation.
-    pub Result<(), &'a io::Error>,
+    pub Result<(), &'a Error>,
 );
 
 impl AddSandstormSocketResponse {
@@ -82,31 +82,31 @@ impl AddSandstormSocketResponse {
 }
 
 impl ByteRead for AddSandstormSocketRequest {
-    async fn read<R: AsyncRead + Unpin + ?Sized>(reader: &mut R) -> Result<Self, io::Error> {
+    async fn read<R: AsyncRead + Unpin + ?Sized>(reader: &mut R) -> Result<Self, Error> {
         Ok(Self(SocketAddr::read(reader).await?))
     }
 }
 
 impl ByteWrite for AddSandstormSocketRequest {
-    async fn write<W: AsyncWrite + Unpin + ?Sized>(&self, writer: &mut W) -> Result<(), io::Error> {
+    async fn write<W: AsyncWrite + Unpin + ?Sized>(&self, writer: &mut W) -> Result<(), Error> {
         (SandstormCommandType::AddSandstormSocket, &self.0).write(writer).await
     }
 }
 
 impl ByteRead for AddSandstormSocketResponse {
-    async fn read<R: AsyncRead + Unpin + ?Sized>(reader: &mut R) -> Result<Self, io::Error> {
-        Ok(Self(<Result<(), io::Error> as ByteRead>::read(reader).await?))
+    async fn read<R: AsyncRead + Unpin + ?Sized>(reader: &mut R) -> Result<Self, Error> {
+        Ok(Self(<Result<(), Error> as ByteRead>::read(reader).await?))
     }
 }
 
 impl ByteWrite for AddSandstormSocketResponse {
-    async fn write<W: AsyncWrite + Unpin + ?Sized>(&self, writer: &mut W) -> Result<(), io::Error> {
+    async fn write<W: AsyncWrite + Unpin + ?Sized>(&self, writer: &mut W) -> Result<(), Error> {
         self.as_ref().write(writer).await
     }
 }
 
 impl<'a> ByteWrite for AddSandstormSocketResponseRef<'a> {
-    async fn write<W: AsyncWrite + Unpin + ?Sized>(&self, writer: &mut W) -> Result<(), io::Error> {
+    async fn write<W: AsyncWrite + Unpin + ?Sized>(&self, writer: &mut W) -> Result<(), Error> {
         (SandstormCommandType::AddSandstormSocket, self.0).write(writer).await
     }
 }
@@ -124,25 +124,25 @@ pub struct RemoveSandstormSocketResponse(
 );
 
 impl ByteRead for RemoveSandstormSocketRequest {
-    async fn read<R: AsyncRead + Unpin + ?Sized>(reader: &mut R) -> Result<Self, io::Error> {
+    async fn read<R: AsyncRead + Unpin + ?Sized>(reader: &mut R) -> Result<Self, Error> {
         Ok(Self(SocketAddr::read(reader).await?))
     }
 }
 
 impl ByteWrite for RemoveSandstormSocketRequest {
-    async fn write<W: AsyncWrite + Unpin + ?Sized>(&self, writer: &mut W) -> Result<(), io::Error> {
+    async fn write<W: AsyncWrite + Unpin + ?Sized>(&self, writer: &mut W) -> Result<(), Error> {
         (SandstormCommandType::RemoveSandstormSocket, &self.0).write(writer).await
     }
 }
 
 impl ByteRead for RemoveSandstormSocketResponse {
-    async fn read<R: AsyncRead + Unpin + ?Sized>(reader: &mut R) -> Result<Self, io::Error> {
+    async fn read<R: AsyncRead + Unpin + ?Sized>(reader: &mut R) -> Result<Self, Error> {
         Ok(Self(RemoveSocketResponse::read(reader).await?))
     }
 }
 
 impl ByteWrite for RemoveSandstormSocketResponse {
-    async fn write<W: AsyncWrite + Unpin + ?Sized>(&self, writer: &mut W) -> Result<(), io::Error> {
+    async fn write<W: AsyncWrite + Unpin + ?Sized>(&self, writer: &mut W) -> Result<(), Error> {
         (SandstormCommandType::RemoveSandstormSocket, &self.0).write(writer).await
     }
 }

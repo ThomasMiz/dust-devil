@@ -1,8 +1,8 @@
-use std::{future::poll_fn, io, net::SocketAddr, task::Poll};
+use std::{future::poll_fn, io::Error, net::SocketAddr, task::Poll};
 
 use tokio::net::{TcpListener, TcpStream};
 
-pub async fn accept_from_any(listeners: &[TcpListener]) -> Result<(TcpStream, SocketAddr), (&TcpListener, io::Error)> {
+pub async fn accept_from_any(listeners: &[TcpListener]) -> Result<(TcpStream, SocketAddr), (&TcpListener, Error)> {
     poll_fn(|cx| {
         for l in listeners {
             let poll_status = l.poll_accept(cx);

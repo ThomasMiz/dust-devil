@@ -1,4 +1,4 @@
-use std::{io, net::SocketAddr};
+use std::{io::Error, net::SocketAddr};
 
 use dust_devil_core::{
     sandstorm::{AddUserResponse, DeleteUserResponse, Metrics, RemoveSocketResponse, UpdateUserResponse},
@@ -11,10 +11,10 @@ pub enum ResponseNotification {
     Shutdown(Receiver<()>),
     LogEventConfig(bool),
     ListSocks5Sockets(Receiver<Vec<SocketAddr>>),
-    AddSocks5Socket(Receiver<Result<(), io::Error>>),
+    AddSocks5Socket(Receiver<Result<(), Error>>),
     RemoveSocks5Socket(Receiver<RemoveSocketResponse>),
     ListSandstormSockets(Receiver<Vec<SocketAddr>>),
-    AddSandstormSocket(Receiver<Result<(), io::Error>>),
+    AddSandstormSocket(Receiver<Result<(), Error>>),
     RemoveSandstormSocket(Receiver<RemoveSocketResponse>),
     ListUsers(Vec<(String, UserRole)>),
     AddUser(AddUserResponse),

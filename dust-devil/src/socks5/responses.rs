@@ -1,4 +1,4 @@
-use std::{io, net::SocketAddr};
+use std::{io::Error, net::SocketAddr};
 
 use dust_devil_core::{socks5::AuthMethod, u8_repr_enum::U8ReprEnum};
 use tokio::io::{AsyncWrite, AsyncWriteExt};
@@ -16,7 +16,7 @@ pub enum SocksStatus {
     AddressTypeNotSupported = 8,
 }
 
-pub async fn send_handshake_response<W>(writer: &mut W, method: Option<AuthMethod>) -> Result<(), io::Error>
+pub async fn send_handshake_response<W>(writer: &mut W, method: Option<AuthMethod>) -> Result<(), Error>
 where
     W: AsyncWrite + Unpin + ?Sized,
 {
@@ -24,7 +24,7 @@ where
     writer.write_all(&buf).await
 }
 
-pub async fn send_request_response<W>(writer: &mut W, status: SocksStatus, socket_bound: Option<SocketAddr>) -> Result<(), std::io::Error>
+pub async fn send_request_response<W>(writer: &mut W, status: SocksStatus, socket_bound: Option<SocketAddr>) -> Result<(), Error>
 where
     W: AsyncWrite + Unpin + ?Sized,
 {

@@ -8,7 +8,7 @@ use tokio::io::{AsyncBufRead, AsyncWrite};
 
 use std::{
     future::poll_fn,
-    io,
+    io::Error,
     pin::Pin,
     task::{ready, Context, Poll},
 };
@@ -28,7 +28,7 @@ fn transfer_one_direction<R, W>(
     writer: &mut W,
     context: &mut ClientContext,
     is_src_to_dst: bool,
-) -> Poll<io::Result<()>>
+) -> Poll<Result<(), Error>>
 where
     R: AsyncBufRead + Unpin + ?Sized,
     W: AsyncWrite + Unpin + ?Sized,
@@ -91,7 +91,7 @@ pub async fn copy_bidirectional<
     dst_reader: &'a mut R2,
     dst_writer: &'a mut W2,
     context: &mut ClientContext,
-) -> Result<(), io::Error> {
+) -> Result<(), Error> {
     let mut src_to_dst = TransferState::Running;
     let mut dst_to_src = TransferState::Running;
 

@@ -1,4 +1,4 @@
-use std::io;
+use std::io::Error;
 
 use dust_devil_core::{
     sandstorm::{ParseHandshakeError, SandstormHandshake, SandstormHandshakeStatus},
@@ -42,7 +42,7 @@ pub async fn handle_sandstorm(stream: TcpStream, mut context: SandstormContext, 
     }
 }
 
-async fn handle_sandstorm_inner(mut stream: TcpStream, context: &mut SandstormContext) -> Result<(), io::Error> {
+async fn handle_sandstorm_inner(mut stream: TcpStream, context: &mut SandstormContext) -> Result<(), Error> {
     let (reader, mut writer) = stream.split();
     let mut reader = BufReader::with_capacity(SANDSTORM_READ_BUFFER_SIZE, reader);
 

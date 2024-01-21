@@ -52,7 +52,7 @@
 //! responses for different simultaneous requests may not even come back in the same order, leading
 //! to a faster protocol, but at the cost of the complexity of implementations.
 
-use std::io::{self, ErrorKind};
+use std::io::{Error, ErrorKind};
 
 use tokio::io::{AsyncRead, AsyncWrite};
 
@@ -140,16 +140,16 @@ impl U8ReprEnum for SandstormCommandType {
 }
 
 impl ByteWrite for SandstormCommandType {
-    async fn write<W: AsyncWrite + Unpin + ?Sized>(&self, writer: &mut W) -> Result<(), io::Error> {
+    async fn write<W: AsyncWrite + Unpin + ?Sized>(&self, writer: &mut W) -> Result<(), Error> {
         self.into_u8().write(writer).await
     }
 }
 
 impl ByteRead for SandstormCommandType {
-    async fn read<R: AsyncRead + Unpin + ?Sized>(reader: &mut R) -> Result<Self, io::Error> {
+    async fn read<R: AsyncRead + Unpin + ?Sized>(reader: &mut R) -> Result<Self, Error> {
         match SandstormCommandType::from_u8(u8::read(reader).await?) {
             Some(value) => Ok(value),
-            None => Err(io::Error::new(ErrorKind::InvalidData, "Invalid SandstormCommandType type byte")),
+            None => Err(Error::new(ErrorKind::InvalidData, "Invalid SandstormCommandType type byte")),
         }
     }
 }
@@ -178,16 +178,16 @@ impl U8ReprEnum for RemoveSocketResponse {
 }
 
 impl ByteRead for RemoveSocketResponse {
-    async fn read<R: AsyncRead + Unpin + ?Sized>(reader: &mut R) -> Result<Self, io::Error> {
+    async fn read<R: AsyncRead + Unpin + ?Sized>(reader: &mut R) -> Result<Self, Error> {
         match Self::from_u8(u8::read(reader).await?) {
             Some(value) => Ok(value),
-            None => Err(io::Error::new(ErrorKind::InvalidData, "Invalid RemoveSocketResponse type byte")),
+            None => Err(Error::new(ErrorKind::InvalidData, "Invalid RemoveSocketResponse type byte")),
         }
     }
 }
 
 impl ByteWrite for RemoveSocketResponse {
-    async fn write<W: AsyncWrite + Unpin + ?Sized>(&self, writer: &mut W) -> Result<(), io::Error> {
+    async fn write<W: AsyncWrite + Unpin + ?Sized>(&self, writer: &mut W) -> Result<(), Error> {
         self.into_u8().write(writer).await
     }
 }

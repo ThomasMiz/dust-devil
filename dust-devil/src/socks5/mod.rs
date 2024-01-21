@@ -1,5 +1,5 @@
 use std::{
-    io::{self, ErrorKind},
+    io::{Error, ErrorKind},
     net::{SocketAddr, SocketAddrV4, SocketAddrV6},
 };
 
@@ -34,8 +34,8 @@ use auth::*;
 use parsers::*;
 use responses::*;
 
-impl From<&io::Error> for responses::SocksStatus {
-    fn from(value: &io::Error) -> Self {
+impl From<&Error> for responses::SocksStatus {
+    fn from(value: &Error) -> Self {
         match value.kind() {
             ErrorKind::ConnectionAborted | ErrorKind::ConnectionRefused | ErrorKind::ConnectionReset => SocksStatus::ConnectionRefused,
             ErrorKind::NotConnected => SocksStatus::NetworkUnreachable,
@@ -65,7 +65,7 @@ pub async fn handle_socks5(stream: TcpStream, mut context: ClientContext, cancel
     }
 }
 
-async fn handle_socks5_inner(mut stream: TcpStream, context: &mut ClientContext) -> Result<(), io::Error> {
+async fn handle_socks5_inner(mut stream: TcpStream, context: &mut ClientContext) -> Result<(), Error> {
     let (reader, mut writer) = stream.split();
     let mut reader = BufReader::with_capacity(context.buffer_size(), reader);
     let maybe_auth_method = match parse_handshake(&mut reader).await {

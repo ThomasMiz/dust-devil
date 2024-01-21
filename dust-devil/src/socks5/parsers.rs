@@ -1,5 +1,5 @@
 use std::{
-    io,
+    io::Error,
     net::{Ipv4Addr, Ipv6Addr},
 };
 
@@ -11,11 +11,11 @@ use crate::utils::chunk_reader::read_domainname;
 #[derive(Debug)]
 pub enum ParseHandshakeError {
     InvalidVersion(u8),
-    IO(io::Error),
+    IO(Error),
 }
 
-impl From<io::Error> for ParseHandshakeError {
-    fn from(value: io::Error) -> Self {
+impl From<Error> for ParseHandshakeError {
+    fn from(value: Error) -> Self {
         ParseHandshakeError::IO(value)
     }
 }
@@ -45,11 +45,11 @@ pub enum ParseRequestError {
     InvalidVersion(u8),
     CommandNotSupported(u8),
     InvalidATYP(u8),
-    IO(io::Error),
+    IO(Error),
 }
 
-impl From<io::Error> for ParseRequestError {
-    fn from(value: io::Error) -> Self {
+impl From<Error> for ParseRequestError {
+    fn from(value: Error) -> Self {
         ParseRequestError::IO(value)
     }
 }

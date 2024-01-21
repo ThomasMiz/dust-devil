@@ -1,4 +1,4 @@
-use std::io;
+use std::io::Error;
 
 use tokio::io::{AsyncRead, AsyncWrite};
 
@@ -16,25 +16,25 @@ pub struct GetBufferSizeResponse(
 );
 
 impl ByteRead for GetBufferSizeRequest {
-    async fn read<R: AsyncRead + Unpin + ?Sized>(_reader: &mut R) -> Result<Self, io::Error> {
+    async fn read<R: AsyncRead + Unpin + ?Sized>(_reader: &mut R) -> Result<Self, Error> {
         Ok(Self)
     }
 }
 
 impl ByteWrite for GetBufferSizeRequest {
-    async fn write<W: AsyncWrite + Unpin + ?Sized>(&self, writer: &mut W) -> Result<(), io::Error> {
+    async fn write<W: AsyncWrite + Unpin + ?Sized>(&self, writer: &mut W) -> Result<(), Error> {
         SandstormCommandType::GetBufferSize.write(writer).await
     }
 }
 
 impl ByteRead for GetBufferSizeResponse {
-    async fn read<R: AsyncRead + Unpin + ?Sized>(reader: &mut R) -> Result<Self, io::Error> {
+    async fn read<R: AsyncRead + Unpin + ?Sized>(reader: &mut R) -> Result<Self, Error> {
         Ok(Self(u32::read(reader).await?))
     }
 }
 
 impl ByteWrite for GetBufferSizeResponse {
-    async fn write<W: AsyncWrite + Unpin + ?Sized>(&self, writer: &mut W) -> Result<(), io::Error> {
+    async fn write<W: AsyncWrite + Unpin + ?Sized>(&self, writer: &mut W) -> Result<(), Error> {
         (SandstormCommandType::GetBufferSize, self.0).write(writer).await
     }
 }
@@ -52,25 +52,25 @@ pub struct SetBufferSizeResponse(
 );
 
 impl ByteRead for SetBufferSizeRequest {
-    async fn read<R: AsyncRead + Unpin + ?Sized>(reader: &mut R) -> Result<Self, io::Error> {
+    async fn read<R: AsyncRead + Unpin + ?Sized>(reader: &mut R) -> Result<Self, Error> {
         Ok(Self(u32::read(reader).await?))
     }
 }
 
 impl ByteWrite for SetBufferSizeRequest {
-    async fn write<W: AsyncWrite + Unpin + ?Sized>(&self, writer: &mut W) -> Result<(), io::Error> {
+    async fn write<W: AsyncWrite + Unpin + ?Sized>(&self, writer: &mut W) -> Result<(), Error> {
         (SandstormCommandType::SetBufferSize, self.0).write(writer).await
     }
 }
 
 impl ByteRead for SetBufferSizeResponse {
-    async fn read<R: AsyncRead + Unpin + ?Sized>(reader: &mut R) -> Result<Self, io::Error> {
+    async fn read<R: AsyncRead + Unpin + ?Sized>(reader: &mut R) -> Result<Self, Error> {
         Ok(Self(bool::read(reader).await?))
     }
 }
 
 impl ByteWrite for SetBufferSizeResponse {
-    async fn write<W: AsyncWrite + Unpin + ?Sized>(&self, writer: &mut W) -> Result<(), io::Error> {
+    async fn write<W: AsyncWrite + Unpin + ?Sized>(&self, writer: &mut W) -> Result<(), Error> {
         (SandstormCommandType::SetBufferSize, self.0).write(writer).await
     }
 }

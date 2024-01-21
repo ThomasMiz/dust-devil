@@ -1,7 +1,7 @@
 use std::{
     collections::VecDeque,
     future::{self, Future},
-    io::{self, ErrorKind},
+    io::{Error, ErrorKind},
     net::SocketAddr,
     ops::DerefMut,
     pin::Pin,
@@ -39,13 +39,13 @@ const RECEIVER_BUFFER_SIZE: usize = 4;
 
 enum SocketRequestReceiver {
     List(oneshot::Receiver<Vec<SocketAddr>>),
-    Add(oneshot::Receiver<Result<(), io::Error>>),
+    Add(oneshot::Receiver<Result<(), Error>>),
     Remove(oneshot::Receiver<RemoveSocketResponse>),
 }
 
 enum SocketRequestResult {
     List(Vec<SocketAddr>),
-    Add(Result<(), io::Error>),
+    Add(Result<(), Error>),
     Remove(RemoveSocketResponse),
 }
 
@@ -160,7 +160,7 @@ pub async fn handle_responses<W>(
     writer: &mut BufWriter<W>,
     context: &SandstormContext,
     mut response_notifier: mpsc::Receiver<ResponseNotification>,
-) -> Result<(), io::Error>
+) -> Result<(), Error>
 where
     W: AsyncWrite + Unpin,
 {
@@ -213,7 +213,7 @@ where
                 match maybe_event {
                     Ok(evt) => EventStreamResponseRef(evt.as_ref()).write(writer).await?,
                     Err(broadcast::error::RecvError::Closed) => break,
-                    Err(broadcast::error::RecvError::Lagged(count)) => return Err(io::Error::new(ErrorKind::Other, format!("Connection too slow to stream events, lagged behind {count} events!"))),
+                    Err(broadcast::error::RecvError::Lagged(count)) => return Err(Error::new(ErrorKind::Other, format!("Connection too slow to stream events, lagged behind {count} events!"))),
                 }
             }
             _ = stall_if_empty(writer) => writer.flush().await?,
@@ -223,7 +223,7 @@ where
     Ok(())
 }
 
-async fn handle_socks5_response<W>(socket_result: SocketRequestResult, writer: &mut W) -> Result<(), io::Error>
+async fn handle_socks5_response<W>(socket_result: SocketRequestResult, writer: &mut W) -> Result<(), Error>
 where
     W: AsyncWrite + Unpin + ?Sized,
 {
@@ -234,7 +234,7 @@ where
     }
 }
 
-async fn handle_sandstorm_response<W>(socket_result: SocketRequestResult, writer: &mut W) -> Result<(), io::Error>
+async fn handle_sandstorm_response<W>(socket_result: SocketRequestResult, writer: &mut W) -> Result<(), Error>
 where
     W: AsyncWrite + Unpin + ?Sized,
 {
@@ -250,7 +250,7 @@ async fn handle_notification<W>(
     writer: &mut W,
     context: &SandstormContext,
     handler_state: &mut ResponseHandlerState,
-) -> Result<(), io::Error>
+) -> Result<(), Error>
 where
     W: AsyncWrite + Unpin + ?Sized,
 {

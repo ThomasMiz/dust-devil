@@ -1,5 +1,5 @@
 use std::{
-    io,
+    io::Error,
     net::SocketAddr,
     sync::{
         atomic::{AtomicBool, AtomicU32, Ordering},
@@ -327,7 +327,7 @@ impl SandstormContext {
         result_rx
     }
 
-    pub async fn add_socks5_socket(&self, socket_address: SocketAddr) -> Receiver<Result<(), io::Error>> {
+    pub async fn add_socks5_socket(&self, socket_address: SocketAddr) -> Receiver<Result<(), Error>> {
         log!(self, EventData::NewSocksSocketRequestedByManager(self.manager_id, socket_address));
 
         let (result_tx, result_rx) = oneshot::channel();
@@ -363,7 +363,7 @@ impl SandstormContext {
         result_rx
     }
 
-    pub async fn add_sandstorm_socket(&self, socket_address: SocketAddr) -> Receiver<Result<(), io::Error>> {
+    pub async fn add_sandstorm_socket(&self, socket_address: SocketAddr) -> Receiver<Result<(), Error>> {
         log!(
             self,
             EventData::NewSandstormSocketRequestedByManager(self.manager_id, socket_address)

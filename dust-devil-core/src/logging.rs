@@ -4,7 +4,7 @@
 
 use std::{
     fmt,
-    io::{self, ErrorKind},
+    io::{Error, ErrorKind},
     net::SocketAddr,
 };
 
@@ -31,21 +31,21 @@ impl Event {
 /// All the possible server events that can be reported.
 pub enum EventData {
     NewSocks5Socket(SocketAddr),
-    FailedBindSocks5Socket(SocketAddr, io::Error),
+    FailedBindSocks5Socket(SocketAddr, Error),
     FailedBindAnySocketAborting,
     RemovedSocks5Socket(SocketAddr),
     NewSandstormSocket(SocketAddr),
-    FailedBindSandstormSocket(SocketAddr, io::Error),
+    FailedBindSandstormSocket(SocketAddr, Error),
     RemovedSandstormSocket(SocketAddr),
     LoadingUsersFromFile(String),
     UsersLoadedFromFile(String, Result<u64, UsersLoadingError>),
     StartingUpWithSingleDefaultUser(String),
     SavingUsersToFile(String),
-    UsersSavedToFile(String, Result<u64, io::Error>),
+    UsersSavedToFile(String, Result<u64, Error>),
     UserRegisteredByArgs(String, UserRole),
     UserReplacedByArgs(String, UserRole),
     NewClientConnectionAccepted(u64, SocketAddr),
-    ClientConnectionAcceptFailed(Option<SocketAddr>, io::Error),
+    ClientConnectionAcceptFailed(Option<SocketAddr>, Error),
     ClientRequestedUnsupportedVersion(u64, u8),
     ClientRequestedUnsupportedCommand(u64, u8),
     ClientRequestedUnsupportedAtyp(u64, u8),
@@ -56,17 +56,17 @@ pub enum EventData {
     ClientSocksRequest(u64, SocksRequest),
     ClientDnsLookup(u64, String),
     ClientAttemptingConnect(u64, SocketAddr),
-    ClientConnectionAttemptBindFailed(u64, io::Error),
-    ClientConnectionAttemptConnectFailed(u64, io::Error),
+    ClientConnectionAttemptBindFailed(u64, Error),
+    ClientConnectionAttemptConnectFailed(u64, Error),
     ClientFailedToConnectToDestination(u64),
     ClientConnectedToDestination(u64, SocketAddr),
     ClientBytesSent(u64, u64),
     ClientBytesReceived(u64, u64),
     ClientSourceShutdown(u64),
     ClientDestinationShutdown(u64),
-    ClientConnectionFinished(u64, u64, u64, Result<(), io::Error>),
+    ClientConnectionFinished(u64, u64, u64, Result<(), Error>),
     NewSandstormConnectionAccepted(u64, SocketAddr),
-    SandstormConnectionAcceptFailed(Option<SocketAddr>, io::Error),
+    SandstormConnectionAcceptFailed(Option<SocketAddr>, Error),
     SandstormRequestedUnsupportedVersion(u64, u8),
     SandstormAuthenticatedAs(u64, String, bool),
     NewSocksSocketRequestedByManager(u64, SocketAddr),
@@ -79,7 +79,7 @@ pub enum EventData {
     AuthMethodToggledByManager(u64, AuthMethod, bool),
     BufferSizeChangedByManager(u64, u32),
     SandstormRequestedShutdown(u64),
-    SandstormConnectionFinished(u64, Result<(), io::Error>),
+    SandstormConnectionFinished(u64, Result<(), Error>),
     ShutdownSignalReceived,
 }
 
@@ -159,21 +159,21 @@ impl fmt::Display for EventData {
 }
 
 impl ByteRead for EventData {
-    async fn read<R: AsyncRead + Unpin + ?Sized>(reader: &mut R) -> Result<Self, io::Error> {
+    async fn read<R: AsyncRead + Unpin + ?Sized>(reader: &mut R) -> Result<Self, Error> {
         let t = u8::read(reader).await?;
 
         match t {
             0x01 => Ok(Self::NewSocks5Socket(SocketAddr::read(reader).await?)),
             0x02 => Ok(Self::FailedBindSocks5Socket(
                 SocketAddr::read(reader).await?,
-                io::Error::read(reader).await?,
+                Error::read(reader).await?,
             )),
             0x03 => Ok(Self::FailedBindAnySocketAborting),
             0x04 => Ok(Self::RemovedSocks5Socket(SocketAddr::read(reader).await?)),
             0x05 => Ok(Self::NewSandstormSocket(SocketAddr::read(reader).await?)),
             0x06 => Ok(Self::FailedBindSandstormSocket(
                 SocketAddr::read(reader).await?,
-                io::Error::read(reader).await?,
+                Error::read(reader).await?,
             )),
             0x07 => Ok(Self::RemovedSandstormSocket(SocketAddr::read(reader).await?)),
             0x08 => Ok(Self::LoadingUsersFromFile(String::read(reader).await?)),
@@ -185,7 +185,7 @@ impl ByteRead for EventData {
             0x0B => Ok(Self::SavingUsersToFile(String::read(reader).await?)),
             0x0C => Ok(Self::UsersSavedToFile(
                 String::read(reader).await?,
-                <Result<u64, io::Error> as ByteRead>::read(reader).await?,
+                <Result<u64, Error> as ByteRead>::read(reader).await?,
             )),
             0x0D => Ok(Self::UserRegisteredByArgs(
                 SmallReadString::read(reader).await?.0,
@@ -201,7 +201,7 @@ impl ByteRead for EventData {
             )),
             0x10 => Ok(Self::ClientConnectionAcceptFailed(
                 <Option<SocketAddr> as ByteRead>::read(reader).await?,
-                io::Error::read(reader).await?,
+                Error::read(reader).await?,
             )),
             0x11 => Ok(Self::ClientRequestedUnsupportedVersion(
                 u64::read(reader).await?,
@@ -243,11 +243,11 @@ impl ByteRead for EventData {
             )),
             0x1B => Ok(Self::ClientConnectionAttemptBindFailed(
                 u64::read(reader).await?,
-                io::Error::read(reader).await?,
+                Error::read(reader).await?,
             )),
             0x1C => Ok(Self::ClientConnectionAttemptConnectFailed(
                 u64::read(reader).await?,
-                io::Error::read(reader).await?,
+                Error::read(reader).await?,
             )),
             0x1D => Ok(Self::ClientFailedToConnectToDestination(u64::read(reader).await?)),
             0x1E => Ok(Self::ClientConnectedToDestination(
@@ -262,7 +262,7 @@ impl ByteRead for EventData {
                 u64::read(reader).await?,
                 u64::read(reader).await?,
                 u64::read(reader).await?,
-                <Result<(), io::Error> as ByteRead>::read(reader).await?,
+                <Result<(), Error> as ByteRead>::read(reader).await?,
             )),
             0x24 => Ok(Self::NewSandstormConnectionAccepted(
                 u64::read(reader).await?,
@@ -270,7 +270,7 @@ impl ByteRead for EventData {
             )),
             0x25 => Ok(Self::SandstormConnectionAcceptFailed(
                 <Option<SocketAddr> as ByteRead>::read(reader).await?,
-                io::Error::read(reader).await?,
+                Error::read(reader).await?,
             )),
             0x26 => Ok(Self::SandstormRequestedUnsupportedVersion(
                 u64::read(reader).await?,
@@ -322,16 +322,16 @@ impl ByteRead for EventData {
             0x31 => Ok(Self::SandstormRequestedShutdown(u64::read(reader).await?)),
             0x32 => Ok(Self::SandstormConnectionFinished(
                 u64::read(reader).await?,
-                <Result<(), io::Error> as ByteRead>::read(reader).await?,
+                <Result<(), Error> as ByteRead>::read(reader).await?,
             )),
             0x33 => Ok(Self::ShutdownSignalReceived),
-            _ => Err(io::Error::new(ErrorKind::InvalidData, "Invalid EventData type byte")),
+            _ => Err(Error::new(ErrorKind::InvalidData, "Invalid EventData type byte")),
         }
     }
 }
 
 impl ByteWrite for EventData {
-    async fn write<W: AsyncWrite + Unpin + ?Sized>(&self, writer: &mut W) -> Result<(), io::Error> {
+    async fn write<W: AsyncWrite + Unpin + ?Sized>(&self, writer: &mut W) -> Result<(), Error> {
         match self {
             Self::NewSocks5Socket(socket_address) => (0x01u8, socket_address).write(writer).await,
             Self::FailedBindSocks5Socket(socket_address, io_error) => (0x02u8, socket_address, io_error).write(writer).await,
@@ -407,13 +407,13 @@ impl ByteWrite for EventData {
 }
 
 impl ByteRead for Event {
-    async fn read<R: AsyncRead + Unpin + ?Sized>(reader: &mut R) -> Result<Self, io::Error> {
+    async fn read<R: AsyncRead + Unpin + ?Sized>(reader: &mut R) -> Result<Self, Error> {
         Ok(Self::new(i64::read(reader).await?, EventData::read(reader).await?))
     }
 }
 
 impl ByteWrite for Event {
-    async fn write<W: AsyncWrite + Unpin + ?Sized>(&self, writer: &mut W) -> Result<(), io::Error> {
+    async fn write<W: AsyncWrite + Unpin + ?Sized>(&self, writer: &mut W) -> Result<(), Error> {
         self.timestamp.write(writer).await?;
         self.data.write(writer).await
     }

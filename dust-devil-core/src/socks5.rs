@@ -2,7 +2,7 @@
 //! [`ByteWrite`] for them.
 
 use std::{
-    io::{self, ErrorKind},
+    io::{Error, ErrorKind},
     net::{Ipv4Addr, Ipv6Addr},
 };
 
@@ -22,7 +22,7 @@ pub enum SocksRequestAddress {
 }
 
 impl ByteWrite for SocksRequestAddress {
-    async fn write<W: AsyncWrite + Unpin + ?Sized>(&self, writer: &mut W) -> Result<(), io::Error> {
+    async fn write<W: AsyncWrite + Unpin + ?Sized>(&self, writer: &mut W) -> Result<(), Error> {
         match self {
             Self::IPv4(v4) => (4u8, v4).write(writer).await,
             Self::IPv6(v6) => (6u8, v6).write(writer).await,
@@ -32,12 +32,12 @@ impl ByteWrite for SocksRequestAddress {
 }
 
 impl ByteRead for SocksRequestAddress {
-    async fn read<R: AsyncRead + Unpin + ?Sized>(reader: &mut R) -> Result<Self, io::Error> {
+    async fn read<R: AsyncRead + Unpin + ?Sized>(reader: &mut R) -> Result<Self, Error> {
         match u8::read(reader).await? {
             4 => Ok(SocksRequestAddress::IPv4(Ipv4Addr::read(reader).await?)),
             6 => Ok(SocksRequestAddress::IPv6(Ipv6Addr::read(reader).await?)),
             200 => Ok(SocksRequestAddress::Domainname(SmallReadString::read(reader).await?.0)),
-            _ => Err(io::Error::new(ErrorKind::InvalidData, "Invalid SocksRequestAddress type byte")),
+            _ => Err(Error::new(ErrorKind::InvalidData, "Invalid SocksRequestAddress type byte")),
         }
     }
 }
@@ -76,13 +76,13 @@ impl SocksRequest {
 }
 
 impl ByteWrite for SocksRequest {
-    async fn write<W: AsyncWrite + Unpin + ?Sized>(&self, writer: &mut W) -> Result<(), io::Error> {
+    async fn write<W: AsyncWrite + Unpin + ?Sized>(&self, writer: &mut W) -> Result<(), Error> {
         (&self.destination, self.port).write(writer).await
     }
 }
 
 impl ByteRead for SocksRequest {
-    async fn read<R: AsyncRead + Unpin + ?Sized>(reader: &mut R) -> Result<Self, io::Error> {
+    async fn read<R: AsyncRead + Unpin + ?Sized>(reader: &mut R) -> Result<Self, Error> {
         Ok(SocksRequest::new(
             SocksRequestAddress::read(reader).await?,
             u16::read(reader).await?,
@@ -115,16 +115,16 @@ impl U8ReprEnum for AuthMethod {
 }
 
 impl ByteWrite for AuthMethod {
-    async fn write<W: AsyncWrite + Unpin + ?Sized>(&self, writer: &mut W) -> Result<(), io::Error> {
+    async fn write<W: AsyncWrite + Unpin + ?Sized>(&self, writer: &mut W) -> Result<(), Error> {
         self.into_u8().write(writer).await
     }
 }
 
 impl ByteRead for AuthMethod {
-    async fn read<R: AsyncRead + Unpin + ?Sized>(reader: &mut R) -> Result<Self, io::Error> {
+    async fn read<R: AsyncRead + Unpin + ?Sized>(reader: &mut R) -> Result<Self, Error> {
         match Self::from_u8(u8::read(reader).await?) {
             Some(value) => Ok(value),
-            None => Err(io::Error::new(ErrorKind::InvalidData, "Invalid AuthMethod type byte")),
+            None => Err(Error::new(ErrorKind::InvalidData, "Invalid AuthMethod type byte")),
         }
     }
 }
