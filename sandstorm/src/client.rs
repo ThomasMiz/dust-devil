@@ -21,7 +21,7 @@ use crate::{
     sandstorm::SandstormRequestManager,
 };
 
-fn choose_read_buffer_sizes(startup_args: &StartupArguments) -> (usize, usize) {
+fn choose_buffer_sizes(startup_args: &StartupArguments) -> (usize, usize) {
     let read_buffer_size = match startup_args.output_logs {
         true => 0x2000,
         false => 0x1000,
@@ -46,7 +46,7 @@ pub async fn run_client(startup_args: StartupArguments) {
 }
 
 async fn run_client_inner(startup_args: StartupArguments) -> Result<(), Error> {
-    let (read_buffer_size, write_buffer_size) = choose_read_buffer_sizes(&startup_args);
+    let (read_buffer_size, write_buffer_size) = choose_buffer_sizes(&startup_args);
     printlnif!(
         startup_args.verbose,
         "Will use read buffer size of {read_buffer_size} and write buffer size of {write_buffer_size}"
@@ -138,7 +138,7 @@ where
     W: AsyncWrite + Unpin + ?Sized,
 {
     printlnif!(verbose, "Sending handshake");
-    SandstormHandshakeRef { username, password }.write(writer).await?;
+    SandstormHandshakeRef::new(username, password).write(writer).await?;
     writer.flush().await?;
 
     printlnif!(verbose, "Waiting for handshake response");

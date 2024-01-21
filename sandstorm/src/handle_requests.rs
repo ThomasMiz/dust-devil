@@ -1,5 +1,7 @@
-use core::fmt;
-use std::{fmt::Write, io::Error};
+use std::{
+    fmt::{self, Write},
+    io::Error,
+};
 
 use tokio::io::AsyncWrite;
 

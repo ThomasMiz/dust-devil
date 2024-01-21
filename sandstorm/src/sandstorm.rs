@@ -416,7 +416,16 @@ where
     pub async fn shutdown_and_close(mut self) -> Result<(), Error> {
         self.writer.shutdown().await?;
         let _ = self.reader_task_handle.await;
-        Ok(())
+        let handlers = self.handlers.borrow_mut();
+
+        match handlers.remaining {
+            0 => Ok(()),
+            rem if rem == handlers.shutdown_handlers.len() => Ok(()),
+            _ => Err(Error::new(
+                ErrorKind::UnexpectedEof,
+                "The server closed the connection before answering all the requests",
+            )),
+        }
     }
 
     pub async fn shutdown_fn<F: FnOnce(ShutdownResponse) + 'static>(&mut self, f: F) -> Result<(), Error> {
