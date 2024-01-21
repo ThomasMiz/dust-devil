@@ -6,7 +6,10 @@ use crate::serialize::{ByteRead, ByteWrite};
 
 use super::SandstormCommandType;
 
+/// A Sandstorm meow (ping) request.
 pub struct MeowRequest;
+
+/// A Sandstorm meow (ping) response.
 pub struct MeowResponse;
 
 impl ByteRead for MeowRequest {

@@ -9,8 +9,17 @@ use crate::{
 
 use super::SandstormCommandType;
 
-pub struct EventStreamResponse(pub Event);
-pub struct EventStreamResponseRef<'a>(pub &'a Event);
+/// A Sandstorm event stream message.
+pub struct EventStreamResponse(
+    /// The new event sent by the server.
+    pub Event,
+);
+
+/// A borrowed version of [`EventStreamResponse`].
+pub struct EventStreamResponseRef<'a>(
+    /// The new event sent by the server.
+    pub &'a Event,
+);
 
 impl EventStreamResponse {
     pub fn as_ref(&self) -> EventStreamResponseRef {

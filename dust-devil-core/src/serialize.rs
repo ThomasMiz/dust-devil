@@ -1,3 +1,49 @@
+//! Defines the [`ByteRead`] and [`ByteWrite`] traits and implements them for many basic types.
+//!
+//! This includes `()`, [`bool`], [`u8`], [`u16`], [`u32`], [`u64`], [`i64`] and [`char`], as well
+//! as more complex types, including [`str`] (write-only), [`String`], `[T]` (write-only),
+//! [`Vec<T>`], [`Ipv4Addr`], [`Ipv6Addr`], [`SocketAddrV4`], [`SocketAddrV6`], [`SocketAddr`],
+//! [`Option<T>`], [`Result<T, E>`] and [`io::Error`].
+//!
+//! # Serialization of [`Option<T>`] and [`Result<T, E>`]
+//! [`Option<T>`] types have [`ByteRead`] and [`ByteWrite`] implemented for `T: ByteRead`
+//! and/or `T: ByteWrite` respectively. Serializing this consists of a presence byte, 1 if Some and
+//! 0 if None, and if 1 then this byte is followed by the serialization of `T`.
+//!
+//! A similar strategy is used for [`Result<T, E>`], with the exception that if the presence byte
+//! is 0 then it is followed by the serialization of `E`.
+//!
+//! # Serialization of [`io::Error`]
+//! [`io::Error`] is serialized with the kind and it's `.to_string()`, as to preserve as much
+//! information on the error as possible.
+//!
+//! # Serialization of strings and lists
+//! [`String`] and [`str`] are serialized as chunked strings, starting with an [`u16`] indicating
+//! the length of the string in bytes, followed by said amount of bytes. Some strings however are
+//! not allowed to be longer than 255 bytes, particularly domain names, usernames and passwords, so
+//! these are serialized with [`u8`] length instead through the [`SmallReadString`] and
+//! [`SmallWriteString`] types, which wrap a [`String`] and an `&str` respectively.
+//!
+//! [`Vec<T>`] and slices are also serialized as chunked lists, starting with an [`u16`] indicating
+//! the length, followed by said amount of elements. Just like with strings, the [`SmallReadList`]
+//! and [`SmallWriteList`] types are provided, which wrap a [`Vec<T>`] and `&[T]` respectively.
+//!
+//! # Serialization of tuples
+//! [`ByteRead`] and [`ByteWrite`] are also implemented for any tuple of up to 5 elements, with all
+//! the element types being [`ByteRead`] and/or [`ByteWrite`]. This allows easily turning multiple
+//! writes such as this:
+//! ```
+//! thing1.write(writer).await?;
+//! thing2.write(writer).await?;
+//! thing3.write(writer).await?;
+//! thing4.write(writer).await?;
+//! ```
+//!
+//! into this:
+//! ```
+//! (thing1, thing2, thing3, thing4).write(writer).await?;
+//! ```
+
 use std::{
     io::{self, ErrorKind},
     net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6},
@@ -5,13 +51,17 @@ use std::{
 
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
+/// Serializes a type into bytes, writing it to an [`AsyncWrite`] asynchronously.
 #[allow(async_fn_in_trait)]
 pub trait ByteWrite {
+    /// Serializes this instance into bytes, writing those bytes into a writer.
     async fn write<W: AsyncWrite + Unpin + ?Sized>(&self, writer: &mut W) -> Result<(), io::Error>;
 }
 
+/// Deserializes a type from raw bytes, reading it from an [`AsyncRead`] asynchronously.
 #[allow(async_fn_in_trait)]
 pub trait ByteRead: Sized {
+    /// Deserializes bytes into an instance of this type by reading bytes from a reader.
     async fn read<R: AsyncRead + Unpin + ?Sized>(reader: &mut R) -> Result<Self, io::Error>;
 }
 
@@ -328,7 +378,7 @@ impl ByteRead for io::Error {
     }
 }
 
-impl ByteWrite for &str {
+impl ByteWrite for str {
     async fn write<W: AsyncWrite + Unpin + ?Sized>(&self, writer: &mut W) -> Result<(), io::Error> {
         let bytes = self.as_bytes();
         let len = bytes.len();
@@ -367,6 +417,8 @@ impl ByteRead for String {
     }
 }
 
+/// A type that wraps a `&str` and implements [`ByteWrite`] for easily writing strings whose max
+/// length is 255 bytes.
 pub struct SmallWriteString<'a>(pub &'a str);
 
 impl<'a> ByteWrite for SmallWriteString<'a> {
@@ -383,6 +435,8 @@ impl<'a> ByteWrite for SmallWriteString<'a> {
     }
 }
 
+/// A type that wraps a [`String`] and implements [`ByteRead`] for easily reading strings whose max
+/// length is 255 bytes.
 pub struct SmallReadString(pub String);
 
 impl ByteRead for SmallReadString {
@@ -434,6 +488,8 @@ impl<T: ByteRead> ByteRead for Vec<T> {
     }
 }
 
+/// A type that wraps a `&[T]` and implements [`ByteWrite`] for easily writing lists whose max
+/// length is 255 elements.
 pub struct SmallWriteList<'a, T>(pub &'a [T]);
 
 impl<'a, T: ByteWrite> ByteWrite for SmallWriteList<'a, T> {
@@ -452,7 +508,8 @@ impl<'a, T: ByteWrite> ByteWrite for SmallWriteList<'a, T> {
         Ok(())
     }
 }
-
+/// A type that wraps a [`Vec<T>`] and implements [`ByteRead`] for easily reading lists whose max
+/// length is 255 elements.
 pub struct SmallReadList<T>(pub Vec<T>);
 
 impl<T: ByteRead> ByteRead for SmallReadList<T> {

@@ -1,3 +1,57 @@
+//! A full implementation of the Sandstorm protocol.
+//!
+//! # Provided types & serialization
+//! This crate provides types for the handshake, events, and both requests and responses of the
+//! Sandstorm protocol, alongside implementations of [`ByteRead`] and [`ByteWrite`] for them.
+//!
+//! Note however that the implementations of read and write are not truly mirrors, as the writes
+//! include writing the command type byte (from [`SandstormCommandType`]), while the reads do not
+//! read this value, and expect you to handle it separately.
+//!
+//! # Ref types
+//! Some of these types need to store strings or lists (for example, [`AddUserRequest`] or
+//! [`ListSocks5SocketsResponse`]), and do so with owned types (for those examples, [`String`] and
+//! [`Vec<T>`] respectively). However, if a client wants to write an [`AddUserRequest`] with the
+//! username coming from a `&str`, it would be inefficient if they have to turn that `&str` into an
+//! owned [`String`]. For these cases, "ref" types are provided ([`AddUserRequestRef`] and
+//! [`ListSocks5SocketsResponseRef`]), which make use of `&str` and `&[T]` and allow writing (but
+//! not reading) these requests or responses without needing additional memory allocations.
+//!
+//! # Usage
+//! Since these types implement [`ByteRead`] and [`ByteWrite`], they are all easily used in the
+//! same fashion:
+//! ```
+//! // On the client:
+//! SetBufferSizeRequest(4096).write(writer).await?;
+//!
+//! let command_type = SandstormCommandType::read(reader).await?;
+//! if command_type != SandstormCommandType::SetBufferSize {
+//!     panic!("Server returned wrong response type!");
+//! }
+//!
+//! let result = SetBufferSizeResponse::read(reader).await?;
+//! match result.0 {
+//!     true => println!("Buffer size updated successfully"),
+//!     false => println!("Could not update buffer size!"),
+//! }
+//!
+//! // On the server:
+//! let command_type = SandstormCommandType::read(reader).await?;
+//! match command_type {
+//!     SandstormCommandType::SetBufferSize => {
+//!         let request = SetBufferSizeRequest::read(reader).await?;
+//!         let status: bool = server.set_buffer_size(request.0);
+//!         SetBufferSizeResponse(status).write(writer).await?;
+//!     }
+//!     ... // Implement other command types
+//! }
+//! ```
+//!
+//! This example shows how one could implement simple, non-pipelined requests and responses. In
+//! reality though, the Sandstorm protocol supports pipelining and asynchronous requests. The
+//! responses for different simultaneous requests may not even come back in the same order, leading
+//! to a faster protocol, but at the cost of the complexity of implementations.
+
 use std::io::{self, ErrorKind};
 
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -29,6 +83,7 @@ pub use shutdown::*;
 pub use socks5_sockets::*;
 pub use users::*;
 
+/// The Sandstorm command types, and their identifying `u8` value.
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SandstormCommandType {
@@ -99,6 +154,8 @@ impl ByteRead for SandstormCommandType {
     }
 }
 
+/// The result of a remove socket operation. This is a common type shared by the
+/// socks5-sockets-type requests and the sandstorm-sockets-type requests.
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RemoveSocketResponse {

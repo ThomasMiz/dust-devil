@@ -1,6 +1,9 @@
+//! Constants and types for dealing with Sandstorm users, as well as implementations of
+//! [`ByteRead`] and [`ByteWrite`] for these types.
+
 use std::{
     fmt,
-    io::{self, ErrorKind},
+    io::{Error, ErrorKind},
 };
 
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -10,14 +13,25 @@ use crate::{
     u8_repr_enum::U8ReprEnum,
 };
 
+/// A character used to write comments on the users file.
 pub const COMMENT_PREFIX_CHAR: char = '!';
+
+/// A symbol character that identifies the admin user role.
 pub const ADMIN_PREFIX_CHAR: char = '@';
+
+/// A symbol character that identifies the regular user role.
 pub const REGULAR_PREFIX_CHAR: char = '#';
+
+/// A character used for escape sequences when specifying users.
 pub const ESCAPE_CHAR: char = '\\';
 
+/// The default user username.
 pub const DEFAULT_USER_USERNAME: &str = "admin";
+
+/// The default user password.
 pub const DEFAULT_USER_PASSWORD: &str = "admin";
 
+/// The roles a user can take.
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UserRole {
@@ -49,16 +63,16 @@ impl U8ReprEnum for UserRole {
 }
 
 impl ByteWrite for UserRole {
-    async fn write<W: AsyncWrite + Unpin + ?Sized>(&self, writer: &mut W) -> Result<(), io::Error> {
+    async fn write<W: AsyncWrite + Unpin + ?Sized>(&self, writer: &mut W) -> Result<(), Error> {
         self.into_u8().write(writer).await
     }
 }
 
 impl ByteRead for UserRole {
-    async fn read<R: AsyncRead + Unpin + ?Sized>(reader: &mut R) -> Result<Self, io::Error> {
+    async fn read<R: AsyncRead + Unpin + ?Sized>(reader: &mut R) -> Result<Self, Error> {
         match UserRole::from_u8(u8::read(reader).await?) {
             Some(role) => Ok(role),
-            None => Err(io::Error::new(ErrorKind::InvalidData, "Invalid UserRole type byte")),
+            None => Err(Error::new(ErrorKind::InvalidData, "Invalid UserRole type byte")),
         }
     }
 }
@@ -72,9 +86,10 @@ impl fmt::Display for UserRole {
     }
 }
 
+/// Errors that can occur when the server loads a users file.
 #[derive(Debug)]
 pub enum UsersLoadingError {
-    IO(io::Error),
+    IO(Error),
     InvalidUtf8 { line_number: u32, byte_at: u64 },
     LineTooLong { line_number: u32, byte_at: u64 },
     ExpectedRoleCharGotEOF(u32, u32),
@@ -115,8 +130,8 @@ impl PartialEq for UsersLoadingError {
     }
 }
 
-impl From<io::Error> for UsersLoadingError {
-    fn from(value: io::Error) -> Self {
+impl From<Error> for UsersLoadingError {
+    fn from(value: Error) -> Self {
         UsersLoadingError::IO(value)
     }
 }
@@ -147,7 +162,7 @@ impl fmt::Display for UsersLoadingError {
 }
 
 impl ByteWrite for UsersLoadingError {
-    async fn write<W: AsyncWrite + Unpin + ?Sized>(&self, writer: &mut W) -> Result<(), io::Error> {
+    async fn write<W: AsyncWrite + Unpin + ?Sized>(&self, writer: &mut W) -> Result<(), Error> {
         match self {
             UsersLoadingError::IO(io_error) => (1u8, io_error).write(writer).await,
             UsersLoadingError::InvalidUtf8 { line_number, byte_at } => (2u8, line_number, byte_at).write(writer).await,
@@ -165,11 +180,11 @@ impl ByteWrite for UsersLoadingError {
 }
 
 impl ByteRead for UsersLoadingError {
-    async fn read<R: AsyncRead + Unpin + ?Sized>(reader: &mut R) -> Result<Self, io::Error> {
+    async fn read<R: AsyncRead + Unpin + ?Sized>(reader: &mut R) -> Result<Self, Error> {
         let t = u8::read(reader).await?;
 
         match t {
-            1 => Ok(UsersLoadingError::IO(io::Error::read(reader).await?)),
+            1 => Ok(UsersLoadingError::IO(Error::read(reader).await?)),
             2 => Ok(UsersLoadingError::InvalidUtf8 {
                 line_number: u32::read(reader).await?,
                 byte_at: u64::read(reader).await?,
@@ -202,7 +217,7 @@ impl ByteRead for UsersLoadingError {
                 u32::read(reader).await?,
             )),
             11 => Ok(UsersLoadingError::NoUsers),
-            _ => Err(io::Error::new(ErrorKind::InvalidData, "Invalid UsersLoadingError type byte")),
+            _ => Err(Error::new(ErrorKind::InvalidData, "Invalid UsersLoadingError type byte")),
         }
     }
 }

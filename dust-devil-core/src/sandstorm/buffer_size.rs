@@ -6,8 +6,14 @@ use crate::serialize::{ByteRead, ByteWrite};
 
 use super::SandstormCommandType;
 
+/// A Sandstorm get buffer size request.
 pub struct GetBufferSizeRequest;
-pub struct GetBufferSizeResponse(pub u32);
+
+// A Sandstorm get buffer size response.
+pub struct GetBufferSizeResponse(
+    /// The buffer size returned by the server.
+    pub u32,
+);
 
 impl ByteRead for GetBufferSizeRequest {
     async fn read<R: AsyncRead + Unpin + ?Sized>(_reader: &mut R) -> Result<Self, io::Error> {
@@ -33,8 +39,17 @@ impl ByteWrite for GetBufferSizeResponse {
     }
 }
 
-pub struct SetBufferSizeRequest(pub u32);
-pub struct SetBufferSizeResponse(pub bool);
+/// A Sandstorm set buffer size request.
+pub struct SetBufferSizeRequest(
+    /// The new requested buffer size, in bytes.
+    pub u32,
+);
+
+/// A Sandstorm set buffer size response.
+pub struct SetBufferSizeResponse(
+    /// Whether the operation succeeded.
+    pub bool,
+);
 
 impl ByteRead for SetBufferSizeRequest {
     async fn read<R: AsyncRead + Unpin + ?Sized>(reader: &mut R) -> Result<Self, io::Error> {

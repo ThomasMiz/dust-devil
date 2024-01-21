@@ -6,9 +6,20 @@ use crate::serialize::{ByteRead, ByteWrite};
 
 use super::{RemoveSocketResponse, SandstormCommandType};
 
+/// A Sandstorm list-socks5-sockets request.
 pub struct ListSocks5SocketsRequest;
-pub struct ListSocks5SocketsResponse(pub Vec<SocketAddr>);
-pub struct ListSocks5SocketsResponseRef<'a>(&'a [SocketAddr]);
+
+/// A Sandstorm list-socks5-sockets response.
+pub struct ListSocks5SocketsResponse(
+    /// The list of sockets listening for incoming socks5 connections sent by the server.
+    pub Vec<SocketAddr>,
+);
+
+/// A borrowed version of [`ListSocks5SocketsResponse`].
+pub struct ListSocks5SocketsResponseRef<'a>(
+    /// The list of sockets listening for incoming socks5 connections sent by the server.
+    &'a [SocketAddr],
+);
 
 impl ListSocks5SocketsResponse {
     pub fn as_ref(&self) -> ListSocks5SocketsResponseRef {
@@ -46,8 +57,29 @@ impl<'a> ByteWrite for ListSocks5SocketsResponseRef<'a> {
     }
 }
 
-pub struct AddSocks5SocketRequest(pub SocketAddr);
-pub struct AddSocks5SocketResponse(pub Result<(), io::Error>);
+/// A Sandstorm add-socks5-socket request.
+pub struct AddSocks5SocketRequest(
+    /// The address of the new socket to open.
+    pub SocketAddr,
+);
+
+/// A Sandstorm add-socks5-socket response.
+pub struct AddSocks5SocketResponse(
+    /// The result of the add socket operation.
+    pub Result<(), io::Error>,
+);
+
+/// A borrowed version of [`AddSocks5SocketResponse`].
+pub struct AddSocks5SocketResponseRef<'a>(
+    /// The result of the add socket operation.
+    pub Result<(), &'a io::Error>,
+);
+
+impl AddSocks5SocketResponse {
+    pub fn as_ref(&self) -> AddSocks5SocketResponseRef {
+        AddSocks5SocketResponseRef(self.0.as_ref().map(|_| ()))
+    }
+}
 
 impl ByteRead for AddSocks5SocketRequest {
     async fn read<R: AsyncRead + Unpin + ?Sized>(reader: &mut R) -> Result<Self, io::Error> {
@@ -69,12 +101,27 @@ impl ByteRead for AddSocks5SocketResponse {
 
 impl ByteWrite for AddSocks5SocketResponse {
     async fn write<W: AsyncWrite + Unpin + ?Sized>(&self, writer: &mut W) -> Result<(), io::Error> {
-        (SandstormCommandType::AddSocks5Socket, &self.0).write(writer).await
+        self.as_ref().write(writer).await
     }
 }
 
-pub struct RemoveSocks5SocketRequest(pub SocketAddr);
-pub struct RemoveSocks5SocketResponse(pub RemoveSocketResponse);
+impl<'a> ByteWrite for AddSocks5SocketResponseRef<'a> {
+    async fn write<W: AsyncWrite + Unpin + ?Sized>(&self, writer: &mut W) -> Result<(), io::Error> {
+        (SandstormCommandType::AddSocks5Socket, self.0).write(writer).await
+    }
+}
+
+/// A Sandstorm remove-socks5-socket request.
+pub struct RemoveSocks5SocketRequest(
+    /// The address of the socket to remove.
+    pub SocketAddr,
+);
+
+/// A Sandstorm remove-socks5-socket response.
+pub struct RemoveSocks5SocketResponse(
+    /// The status of the remove socket operation.
+    pub RemoveSocketResponse,
+);
 
 impl ByteRead for RemoveSocks5SocketRequest {
     async fn read<R: AsyncRead + Unpin + ?Sized>(reader: &mut R) -> Result<Self, io::Error> {

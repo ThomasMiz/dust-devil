@@ -6,9 +6,20 @@ use crate::serialize::{ByteRead, ByteWrite};
 
 use super::{RemoveSocketResponse, SandstormCommandType};
 
+/// A Sandstorm list-sandstorm-sockets request.
 pub struct ListSandstormSocketsRequest;
-pub struct ListSandstormSocketsResponse(pub Vec<SocketAddr>);
-pub struct ListSandstormSocketsResponseRef<'a>(&'a [SocketAddr]);
+
+/// A Sandstorm list-sandstorm-sockets response.
+pub struct ListSandstormSocketsResponse(
+    /// The list of sockets listening for incoming Sandstorm connections sent by the server.
+    pub Vec<SocketAddr>,
+);
+
+/// A borrowed version of [`ListSandstormSocketsResponse`].
+pub struct ListSandstormSocketsResponseRef<'a>(
+    /// The list of sockets listening for incoming Sandstorm connections sent by the server.
+    &'a [SocketAddr],
+);
 
 impl ListSandstormSocketsResponse {
     pub fn as_ref(&self) -> ListSandstormSocketsResponseRef {
@@ -46,8 +57,29 @@ impl<'a> ByteWrite for ListSandstormSocketsResponseRef<'a> {
     }
 }
 
-pub struct AddSandstormSocketRequest(pub SocketAddr);
-pub struct AddSandstormSocketResponse(pub Result<(), io::Error>);
+/// A Sandstorm add-sandstorm-socket request.
+pub struct AddSandstormSocketRequest(
+    /// The address of the new socket to open.
+    pub SocketAddr,
+);
+
+/// A Sandstorm add-sandstorm-socket response.
+pub struct AddSandstormSocketResponse(
+    /// The result of the add socket operation.
+    pub Result<(), io::Error>,
+);
+
+/// A borrowed version of [`AddSandstormSocketResponse`].
+pub struct AddSandstormSocketResponseRef<'a>(
+    /// The result of the add socket operation.
+    pub Result<(), &'a io::Error>,
+);
+
+impl AddSandstormSocketResponse {
+    pub fn as_ref(&self) -> AddSandstormSocketResponseRef {
+        AddSandstormSocketResponseRef(self.0.as_ref().map(|_| ()))
+    }
+}
 
 impl ByteRead for AddSandstormSocketRequest {
     async fn read<R: AsyncRead + Unpin + ?Sized>(reader: &mut R) -> Result<Self, io::Error> {
@@ -69,12 +101,27 @@ impl ByteRead for AddSandstormSocketResponse {
 
 impl ByteWrite for AddSandstormSocketResponse {
     async fn write<W: AsyncWrite + Unpin + ?Sized>(&self, writer: &mut W) -> Result<(), io::Error> {
-        (SandstormCommandType::AddSandstormSocket, &self.0).write(writer).await
+        self.as_ref().write(writer).await
     }
 }
 
-pub struct RemoveSandstormSocketRequest(pub SocketAddr);
-pub struct RemoveSandstormSocketResponse(pub RemoveSocketResponse);
+impl<'a> ByteWrite for AddSandstormSocketResponseRef<'a> {
+    async fn write<W: AsyncWrite + Unpin + ?Sized>(&self, writer: &mut W) -> Result<(), io::Error> {
+        (SandstormCommandType::AddSandstormSocket, self.0).write(writer).await
+    }
+}
+
+/// A Sandstorm remove-sandstorm-socket request.
+pub struct RemoveSandstormSocketRequest(
+    /// The address of the socket to remove.
+    pub SocketAddr,
+);
+
+/// A Sandstorm remove-sandstorm-socket response.
+pub struct RemoveSandstormSocketResponse(
+    /// The status of the remove socket operation.
+    pub RemoveSocketResponse,
+);
 
 impl ByteRead for RemoveSandstormSocketRequest {
     async fn read<R: AsyncRead + Unpin + ?Sized>(reader: &mut R) -> Result<Self, io::Error> {

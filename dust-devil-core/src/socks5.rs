@@ -1,3 +1,6 @@
+//! Basic types for implementing the socks5 protocol as well as implementations of [`ByteRead`] and
+//! [`ByteWrite`] for them.
+
 use std::{
     io::{self, ErrorKind},
     net::{Ipv4Addr, Ipv6Addr},
@@ -10,12 +13,14 @@ use crate::{
     u8_repr_enum::U8ReprEnum,
 };
 
+/// A socks5 request's address (without a port).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SocksRequestAddress {
     IPv4(Ipv4Addr),
     IPv6(Ipv6Addr),
     Domainname(String),
 }
+
 impl ByteWrite for SocksRequestAddress {
     async fn write<W: AsyncWrite + Unpin + ?Sized>(&self, writer: &mut W) -> Result<(), io::Error> {
         match self {
@@ -37,6 +42,7 @@ impl ByteRead for SocksRequestAddress {
     }
 }
 
+/// A socks5 request's destination, including the address and port.
 pub struct SocksRequest {
     pub destination: SocksRequestAddress,
     pub port: u16,
@@ -84,6 +90,7 @@ impl ByteRead for SocksRequest {
     }
 }
 
+/// A socks5 authentication method.
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AuthMethod {

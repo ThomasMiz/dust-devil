@@ -7,18 +7,30 @@ use crate::{
     u8_repr_enum::U8ReprEnum,
 };
 
+/// A Sandstorm handshake client request, implicitly version 1.
 pub struct SandstormHandshake {
+    /// The username of the user to log in as.
     pub username: String,
+
+    /// The password of the user to log in as.
     pub password: String,
 }
 
+/// A borrowed version of [`SandstormHandshake`].
 pub struct SandstormHandshakeRef<'a> {
+    /// The username of the user to log in as.
     pub username: &'a str,
+
+    /// The password of the user to log in as.
     pub password: &'a str,
 }
 
+/// An error from reading a [`SandstormHandshake`].
 pub enum ParseHandshakeError {
+    /// Indicates that the client requested an invalid or unsupported Sandstorm version.
     InvalidVersion(u8),
+
+    /// Indicates that an IO error ocurred while reading the handshake.
     IO(io::Error),
 }
 
@@ -86,13 +98,23 @@ impl<'a> ByteWrite for SandstormHandshakeRef<'a> {
     }
 }
 
+/// A Sandstorm handshake server response, indicating the result of the handshake.
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SandstormHandshakeStatus {
+    /// The handshake succeeded and access was granted.
     Ok = 0x00,
+
+    /// The client requested an invalid or unsupported Sandstorm version.
     UnsupportedVersion = 0x01,
+
+    /// The client specified invalid username or password.
     InvalidUsernameOrPassword = 0x02,
+
+    /// The client successfully logged in, but the user doesn't have monitoring permissions.
     PermissionDenied = 0x03,
+
+    /// Unspecified error.
     UnspecifiedError = 0xFF,
 }
 

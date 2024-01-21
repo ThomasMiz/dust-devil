@@ -1,5 +1,9 @@
-use core::fmt;
+//! Defines the [`Event`] and [`EventData`] structs used for serializing events, as well as
+//! implementing the [`fmt::Display`] trait for [`EventData`], which is used for turning events
+//! into server logs.
+
 use std::{
+    fmt,
     io::{self, ErrorKind},
     net::SocketAddr,
 };
@@ -12,6 +16,7 @@ use crate::{
     users::{UserRole, UsersLoadingError},
 };
 
+/// A server event, consisting of a UNIX timestamp and an [`EventData`] describing the event.
 pub struct Event {
     pub timestamp: i64,
     pub data: EventData,
@@ -23,6 +28,7 @@ impl Event {
     }
 }
 
+/// All the possible server events that can be reported.
 pub enum EventData {
     NewSocks5Socket(SocketAddr),
     FailedBindSocks5Socket(SocketAddr, io::Error),

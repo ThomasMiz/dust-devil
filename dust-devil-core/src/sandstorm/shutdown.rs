@@ -4,7 +4,10 @@ use crate::serialize::{ByteRead, ByteWrite};
 
 use super::SandstormCommandType;
 
+/// A Sandstorm shutdown request.
 pub struct ShutdownRequest;
+
+/// A Sandstorm shutdown response.
 pub struct ShutdownResponse;
 
 impl ByteRead for ShutdownRequest {

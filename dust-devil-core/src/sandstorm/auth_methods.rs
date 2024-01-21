@@ -9,9 +9,20 @@ use crate::{
 
 use super::SandstormCommandType;
 
+/// A Sandstorm list auth methods request.
 pub struct ListAuthMethodsRequest;
-pub struct ListAuthMethodsResponse(pub Vec<(AuthMethod, bool)>);
-pub struct ListAuthMethodsResponseRef<'a>(&'a [(AuthMethod, bool)]);
+
+/// A Sandstorm list auth methods response.
+pub struct ListAuthMethodsResponse(
+    /// The list of authentication methods returned by the server.
+    pub Vec<(AuthMethod, bool)>,
+);
+
+/// A borrowed version of [`ListAuthMethodsResponse`].
+pub struct ListAuthMethodsResponseRef<'a>(
+    /// The list of authentication methods returned by the server.
+    &'a [(AuthMethod, bool)],
+);
 
 impl ListAuthMethodsResponse {
     pub fn as_ref(&self) -> ListAuthMethodsResponseRef {
@@ -49,8 +60,19 @@ impl<'a> ByteWrite for ListAuthMethodsResponseRef<'a> {
     }
 }
 
-pub struct ToggleAuthMethodRequest(pub AuthMethod, pub bool);
-pub struct ToggleAuthMethodResponse(pub bool);
+/// A Sandstorm toggle auth method request.
+pub struct ToggleAuthMethodRequest(
+    /// The authentication method to alter.
+    pub AuthMethod,
+    /// The desired state for the authentication method (`true` = enabled, `false` = disabled).
+    pub bool,
+);
+
+// A Sandstorm toggle auth method response.
+pub struct ToggleAuthMethodResponse(
+    /// Whether the operation succeeded.
+    pub bool,
+);
 
 impl ByteRead for ToggleAuthMethodRequest {
     async fn read<R: AsyncRead + Unpin + ?Sized>(reader: &mut R) -> Result<Self, io::Error> {
