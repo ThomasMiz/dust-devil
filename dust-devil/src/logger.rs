@@ -275,7 +275,7 @@ impl LogManager {
             create_file(verbose, path).await
         } else {
             printlnif!(
-                verbose,
+                !log_to_stdout && verbose,
                 "Logger doesn't have stdout nor file enabled. Yet you did turn on verbose prints? The audacity."
             );
 
