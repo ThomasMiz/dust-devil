@@ -437,7 +437,7 @@ where
     while let Some(arg) = args.next() {
         if arg.is_empty() {
             continue;
-        } else if arg.eq_ignore_ascii_case("-h") || arg.eq_ignore_ascii_case("--help") {
+        } else if arg.eq("-h") || arg.eq_ignore_ascii_case("--help") {
             return Ok(ArgumentsRequest::Help);
         } else if arg.eq("-V") || arg.eq_ignore_ascii_case("--version") {
             return Ok(ArgumentsRequest::Version);

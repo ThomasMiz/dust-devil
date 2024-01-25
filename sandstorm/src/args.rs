@@ -50,6 +50,7 @@ pub fn get_help_string() -> &'static str {
         "  -b, --set-buffer-size <size>    Requests the server changes its buffer size\n",
         "  -w, --meow                      Requests a meow ping to the server\n",
         "  -o, --output-logs               Remain open and print the server's logs to stdout\n",
+        "  -i, --interactive               Remains open with an advanced terminal UI interface\n",
         "\n",
         "Socket addresses may be specified as an IPv4 or IPv6 address, or a domainname, and may include a port number. If ",
         "no port is specified, then the appropriate default will be used (1080 for Socks5 and 2222 for Sandstorm). If no ",
@@ -76,7 +77,9 @@ pub fn get_help_string() -> &'static str {
         "-s/--silent is specified). Pipelining will be used, so the requests are not guaranteed to come back in the same ",
         "order. The only ordering guarantees are those defined in the Sandstorm protocol (so, for example, list/add/remove ",
         "socks5 sockets operations are guaranteed to be handled in order and answered in order, but an add user request in ",
-        "the middle of all that may not come back in the same order.\n"
+        "the middle of all that may not come back in the same order.\n",
+        "\n",
+        "The -o/--output-logs and -i/--interactive modes are mutually exclusive, only one may be enabled.\n"
     )
 }
 
@@ -116,6 +119,7 @@ pub struct StartupArguments {
     pub login_credentials: (String, String),
     pub requests: Vec<CommandRequest>,
     pub output_logs: bool,
+    pub interactive: bool,
 }
 
 impl StartupArguments {
@@ -127,6 +131,7 @@ impl StartupArguments {
             login_credentials: (String::new(), String::new()),
             requests: Vec::new(),
             output_logs: false,
+            interactive: false,
         }
     }
 
@@ -164,6 +169,7 @@ pub enum ArgumentsError {
     DeleteUserError(DeleteUserErrorType),
     AuthToggleError(AuthToggleErrorType),
     BufferSizeError(BufferSizeErrorType),
+    CantMixOutputAndInteractive,
 }
 
 impl fmt::Display for ArgumentsError {
@@ -183,6 +189,7 @@ impl fmt::Display for ArgumentsError {
             Self::DeleteUserError(delete_user_error) => delete_user_error.fmt(f),
             Self::AuthToggleError(auth_toggle_error) => auth_toggle_error.fmt(f),
             Self::BufferSizeError(buffer_size_error) => buffer_size_error.fmt(f),
+            Self::CantMixOutputAndInteractive => write!(f, "Cannot specify both -o/--output-logs and -i/--interactive together"),
         }
     }
 }
@@ -684,7 +691,7 @@ where
     while let Some(arg) = args.next() {
         if arg.is_empty() {
             continue;
-        } else if arg.eq_ignore_ascii_case("-h") || arg.eq_ignore_ascii_case("--help") {
+        } else if arg.eq("-h") || arg.eq_ignore_ascii_case("--help") {
             return Ok(ArgumentsRequest::Help);
         } else if arg.eq("-V") || arg.eq_ignore_ascii_case("--version") {
             return Ok(ArgumentsRequest::Version);
@@ -758,7 +765,15 @@ where
         } else if arg.eq("-w") || arg.eq_ignore_ascii_case("--meow") {
             result.requests.push(CommandRequest::Meow);
         } else if arg.eq("-o") || arg.eq_ignore_ascii_case("--output-logs") {
+            if result.interactive {
+                return Err(ArgumentsError::CantMixOutputAndInteractive);
+            }
             result.output_logs = true;
+        } else if arg.eq("-i") || arg.eq_ignore_ascii_case("--interactive") {
+            if result.output_logs {
+                return Err(ArgumentsError::CantMixOutputAndInteractive);
+            }
+            result.interactive = true;
         } else {
             return Err(ArgumentsError::UnknownArgument(arg));
         }

@@ -20,7 +20,7 @@
 //! # Usage
 //! Since these types implement [`ByteRead`] and [`ByteWrite`], they are all easily used in the
 //! same fashion:
-//! ```
+//! ```ignore
 //! // On the client:
 //! SetBufferSizeRequest(4096).write(writer).await?;
 //!

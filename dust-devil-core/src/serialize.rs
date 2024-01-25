@@ -32,7 +32,7 @@
 //! [`ByteRead`] and [`ByteWrite`] are also implemented for any tuple of up to 5 elements, with all
 //! the element types being [`ByteRead`] and/or [`ByteWrite`]. This allows easily turning multiple
 //! writes such as this:
-//! ```
+//! ```ignore
 //! thing1.write(writer).await?;
 //! thing2.write(writer).await?;
 //! thing3.write(writer).await?;
@@ -40,7 +40,7 @@
 //! ```
 //!
 //! into this:
-//! ```
+//! ```ignore
 //! (thing1, thing2, thing3, thing4).write(writer).await?;
 //! ```
 
