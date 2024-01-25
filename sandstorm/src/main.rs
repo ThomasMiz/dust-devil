@@ -9,6 +9,7 @@ mod client;
 mod handle_output;
 mod handle_requests;
 mod sandstorm;
+mod tui;
 mod utils;
 
 fn main() {

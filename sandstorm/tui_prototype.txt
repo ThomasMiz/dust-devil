@@ -1,0 +1,297 @@
+
+Symbols guide: https://github.com/ratatui-org/ratatui/blob/main/src/symbols.rs
+Color guide: https://github.com/ratatui-org/ratatui/blob/main/examples/README.md#colors
+Thanks to the Ratatui project for inspiration (and an easy place to get the chars I wanted ;))
+
+
+Single frame: │ ─ ┐ ╮ ┌ ╭ ┘ ╯ └ ╰ ┤ ├ ┬ ┴ ┼
+
+Double frame: ║ ═ ╗ ╔ ╝ ╚ ╣ ╠ ╦ ╩ ╬
+
+Thick frame:  ┃ ━ ┓ ┏ ┛ ┗ ┫ ┣ ┳ ┻ ╋
+
+Scroll bar: ↑↓║█◄►←→
+
+
+The TUI should be able to:
+- View real the time logs
+- Request a shutdown
+- List socks5 sockets
+- Add a socks5 socket
+- Remove a socks5 socket
+- List Sandstorm sockets
+- Add a Sandstorm socket
+- Remove a Sandstorm socket
+- List users
+- Add user
+- Update user
+- Delete user
+- List authentication methods
+- Toggle authentication method
+- View real time metrics
+- Get buffer size
+- Set buffer size
+- A meow-ping-based latency display "19ms" ">1ms"
+
+
+
+Prototype:
+██████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████
+█║ Shutdown (x) ║ Socks5 (s) ║ Sandstorm (d) ║ Users (u) ║ Auth (a) ║ 16.9KB (b) ║ Sandstorm Protocol v1       ║ 9999ms ║█
+█╚══════════════╩════════════╩═══════════════╩═══════════╩══════════╩════════════╩═════════════════════════════╩════════╝█
+█┌─Logs───────────────────────────────────────────────────────────↑               Client Activity [expand graph (g)]     █
+█│                                                                ║               Graph precision: 100ms [change (p)]    █
+█│                                                                ║                                                      █
+█│                                                                ║  100MB/s ┼                                           █
+█│                                                                ║          │                                           █
+█│                                                                ║          │                                           █
+█│                                                                ║ 80.0MB/s ┼                                           █
+█│                                                                ║          │                                           █
+█│                                                                ║          │                                           █
+█│                                                                ║ 60.0MB/s ┼                                           █
+█│                                                                ║          │                                           █
+█│                                                                ║          │                                           █
+█│                                                                ║ 40.0MB/s ┼               █                           █
+█│                                                                ║          │ █             █                           █
+█│                                                                ║          │ █            ▄█                           █
+█│                                                                ║ 20.0MB/s ┼██      ▄     ██                           █
+█│                                                                ║          │██▄    ███▄   ███▄                         █
+█│                                                                ║          │███▄  ██████_▄████▄                        █
+█│                                                                ║ 0B/s    ─┼─────────┼──────────────┼──────────────┼── █
+█│                                                                ║                  13:58          13:59          14:00 █
+█│                                                                ║                                                      █
+█│                                                                █  Current clients: 4294967296                         █
+█│                                                                █  Historic clients: 4294967296                        █
+█│                                                                █  Bytes sent: 16777216TB                              █
+█│                                                                ║  Bytes received: 16777216TB                          █
+█│                                                                ║  Current managers: 4294967296                        █
+█└────────────────────────────────────────────────────────────────↓  Historic managers: 4294967296                       █
+█Tooltip                                                                                                                 █
+██████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████
+The "tooltip" won't actually say tooltip, but rather display instructions on how to use the currently selected UI element.
+Maybe the tooltip won't be necessary? It might be a waste of space. Not sure.
+
+Scroll bars are only visible if the frame isn't large enough to hold whatever list of content they have. They can be
+navigated with the UP/DOWN arrow keys, pageup/pagedown, start/end.
+
+When the [change] in Graph precision is selected, the line changes to show a selector:
+
+  Graph precision: ← 100ms →                          █
+
+As the left and right arrows are used, the value switches between [100ms, 200ms, 500ms, 1s, 2s, 5s, 10s, 30s, 1m]
+
+When [expand] in Client Activity is selected, the graph is expanded to the whole screen:
+
+
+██████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████
+█║ Shutdown (x) ║ Socks5 (s) ║ Sandstorm (d) ║ Users (u) ║ Auth (a) ║ 16.9KB (b) ║ Sandstorm Protocol v1       ║ 9999ms ║█
+█╚══════════════╩════════════╩═══════════════╩═══════════╩══════════╩════════════╩═════════════════════════════╩════════╝█
+█ Client Activity | Graph precision: 100ms [change (p)] | [return to main view (q)]                                      █
+█                                                                                                                        █
+█  100MB/s ┼                                                                                                             █
+█          │                                                                                                             █
+█          │                                                                                                             █
+█          │                                                                                                             █
+█ 83.3MB/s ┼                                                                                                             █
+█          │                                                                                                             █
+█          │                                                                                                             █
+█          │                                                                                                             █
+█ 66.7MB/s ┼                                                                                                             █
+█          │                                                                                                             █
+█          │                                                                                                             █
+█          │                                                                                                             █
+█ 50.0MB/s ┼                                                                                                             █
+█          │                                                                                                             █
+█          │                                                                                                             █
+█          │                                                                                                             █
+█ 33.3MB/s ┼                                                                                                             █
+█          │                                                                                                             █
+█          │                                                                                                             █
+█          │ █             █                                                                                             █
+█ 16.7MB/s ┼ █            ▄█                                                                                             █
+█          │██      ▄     ██                                                                                             █
+█          │██▄    ███▄   ███▄                                                                                           █
+█          │███▄  ██████_▄████▄                                                                                          █
+█ 0B/s    ─┼─────────┼──────────────┼──────────────┼──────────────┼──────────────┼──────────────┼──────────────┼──────── █
+█                  13:54          13:55          13:56          13:57          13:58          13:59          14:00       █
+██████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████
+                                                                             Always keeps the latest line on the right ^
+
+
+Shutdown popup:
+┌─Shutdown───────────────────────┐
+│ Are you sure you want to shut  │
+│        down the server?        │
+│                                │
+│   [YES (y)]   [CANCEL (c/n)]   │
+│                                │
+└────────────────────[close (q)]─┘
+
+If yes is selected:
+┌─Shutdown───────────────────────┐
+│ Are you sure you want to shut  │
+│        down the server?        │
+│                                │
+│        Shutting down...        │
+│                                │
+└────────────────────────────────┘
+
+
+Sockets popup:
+
+┌─Sandstorm Sockets──────────────┐
+│ Listening sandstorm sockets:   │
+│ Filter:  [ALL (f)]             │
+│┌──────────────────────────────↑│
+││ 127.0.0.1:2222               ║│
+││ [::]:2222                    █│
+││ 1.2.3.4:4321                 █│
+││ 1.2.3.4:4321                 █│
+││ 1.2.3.4:4321                 ║│
+││ 1.2.3.4:4321                 ║│
+││ 1.2.3.4:4321                 ║│
+││ 1.2.3.4:4321                 ║│
+││ 1.2.3.4:4321                 ║│
+││ 1.2.3.4:4321                 ║│
+│└──────────────────────────────↓│
+│ Scroll the list with the arrow │
+│    keys, press (ENTER) on a    │
+│      socket to close it.       │
+│                                │
+│      [add new socket (a)]      │
+│                                │
+└────────────────────[close (q)]─┘
+
+Selecting the filter option lets you select a filter option by cycling through with the arrow keys:
+
+│ Filter: ← [ALL] →              │
+│ Filter: ← [IPv4] →             │
+│ Filter: ← [IPv6] →             │
+
+If the list is empty after applying the filter, [None] will be displayed centered horizontally.
+
+Selecting an address will open the close socket popup:
+
+
+┌─Close Sandstorm Socket──────────────────────┐
+│ Are you sure you want to close this socket? │
+│    The server will no longer listen for     │
+│     incoming Sandstorm connections at:      │
+│                                             │
+│               127.0.0.1:1234                │
+│                                             │
+│          [YES (y)]  [CANCEL (c/n)]          │
+│                                             │
+└─────────────────────────────────[close (q)]─┘
+
+┌─Add Sandstorm Socket────────────────────────┐
+│   Enter the address of the socket to add:   │
+│                                             │
+│   _______________________________________   │
+│                                             │
+│       [CONFIRM (y)]   [CANCEL (c/n)]        │
+│                                             │
+└─────────────────────────────────[close (q)]─┘
+
+If YES is selected, then the buttons are replaced with a "Closing socket..." text.
+
+Users popup:
+
+┌─Users───────────────────────────────────────┐
+│ Type: [ALL (t)]                             │
+│ Filter: [NONE (f)]                          │
+│┌───────────────────────────────────────────↑│
+││ [@] username123                           ║│
+││ [@] username123                           █│
+││ [@] username123                           █│
+││ [@] username123                           █│
+││ [#] username123                           ║│
+││ [#] username123                           ║│
+││ [#] username123                           ║│
+││ [#] username123                           ║│
+││ [#] username123                           ║│
+││ [#] username123                           ║│
+│└───────────────────────────────────────────↓│
+│ Scroll the list with the arrow keys, press  │
+│    (ENTER) on a user to update or (d) to    │
+│                 delete it.                  │
+│                                             │
+│             [add new user (a)]              │
+│                                             │
+└─────────────────────────────────[close (q)]─┘
+
+When a user is selected for updating:
+┌─Update User─────────────────────────────────┐
+│                                             │
+│ Username: username123                       │
+│ Role: [REGULAR]                             │
+│ New Password: _____________________________ │
+│                                             │
+│       [CONFIRM (y)]   [CANCEL (c/n)]        │
+│                                             │
+└─────────────────────────────────[close (q)]─┘
+
+When a user is selected for deletion:
+┌─Delete User─────────────────────────────────┐
+│ Are you sure you want to delete this user?  │
+│                                             │
+│ Username: username123                       │
+│ Role: Regular                               │
+│                                             │
+│       [CONFIRM (y)]   [CANCEL (c/n)]        │
+│                                             │
+└─────────────────────────────────[close (q)]─┘
+
+
+Authentication methods popup:
+
+┌─Authentication Methods─────────┐
+│ Listening sandstorm sockets:   │
+│ Filter:  [ALL (f)]             │
+│┌──────────────────────────────↑│
+││ No Authentication            ║│
+││ Username and password        ║│
+││ ...                          █│
+││ ...                          ║│
+│└──────────────────────────────↓│
+│ Scroll the list with the arrow │
+│ keys, press (ENTER) on an auth │
+│      method to toggle it.      │
+│                                │
+└────────────────────[close (q)]─┘
+^ The scroll bar is truly unnecessary, but the code for this types of lists will be shared anyway
+
+When a method is selected:
+
+┌─Enable Authentication Method────────────────┐
+│       Are you sure you want to enable       │
+│ authentication with username and password?  │
+│                                             │
+│       [CONFIRM (y)]   [CANCEL (c/n)]        │
+│                                             │
+└─────────────────────────────────[close (q)]─┘
+
+or
+
+┌─Disable Authentication Method───────────────┐
+│      Are you sure you want to disable       │
+│ authentication with username and password?  │
+│                                             │
+│       [CONFIRM (y)]   [CANCEL (c/n)]        │
+│                                             │
+└─────────────────────────────────[close (q)]─┘
+
+
+Set buffer size popup:
+
+┌─Set Buffer Size────────────────────────┐
+│ The current buffer size for clients is │
+│ 4133906022 (3.85GB)                    │
+│                                        │
+│ Do you want to set a new buffer size?  │
+│                                        │
+│ New buffer size: _____________________ │
+│                                        │
+│     [CONFIRM (y)]   [CANCEL (c/n)]     │
+│                                        │
+└────────────────────────────[close (q)]─┘

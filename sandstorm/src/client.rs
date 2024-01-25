@@ -19,6 +19,7 @@ use crate::{
     handle_requests::handle_requests,
     printlnif,
     sandstorm::SandstormRequestManager,
+    tui::handle_interactive,
 };
 
 fn choose_buffer_sizes(startup_args: &StartupArguments) -> (usize, usize) {
@@ -46,6 +47,14 @@ pub async fn run_client(startup_args: StartupArguments) {
 }
 
 async fn run_client_inner(startup_args: StartupArguments) -> Result<(), Error> {
+    // TODO: DELETE ALL OF THIS SHIT AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+    let (mut concha, _delalora) = SandstormRequestManager::new(tokio::io::empty(), tokio::io::sink());
+    handle_interactive(&mut concha).await?;
+    if tokio::time::Duration::from_micros(1).as_micros() != 2 {
+        // shut up unreachable warning
+        return Ok(());
+    }
+
     let (read_buffer_size, write_buffer_size) = choose_buffer_sizes(&startup_args);
     printlnif!(
         startup_args.verbose,
@@ -85,7 +94,7 @@ async fn run_client_inner(startup_args: StartupArguments) -> Result<(), Error> {
     let (mut manager, read_error_recevier) = SandstormRequestManager::new(reader_buf, writer_buf);
 
     select! {
-        result = handle_connection(startup_args.verbose, startup_args.silent, &startup_args.requests, startup_args.output_logs, &mut manager) => result?,
+        result = handle_connection(startup_args.verbose, startup_args.silent, &startup_args.requests, startup_args.output_logs, startup_args.interactive, &mut manager) => result?,
         read_error_result = read_error_recevier => {
             match read_error_result {
                 Ok(error) => return Err(error),
@@ -160,6 +169,7 @@ async fn handle_connection<W>(
     silent: bool,
     requests: &Vec<CommandRequest>,
     output_logs: bool,
+    interactive: bool,
     manager: &mut SandstormRequestManager<W>,
 ) -> Result<(), Error>
 where
@@ -167,11 +177,17 @@ where
 {
     handle_requests(silent, requests, manager).await?;
 
-    if output_logs {
+    if output_logs || interactive {
         printlnif!(verbose, "Waiting for responses");
         manager.flush_and_wait().await?;
-        printlnif!(verbose, "Starting log output");
-        handle_output(verbose, manager).await?;
+
+        if output_logs {
+            printlnif!(verbose, "Starting log output");
+            handle_output(verbose, manager).await?;
+        } else if interactive {
+            printlnif!(verbose, "Entering interactive mode");
+            handle_interactive(manager).await?;
+        }
     }
 
     Ok(())
