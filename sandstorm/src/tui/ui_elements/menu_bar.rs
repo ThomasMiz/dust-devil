@@ -5,17 +5,25 @@
 */
 
 use std::{
-    io::{Error, Write},
+    borrow::BorrowMut,
+    cell::RefCell,
+    fmt::Write,
+    io::{self, Error},
     num::NonZeroU16,
+    ops::Deref,
+    rc::{Rc, Weak},
+    time::Duration,
 };
 
 use crossterm::{
     style::{ContentStyle, Print, SetStyle, Stylize},
     QueueableCommand,
 };
+use tokio::{sync::Notify, task::JoinHandle};
 
 use crate::tui::{
     chars,
+    pretty_print::PrettyByteDisplayer,
     types::{HorizontalLine, Point, Rectangle},
 };
 
@@ -55,20 +63,21 @@ struct FrameChunk {
     is_leftmost: bool,
     is_rightmost: bool,
     frame_style: ContentStyle,
+    needs_redraw: bool,
 }
 
 impl FrameChunk {
     pub fn new(
         area: Rectangle,
-        label: &str,
+        label_text: &str,
         maybe_key: Option<char>,
         is_leftmost: bool,
         is_rightmost: bool,
         text_style: ContentStyle,
         frame_style: ContentStyle,
     ) -> Self {
-        let mut text = String::with_capacity(label.len() + maybe_key.map(|c| c.len_utf8() + 3).unwrap_or(0));
-        text.push_str(label);
+        let mut text = String::with_capacity(label_text.len() + maybe_key.map(|c| c.len_utf8() + 3).unwrap_or(0));
+        text.push_str(label_text);
         if let Some(key) = maybe_key {
             text.push_str(" (");
             text.push(key);
@@ -88,16 +97,45 @@ impl FrameChunk {
             is_leftmost,
             is_rightmost,
             frame_style,
+            needs_redraw: false,
         }
     }
 
-    fn draw_top<O: Write>(
+    pub fn new2(
+        area: Rectangle,
+        label_text: String,
+        is_leftmost: bool,
+        is_rightmost: bool,
+        text_style: ContentStyle,
+        frame_style: ContentStyle,
+    ) -> Self {
+        let mut label = SimpleLabel::new(HorizontalLine::get_single_pixel_line(), label_text, text_style);
+        let label_start_x = area.left() + 2;
+        let label_end_x = area.right().min(label_start_x + label.text_len() - 1);
+        if let Some(label_area) = HorizontalLine::from_borders(area.top(), label_start_x, label_end_x) {
+            label.resize(label_area.into());
+        }
+
+        Self {
+            area,
+            label,
+            is_leftmost,
+            is_rightmost,
+            frame_style,
+            needs_redraw: false,
+        }
+    }
+
+    fn draw_top<O: io::Write>(
         &mut self,
         out: &mut O,
         area: HorizontalLine,
         is_cursor_at_start: &mut bool,
         force_redraw: bool,
     ) -> Result<(), Error> {
+        let force_redraw = force_redraw | self.needs_redraw;
+        self.needs_redraw = false;
+
         if force_redraw {
             ensure_cursor_at_start(is_cursor_at_start, out, area.left(), area.y)?;
 
@@ -149,7 +187,7 @@ impl FrameChunk {
         Ok(())
     }
 
-    fn draw_bottom<O: Write>(
+    fn draw_bottom<O: io::Write>(
         &self,
         out: &mut O,
         area: HorizontalLine,
@@ -191,7 +229,7 @@ impl UIElement for FrameChunk {
         self.area
     }
 
-    fn draw_line<O: Write>(
+    fn draw_line<O: io::Write>(
         &mut self,
         out: &mut O,
         area: HorizontalLine,
@@ -212,22 +250,62 @@ impl UIElement for FrameChunk {
     }
 }
 
-pub struct MenuBar {
-    area: Rectangle,
+struct MenuBarInner {
     shutdown_frame_chunk: FrameChunk,
     socks5_frame_chunk: FrameChunk,
     sandstorm_frame_chunk: FrameChunk,
     users_frame_chunk: FrameChunk,
     auth_frame_chunk: FrameChunk,
+    buffer_frame_chunk: FrameChunk,
+}
+
+pub struct MenuBar {
+    area: Rectangle,
+    inner: Rc<RefCell<MenuBarInner>>,
+    task_handle: JoinHandle<()>,
+}
+
+async fn menu_bar_task(inner_weak: Weak<RefCell<MenuBarInner>>, redraw_notify_weak: Weak<Notify>) {
+    let mut byte_count = 1024usize;
+    let mut sleep_time = 1000;
+    loop {
+        tokio::time::sleep(Duration::from_millis(sleep_time)).await;
+        sleep_time = sleep_time.max(50) - 50;
+        let inner_rc = match inner_weak.upgrade() {
+            Some(v) => v,
+            None => return,
+        };
+        let mut inner = inner_rc.deref().borrow_mut();
+
+        let redraw_notify = match redraw_notify_weak.upgrade() {
+            Some(v) => v,
+            None => return,
+        };
+
+        inner.buffer_frame_chunk.label.modify_text(|text| {
+            text.clear();
+            let _ = write!(text, "{} ({BUFFER_KEY})", PrettyByteDisplayer(byte_count));
+        });
+
+        let mut buffer_frame_area = inner.buffer_frame_chunk.area();
+        buffer_frame_area.width = NonZeroU16::new(inner.buffer_frame_chunk.label.text_len() + 3).unwrap();
+        if buffer_frame_area.width() != inner.buffer_frame_chunk.area().width() {
+            inner.buffer_frame_chunk.resize(buffer_frame_area);
+        }
+
+        inner.buffer_frame_chunk.needs_redraw = true;
+        byte_count += 512;
+        redraw_notify.notify_one();
+    }
 }
 
 impl MenuBar {
-    pub fn new(area: Rectangle) -> Self {
+    pub fn new(area: Rectangle, redraw_notify: Weak<Notify>) -> Self {
         let frame_style = ContentStyle::default().reset();
         let shutdown_frame_chunk = FrameChunk::new(
             Rectangle::new(
                 Point::new(area.left() + SHUTDOWN_FRAME_OFFSET, area.top()),
-                unsafe { NonZeroU16::new_unchecked(SOCKS5_FRAME_OFFSET - SHUTDOWN_FRAME_OFFSET) },
+                NonZeroU16::new(SOCKS5_FRAME_OFFSET - SHUTDOWN_FRAME_OFFSET).unwrap(),
                 area.height,
             ),
             SHUTDOWN_LABEL,
@@ -241,7 +319,7 @@ impl MenuBar {
         let socks5_frame_chunk = FrameChunk::new(
             Rectangle::new(
                 Point::new(area.left() + SOCKS5_FRAME_OFFSET, area.top()),
-                unsafe { NonZeroU16::new_unchecked(SANDSTORM_FRAME_OFFSET - SOCKS5_FRAME_OFFSET) },
+                NonZeroU16::new(SANDSTORM_FRAME_OFFSET - SOCKS5_FRAME_OFFSET).unwrap(),
                 area.height,
             ),
             SOCKS5_LABEL,
@@ -255,7 +333,7 @@ impl MenuBar {
         let sandstorm_frame_chunk = FrameChunk::new(
             Rectangle::new(
                 Point::new(area.left() + SANDSTORM_FRAME_OFFSET, area.top()),
-                unsafe { NonZeroU16::new_unchecked(USERS_FRAME_OFFSET - SANDSTORM_FRAME_OFFSET) },
+                NonZeroU16::new(USERS_FRAME_OFFSET - SANDSTORM_FRAME_OFFSET).unwrap(),
                 area.height,
             ),
             SANDSTORM_LABEL,
@@ -269,7 +347,7 @@ impl MenuBar {
         let users_frame_chunk = FrameChunk::new(
             Rectangle::new(
                 Point::new(area.left() + USERS_FRAME_OFFSET, area.top()),
-                unsafe { NonZeroU16::new_unchecked(AUTH_FRAME_OFFSET - USERS_FRAME_OFFSET) },
+                NonZeroU16::new(AUTH_FRAME_OFFSET - USERS_FRAME_OFFSET).unwrap(),
                 area.height,
             ),
             USERS_LABEL,
@@ -283,25 +361,52 @@ impl MenuBar {
         let auth_frame_chunk = FrameChunk::new(
             Rectangle::new(
                 Point::new(area.left() + AUTH_FRAME_OFFSET, area.top()),
-                unsafe { NonZeroU16::new_unchecked(BUFFER_FRAME_OFFSET - AUTH_FRAME_OFFSET + 1) },
+                NonZeroU16::new(BUFFER_FRAME_OFFSET - AUTH_FRAME_OFFSET).unwrap(),
                 area.height,
             ),
             AUTH_LABEL,
             Some(AUTH_KEY),
             false,
-            true,
+            false,
             ContentStyle::default().red(),
             frame_style,
         );
 
-        Self {
-            area,
+        let buffer_frame_text = format!("16.3KB ({BUFFER_KEY})");
+        let buffer_frame_chunk = FrameChunk::new2(
+            Rectangle::new(
+                Point::new(area.left() + BUFFER_FRAME_OFFSET, area.top()),
+                NonZeroU16::new(buffer_frame_text.len() as u16 + 3).unwrap(),
+                area.height,
+            ),
+            buffer_frame_text,
+            false,
+            false,
+            ContentStyle::default().red(),
+            frame_style,
+        );
+
+        let inner = Rc::new(RefCell::new(MenuBarInner {
             shutdown_frame_chunk,
             socks5_frame_chunk,
             sandstorm_frame_chunk,
             users_frame_chunk,
             auth_frame_chunk,
-        }
+            buffer_frame_chunk,
+        }));
+
+        let inner_weak = Rc::downgrade(&inner);
+        let task_handle = tokio::task::spawn_local(async move {
+            menu_bar_task(inner_weak, redraw_notify).await;
+        });
+
+        Self { area, inner, task_handle }
+    }
+}
+
+impl Drop for MenuBar {
+    fn drop(&mut self) {
+        self.task_handle.abort();
     }
 }
 
@@ -310,41 +415,49 @@ impl UIElement for MenuBar {
         self.area
     }
 
-    fn draw_line<O: Write>(
+    fn draw_line<O: io::Write>(
         &mut self,
         out: &mut O,
         area: HorizontalLine,
         mut is_cursor_at_start: bool,
         force_redraw: bool,
     ) -> Result<bool, Error> {
-        if let Some(shutdown_draw_area) = area.intersection_with_rect(self.shutdown_frame_chunk.area()) {
-            is_cursor_at_start = self
+        let mut inner = self.inner.deref().borrow_mut();
+
+        if let Some(shutdown_draw_area) = area.intersection_with_rect(inner.shutdown_frame_chunk.area()) {
+            is_cursor_at_start = inner
                 .shutdown_frame_chunk
                 .draw_line(out, shutdown_draw_area, is_cursor_at_start, force_redraw)?;
         }
 
-        if let Some(socks5_draw_area) = area.intersection_with_rect(self.socks5_frame_chunk.area()) {
-            is_cursor_at_start = self
+        if let Some(socks5_draw_area) = area.intersection_with_rect(inner.socks5_frame_chunk.area()) {
+            is_cursor_at_start = inner
                 .socks5_frame_chunk
                 .draw_line(out, socks5_draw_area, is_cursor_at_start, force_redraw)?;
         }
 
-        if let Some(sandstorm_draw_area) = area.intersection_with_rect(self.sandstorm_frame_chunk.area()) {
-            is_cursor_at_start = self
+        if let Some(sandstorm_draw_area) = area.intersection_with_rect(inner.sandstorm_frame_chunk.area()) {
+            is_cursor_at_start = inner
                 .sandstorm_frame_chunk
                 .draw_line(out, sandstorm_draw_area, is_cursor_at_start, force_redraw)?;
         }
 
-        if let Some(users_draw_area) = area.intersection_with_rect(self.users_frame_chunk.area()) {
-            is_cursor_at_start = self
+        if let Some(users_draw_area) = area.intersection_with_rect(inner.users_frame_chunk.area()) {
+            is_cursor_at_start = inner
                 .users_frame_chunk
                 .draw_line(out, users_draw_area, is_cursor_at_start, force_redraw)?;
         }
 
-        if let Some(auth_draw_area) = area.intersection_with_rect(self.auth_frame_chunk.area()) {
-            is_cursor_at_start = self
+        if let Some(auth_draw_area) = area.intersection_with_rect(inner.auth_frame_chunk.area()) {
+            is_cursor_at_start = inner
                 .auth_frame_chunk
                 .draw_line(out, auth_draw_area, is_cursor_at_start, force_redraw)?;
+        }
+
+        if let Some(buffer_draw_area) = area.intersection_with_rect(inner.buffer_frame_chunk.area()) {
+            is_cursor_at_start = inner
+                .buffer_frame_chunk
+                .draw_line(out, buffer_draw_area, is_cursor_at_start, force_redraw)?;
         }
 
         Ok(is_cursor_at_start)

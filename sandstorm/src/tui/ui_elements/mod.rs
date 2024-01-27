@@ -1,5 +1,7 @@
 use std::io::{Error, Write};
 
+use crossterm::event::Event;
+
 use super::types::{HorizontalLine, Rectangle};
 
 pub mod frame;
@@ -52,4 +54,18 @@ pub trait UIElement {
 
     /// Sets the area on screen this UI element occupies.
     fn resize(&mut self, area: Rectangle);
+
+    /// Requests this `UIElement` handles an event.
+    fn handle_event(&mut self, event: &Event) -> HandleEventResult {
+        HandleEventResult::Unhandled
+    }
+}
+
+/// The possible results of an `UIElement` handling an event.
+pub enum HandleEventResult {
+    /// The event has been handled, and a bool indicates whether a redraw is required.
+    Handled(bool),
+
+    /// The event has not been handled and it may be passed onto other UI elements.
+    Unhandled,
 }

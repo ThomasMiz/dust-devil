@@ -1,22 +1,25 @@
 use std::{
     io::{Error, Write},
+    rc::{Rc, Weak},
     time::Duration,
 };
 
 use crossterm::{
+    cursor::{self, Show},
     event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, KeyModifiers},
     style::{ContentStyle, Stylize},
     terminal::{self, EnterAlternateScreen, LeaveAlternateScreen},
-    ExecutableCommand,
+    ExecutableCommand, QueueableCommand,
 };
-use tokio::io::AsyncWrite;
+use tokio::{io::AsyncWrite, select, sync::Notify};
 
 use crate::sandstorm::SandstormRequestManager;
 
 use self::{
     styles::frame_types,
-    types::{HorizontalLine, Rectangle},
+    types::Rectangle,
     ui_elements::{frame::Frame, layouts::vertical_split::VerticalSplit, menu_bar::MenuBar, solid::Solid, UIElement},
+    ui_manager::UIManager,
 };
 
 mod chars;
@@ -24,6 +27,9 @@ mod pretty_print;
 mod styles;
 mod types;
 mod ui_elements;
+mod ui_manager;
+
+const EVENT_POLL_INTERVAL: Duration = Duration::from_millis(10);
 
 pub async fn handle_interactive<W>(manager: &mut SandstormRequestManager<W>) -> Result<(), Error>
 where
@@ -31,30 +37,28 @@ where
 {
     let mut out = std::io::stdout();
 
-    out.execute(EnterAlternateScreen)?;
     terminal::enable_raw_mode()?;
-    out.execute(EnableMouseCapture)?;
+    out.queue(EnterAlternateScreen)?
+        .queue(EnableMouseCapture)?
+        .queue(cursor::Hide)?
+        .flush()?;
 
     handle_interactive_inner(&mut out, manager).await?;
 
-    out.execute(DisableMouseCapture)?;
+    out.queue(cursor::Show)?
+        .queue(DisableMouseCapture)?
+        .queue(LeaveAlternateScreen)?
+        .flush()?;
     terminal::disable_raw_mode()?;
-    out.execute(LeaveAlternateScreen)?;
 
     Ok(())
 }
 
-async fn handle_interactive_inner<O, W>(out: &mut O, _manager: &mut SandstormRequestManager<W>) -> Result<(), Error>
-where
-    O: Write,
-    W: AsyncWrite + Unpin,
-{
-    let mut terminal_size = terminal::size()?;
-
-    let mut ui_root = VerticalSplit::new(
-        Rectangle::from_borders(0, 0, terminal_size.0 - 1, terminal_size.1 - 1).unwrap(),
+fn build_ui_root(area: Rectangle, redraw_notify: &Weak<Notify>) -> impl UIElement {
+    VerticalSplit::new(
+        area,
         2,
-        |upper_area| MenuBar::new(upper_area),
+        |upper_area| MenuBar::new(upper_area, Weak::clone(&redraw_notify)),
         |bottom_area| {
             Frame::new(
                 bottom_area,
@@ -65,53 +69,56 @@ where
                 |area| Solid::new(area, "X", ContentStyle::default().blue().on_yellow()),
             )
         },
-    );
+    )
+}
 
-    for y in 0..terminal_size.1 {
-        ui_root.draw_line(
-            out,
-            HorizontalLine::new(y, ui_root.area().left(), ui_root.area().width),
-            false,
-            true,
-        )?;
-    }
-    out.flush()?;
+async fn handle_interactive_inner<O, W>(out: &mut O, _manager: &mut SandstormRequestManager<W>) -> Result<(), Error>
+where
+    O: Write,
+    W: AsyncWrite + Unpin,
+{
+    let redraw_notify = Rc::new(Notify::const_new());
+    let mut ui_manager = UIManager::new(Rc::downgrade(&redraw_notify), build_ui_root)?;
+    redraw_notify.notify_one();
+
+    let mut force_redraw = true;
+
+    ui_manager.draw(out, true)?;
+
+    let mut event_poll_interval = tokio::time::interval(EVENT_POLL_INTERVAL);
+    event_poll_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
     loop {
-        while event::poll(Duration::default())? {
-            let event = event::read()?;
+        select! {
+            _ = event_poll_interval.tick() => {
+                while event::poll(Duration::from_secs(0))? {
+                    let event = event::read()?;
 
-            if let Event::Key(e) = event {
-                if let KeyCode::Char(c) = e.code {
-                    //out.execute(Print(c))?;
+                    if let Event::Key(key_event) = event {
+                        if (key_event.code == KeyCode::Char('c') || key_event.code == KeyCode::Char('C'))
+                            && key_event.modifiers.contains(KeyModifiers::CONTROL)
+                            && key_event.kind == KeyEventKind::Press
+                        {
+                            return Ok(());
+                        }
+
+                        if key_event.code == KeyCode::Esc {
+                            return Ok(());
+                        }
+                    }
+
+                    if let Event::Resize(width, height) = event {
+                        ui_manager.handle_resize(width, height);
+                        redraw_notify.notify_one();
+                        force_redraw = true;
+                    } else {
+                        ui_manager.handle_event(event);
+                    }
                 }
             }
-
-            if let Event::Key(key_event) = event {
-                if key_event.code == KeyCode::Char('c')
-                    && key_event.modifiers.contains(KeyModifiers::CONTROL)
-                    && key_event.kind == KeyEventKind::Press
-                {
-                    return Ok(());
-                }
-
-                if key_event.code == KeyCode::Esc {
-                    return Ok(());
-                }
-            }
-
-            if let Event::Resize(width, height) = event {
-                terminal_size = (width, height);
-                ui_root.resize(Rectangle::from_borders(0, 0, terminal_size.0 - 1, terminal_size.1 - 1).unwrap());
-                for y in 0..terminal_size.1 {
-                    ui_root.draw_line(
-                        out,
-                        HorizontalLine::new(y, ui_root.area().left(), ui_root.area().width),
-                        false,
-                        true,
-                    )?;
-                }
-                out.flush()?;
+            _ = redraw_notify.notified() => {
+                ui_manager.draw(out, force_redraw)?;
+                force_redraw = false;
             }
         }
     }

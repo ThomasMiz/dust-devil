@@ -40,6 +40,12 @@ impl SimpleLabel {
     pub fn text(&self) -> &str {
         &self.text
     }
+
+    pub fn modify_text<F: FnOnce(&mut String)>(&mut self, f: F) -> &str {
+        f(&mut self.text);
+        self.text_len = self.text.chars().count().min(u16::MAX as usize) as u16;
+        &self.text
+    }
 }
 
 impl UIElement for SimpleLabel {
