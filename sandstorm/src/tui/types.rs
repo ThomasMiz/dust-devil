@@ -10,7 +10,7 @@ pub struct Point {
 }
 
 impl Point {
-    pub fn new(x: u16, y: u16) -> Self {
+    pub const fn new(x: u16, y: u16) -> Self {
         Self { x, y }
     }
 }
@@ -111,12 +111,12 @@ pub struct Rectangle {
 /// An axis-aligned rectangle in a 2D grid of pixels with u16 coordinates. Guaranteed to not be
 /// empty (contains at least 1 pixel).
 impl Rectangle {
-    pub fn new(top_left: Point, width: NonZeroU16, height: NonZeroU16) -> Self {
+    pub const fn new(top_left: Point, width: NonZeroU16, height: NonZeroU16) -> Self {
         Self { top_left, width, height }
     }
 
     /// Creates a new rectangle from the desired borders (included).
-    pub fn from_borders(left: u16, top: u16, right: u16, bottom: u16) -> Option<Self> {
+    pub const fn from_borders(left: u16, top: u16, right: u16, bottom: u16) -> Option<Self> {
         if right >= left && bottom >= top {
             let top_left = Point::new(left, top);
             let width = unsafe { NonZeroU16::new_unchecked(right + 1 - left) };
@@ -129,50 +129,50 @@ impl Rectangle {
     }
 
     /// Gets this rectangle's width. Guaranteed to not be zero.
-    pub fn width(&self) -> u16 {
+    pub const fn width(&self) -> u16 {
         self.width.get()
     }
 
     /// Gets this rectangle's height. Guaranteed to not be zero.
-    pub fn height(&self) -> u16 {
+    pub const fn height(&self) -> u16 {
         self.height.get()
     }
 
     /// Gets this rectangle's lowest inclusive X coordinate.
-    pub fn left(&self) -> u16 {
+    pub const fn left(&self) -> u16 {
         self.top_left.x
     }
 
     /// Gets this rectangle's highest inclusive X coordinate. Guaranteed to be `>= left()`.
-    pub fn right(&self) -> u16 {
+    pub const fn right(&self) -> u16 {
         self.top_left.x + self.width() - 1
     }
 
     /// Gets this rectangle's lowest inclusive Y coordinate.
-    pub fn top(&self) -> u16 {
+    pub const fn top(&self) -> u16 {
         self.top_left.y
     }
 
     /// Gets this rectangle's highest inclusive Y coordinate. Guaranteed to be `>= top()`.
-    pub fn bottom(&self) -> u16 {
+    pub const fn bottom(&self) -> u16 {
         self.top_left.y + self.height() - 1
     }
 
-    pub fn bottom_left(&self) -> Point {
+    pub const fn bottom_left(&self) -> Point {
         Point {
             x: self.left(),
             y: self.bottom(),
         }
     }
 
-    pub fn top_right(&self) -> Point {
+    pub const fn top_right(&self) -> Point {
         Point {
             x: self.right(),
             y: self.top(),
         }
     }
 
-    pub fn bottom_right(&self) -> Point {
+    pub const fn bottom_right(&self) -> Point {
         Point {
             x: self.right(),
             y: self.bottom(),
@@ -180,7 +180,7 @@ impl Rectangle {
     }
 
     /// Gets this rectangle's area.
-    pub fn area(&self) -> u16 {
+    pub const fn area(&self) -> u16 {
         self.width() * self.height()
     }
 
@@ -206,6 +206,15 @@ impl Rectangle {
             None
         }
     }
+
+    pub fn top_as_line(&self) -> HorizontalLine {
+        HorizontalLine::new(self.top(), self.left(), self.width)
+    }
+
+    pub const fn get_single_pixel_rect() -> Self {
+        let one = unsafe { NonZeroU16::new_unchecked(1) };
+        Rectangle::new(Point::new(0, 0), one, one)
+    }
 }
 
 /// A Horizontal line of pixels in a 2D grid. Guaranteed to not be empty (contains at least 1 pixel).
@@ -217,12 +226,12 @@ pub struct HorizontalLine {
 }
 
 impl HorizontalLine {
-    pub fn new(y: u16, left: u16, width: NonZeroU16) -> Self {
+    pub const fn new(y: u16, left: u16, width: NonZeroU16) -> Self {
         Self { y, left, width }
     }
 
-    /// Creates a new line from the desired borders. Returns None if `left > right`.
-    pub fn from_borders(y: u16, left: u16, right: u16) -> Option<Self> {
+    /// Creates a new line from the desired borders (included). Returns None if `left > right`.
+    pub const fn from_borders(y: u16, left: u16, right: u16) -> Option<Self> {
         if left <= right {
             let width = unsafe { NonZeroU16::new_unchecked(right - left + 1) };
             Some(HorizontalLine { y, left, width })
@@ -232,22 +241,22 @@ impl HorizontalLine {
     }
 
     /// Gets this line's lowest inclusive X coordinate.
-    pub fn left(&self) -> u16 {
+    pub const fn left(&self) -> u16 {
         self.left
     }
 
     /// Gets this line's highest inclusive X coordinate. Guaranteed to be `>= left()`.
-    pub fn right(&self) -> u16 {
+    pub const fn right(&self) -> u16 {
         self.left + self.width.get() - 1
     }
 
     /// Gets this line's width. Guaranteed to not be zero.
-    pub fn width(&self) -> u16 {
+    pub const fn width(&self) -> u16 {
         self.width.get()
     }
 
     /// Calculates the intersection between this line and a rectangle.
-    pub fn intersection_with(&self, rect: Rectangle) -> Option<Self> {
+    pub fn intersection_with_rect(&self, rect: Rectangle) -> Option<Self> {
         let left = self.left().max(rect.left());
         let right = self.right().min(rect.right());
 
@@ -258,8 +267,19 @@ impl HorizontalLine {
         }
     }
 
+    /// Calculates the intersection between this line and another line.
+    pub fn intersection_with_line(&self, line: Self) -> Option<Self> {
+        if self.y == line.y {
+            let left = self.left().max(line.left());
+            let right = self.right().min(line.right());
+            Self::from_borders(self.y, left, right)
+        } else {
+            None
+        }
+    }
+
     /// Calculates the inside of this line by pushing the horizontal borders inwards by 1 unit.
-    pub fn inside(&self) -> Option<Self> {
+    pub const fn inside(&self) -> Option<Self> {
         if self.width() > 2 {
             Some(Self {
                 y: self.y,
@@ -269,6 +289,18 @@ impl HorizontalLine {
         } else {
             None
         }
+    }
+
+    pub const fn get_single_pixel_line() -> Self {
+        let one = unsafe { NonZeroU16::new_unchecked(1) };
+        Self::new(0, 0, one)
+    }
+}
+
+impl From<HorizontalLine> for Rectangle {
+    fn from(value: HorizontalLine) -> Self {
+        let one = unsafe { NonZeroU16::new_unchecked(1) };
+        Rectangle::new(Point::new(value.left, value.y), value.width, one)
     }
 }
 

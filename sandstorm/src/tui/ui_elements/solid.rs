@@ -7,7 +7,7 @@ use crossterm::{
 
 use crate::tui::types::{HorizontalLine, Rectangle};
 
-use super::{utils::ensure_cursor_at_start, UIElementDraw, UIElementResize};
+use super::{utils::ensure_cursor_at_start, UIElement};
 
 pub struct Solid {
     area: Rectangle,
@@ -19,14 +19,20 @@ impl Solid {
     pub fn new(area: Rectangle, fill_char: &'static str, style: ContentStyle) -> Self {
         Self { area, fill_char, style }
     }
-
-    pub fn area(&self) -> Rectangle {
-        self.area
-    }
 }
 
-impl<O: Write> UIElementDraw<O> for Solid {
-    fn draw_line(&mut self, out: &mut O, area: HorizontalLine, mut is_cursor_at_start: bool, force_redraw: bool) -> Result<bool, Error> {
+impl UIElement for Solid {
+    fn area(&self) -> Rectangle {
+        self.area
+    }
+
+    fn draw_line<O: Write>(
+        &mut self,
+        out: &mut O,
+        area: HorizontalLine,
+        mut is_cursor_at_start: bool,
+        force_redraw: bool,
+    ) -> Result<bool, Error> {
         if !force_redraw {
             return Ok(false);
         }
@@ -39,9 +45,7 @@ impl<O: Write> UIElementDraw<O> for Solid {
 
         Ok(true)
     }
-}
 
-impl UIElementResize for Solid {
     fn resize(&mut self, area: Rectangle) {
         self.area = area;
     }

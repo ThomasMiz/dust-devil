@@ -3,12 +3,17 @@ use std::io::{Error, Write};
 use super::types::{HorizontalLine, Rectangle};
 
 pub mod frame;
+pub mod layouts;
 pub mod menu_bar;
+pub mod simple_label;
 pub mod solid;
 pub mod utils;
 
 /// An UI element in the TUI that occupies an area on the screen.
-pub trait UIElementDraw<O: Write> {
+pub trait UIElement {
+    /// Gets the area on screen this UI element occupies.
+    fn area(&self) -> Rectangle;
+
     /// Draws an horizontal line of chars from this UI element. Drawing occurs by lines to reduce
     /// the amount of cursor movements, since printing a char advances the cursor forward. The area
     /// to draw is defined by the `area` parameter, of type `HorizontalLine`. This area must be
@@ -37,15 +42,14 @@ pub trait UIElementDraw<O: Write> {
     /// frame would need a lot of cursor movements! When drawing by lines, this allows the `Frame`
     /// to draw, for each line, the left-side vertical border (e.g. '|'), then call the inner's
     /// draw_line(), and then draw the right-side vertical border, thus reducing cursor movements.
-    fn draw_line(&mut self, out: &mut O, area: HorizontalLine, is_cursor_at_start: bool, force_redraw: bool) -> Result<bool, Error>;
-}
+    fn draw_line<O: Write>(
+        &mut self,
+        out: &mut O,
+        area: HorizontalLine,
+        is_cursor_at_start: bool,
+        force_redraw: bool,
+    ) -> Result<bool, Error>;
 
-pub trait UIElementResize {
     /// Sets the area on screen this UI element occupies.
     fn resize(&mut self, area: Rectangle);
 }
-
-/// Any type that implements both `UIElementDraw<O>` and `UIElementResize` also automatically
-/// implements `UIElement`, which simply is a combination of those two traits.
-pub trait UIElement<O: Write>: UIElementDraw<O> + UIElementResize {}
-impl<T, O: Write> UIElement<O> for T where T: UIElementDraw<O> + UIElementResize {}

@@ -1,12 +1,11 @@
 use std::{
     io::{Error, Write},
-    num::NonZeroU16,
     time::Duration,
 };
 
 use crossterm::{
     event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, KeyModifiers},
-    style::{ContentStyle, Print, Stylize},
+    style::{ContentStyle, Stylize},
     terminal::{self, EnterAlternateScreen, LeaveAlternateScreen},
     ExecutableCommand,
 };
@@ -17,10 +16,11 @@ use crate::sandstorm::SandstormRequestManager;
 use self::{
     styles::frame_types,
     types::{HorizontalLine, Rectangle},
-    ui_elements::{frame::Frame, solid::Solid, UIElementDraw, UIElementResize},
+    ui_elements::{frame::Frame, layouts::vertical_split::VerticalSplit, menu_bar::MenuBar, solid::Solid, UIElement},
 };
 
 mod chars;
+mod pretty_print;
 mod styles;
 mod types;
 mod ui_elements;
@@ -50,17 +50,30 @@ where
     W: AsyncWrite + Unpin,
 {
     let mut terminal_size = terminal::size()?;
-    let mut frame = Frame::new(
+
+    let mut ui_root = VerticalSplit::new(
         Rectangle::from_borders(0, 0, terminal_size.0 - 1, terminal_size.1 - 1).unwrap(),
-        String::from("A ver si funca lcdll↑↓║█◄►←→┃ ━ ┓ ┏ ┛ ┗ ┫ ┣ ┳ ┻ ╋║ ═ ╗ ╔ ╝ ╚ ╣ ╠ ╦ ╩ ╬│ ─ ┐ ╮ ┌ ╭ ┘ ╯ └ ╰ ┤ ├ ┬ ┴ ┼ pedro"),
-        ContentStyle::default().red(),
-        frame_types::LINE,
-        ContentStyle::default().reset(),
-        |area| Solid::new(area, "X", ContentStyle::default().blue().on_yellow()),
+        2,
+        |upper_area| MenuBar::new(upper_area),
+        |bottom_area| {
+            Frame::new(
+                bottom_area,
+                String::from("A ver si funca lcdll↑↓║█◄►←→┃ ━ ┓ ┏ ┛ ┗ ┫ ┣ ┳ ┻ ╋║ ═ ╗ ╔ ╝ ╚ ╣ ╠ ╦ ╩ ╬│ ─ ┐ ╮ ┌ ╭ ┘ ╯ └ ╰ ┤ ├ ┬ ┴ ┼ pedro"),
+                ContentStyle::default().red(),
+                frame_types::LINE,
+                ContentStyle::default().reset(),
+                |area| Solid::new(area, "X", ContentStyle::default().blue().on_yellow()),
+            )
+        },
     );
 
     for y in 0..terminal_size.1 {
-        frame.draw_line(out, HorizontalLine::new(y, frame.area().left(), frame.area().width), false, true)?;
+        ui_root.draw_line(
+            out,
+            HorizontalLine::new(y, ui_root.area().left(), ui_root.area().width),
+            false,
+            true,
+        )?;
     }
     out.flush()?;
 
@@ -89,9 +102,14 @@ where
 
             if let Event::Resize(width, height) = event {
                 terminal_size = (width, height);
-                frame.resize(Rectangle::from_borders(0, 0, terminal_size.0 - 1, terminal_size.1 - 1).unwrap());
+                ui_root.resize(Rectangle::from_borders(0, 0, terminal_size.0 - 1, terminal_size.1 - 1).unwrap());
                 for y in 0..terminal_size.1 {
-                    frame.draw_line(out, HorizontalLine::new(y, frame.area().left(), frame.area().width), false, true)?;
+                    ui_root.draw_line(
+                        out,
+                        HorizontalLine::new(y, ui_root.area().left(), ui_root.area().width),
+                        false,
+                        true,
+                    )?;
                 }
                 out.flush()?;
             }

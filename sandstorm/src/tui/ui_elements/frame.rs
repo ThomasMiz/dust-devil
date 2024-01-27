@@ -10,7 +10,7 @@ use crate::tui::{
     types::{HorizontalLine, Rectangle},
 };
 
-use super::{utils::ensure_cursor_at_start, UIElementDraw, UIElementResize};
+use super::{utils::ensure_cursor_at_start, UIElement};
 
 pub struct Frame<T> {
     area: Rectangle,
@@ -22,7 +22,7 @@ pub struct Frame<T> {
     inner: T,
 }
 
-impl<T> Frame<T> {
+impl<T: UIElement> Frame<T> {
     pub fn new<F: FnOnce(Rectangle) -> T>(
         area: Rectangle,
         title: String,
@@ -38,7 +38,7 @@ impl<T> Frame<T> {
             title_style,
             frame_type,
             frame_style,
-            inner: inner_builder(area.inside().expect("Frame's area isn't large enough")),
+            inner: inner_builder(area.inside().unwrap_or(Rectangle::get_single_pixel_rect())),
         }
     }
 
@@ -48,10 +48,6 @@ impl<T> Frame<T> {
 
     pub fn inner_mut(&mut self) -> &mut T {
         &mut self.inner
-    }
-
-    pub fn area(&self) -> Rectangle {
-        self.area
     }
 
     /// Draws the top part of this frame, including the corners and title. This function assumes
@@ -133,8 +129,18 @@ impl<T> Frame<T> {
     }
 }
 
-impl<O: Write, T: UIElementDraw<O>> UIElementDraw<O> for Frame<T> {
-    fn draw_line(&mut self, out: &mut O, area: HorizontalLine, mut is_cursor_at_start: bool, force_redraw: bool) -> Result<bool, Error> {
+impl<T: UIElement> UIElement for Frame<T> {
+    fn area(&self) -> Rectangle {
+        self.area
+    }
+
+    fn draw_line<O: Write>(
+        &mut self,
+        out: &mut O,
+        area: HorizontalLine,
+        mut is_cursor_at_start: bool,
+        force_redraw: bool,
+    ) -> Result<bool, Error> {
         if area.y == self.area.top() {
             if force_redraw {
                 ensure_cursor_at_start(&mut is_cursor_at_start, out, area.left(), area.y)?;
@@ -167,9 +173,7 @@ impl<O: Write, T: UIElementDraw<O>> UIElementDraw<O> for Frame<T> {
 
         Ok(is_cursor_at_start)
     }
-}
 
-impl<T: UIElementResize> UIElementResize for Frame<T> {
     fn resize(&mut self, area: Rectangle) {
         self.area = area;
         if let Some(inside) = area.inside() {
