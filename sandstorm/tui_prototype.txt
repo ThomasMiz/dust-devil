@@ -3,6 +3,9 @@ Symbols guide: https://github.com/ratatui-org/ratatui/blob/main/src/symbols.rs
 Color guide: https://github.com/ratatui-org/ratatui/blob/main/examples/README.md#colors
 Thanks to the Ratatui project for inspiration (and an easy place to get the chars I wanted ;))
 
+More symbols: https://github.com/arkbig/throbber-widgets-tui/blob/main/src/symbols.rs
+
+
 
 Single frame: │ ─ ┐ ╮ ┌ ╭ ┘ ╯ └ ╰ ┤ ├ ┬ ┴ ┼
 
