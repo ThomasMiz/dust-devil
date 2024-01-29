@@ -69,7 +69,7 @@ async fn handle_interactive_inner<B, W>(
     terminal: &mut Terminal<B>,
     manager: SandstormRequestManager<W>,
     mut stream_event_receiver: StreamEventReceiver,
-    _metrics: Metrics,
+    metrics: Metrics,
 ) -> Result<(), Error>
 where
     B: Backend,
@@ -83,7 +83,7 @@ where
 
     let mut terminal_event_receiver = TerminalEventReceiver::new();
 
-    let mut ui_manager = UIManager::new(manager, Rc::clone(&redraw_notify), shutdown_sender);
+    let mut ui_manager = UIManager::new(manager, metrics, Rc::clone(&redraw_notify), shutdown_sender);
 
     loop {
         select! {

@@ -1,10 +1,11 @@
-use core::fmt;
+use std::fmt;
 
-/// Pretty-prints an amount of bytes into a four-digit number followed by a unit suffix. This means
-/// printed values are never more than 6 chars long.
+/// A struct that implements [`fmt::Display`] for pretty-printing an amount of bytes into a
+/// four-digit number followed by a unit suffix. This means printed values are never more than 6
+/// chars long.
 ///
-/// For example, 900 will be displayed as "900B", but 1024 will be displayed as "1KB", or 1536 will
-/// be displayed as "1.5KB". The suffixes used can be K, M, G, T, P, and E.
+/// For example, `900` will be displayed as `900B`, but `1024` will be displayed as `1KB`, or
+/// `1536` will be displayed as `1.5KB`. The suffixes used can be `K`, `M`, `G`, `T`, `P`, and `E`.
 pub struct PrettyByteDisplayer(pub usize);
 
 const BYTE_COUNT_SUFFIXES: &[char] = &['K', 'M', 'G', 'T', 'P', 'E'];
@@ -44,5 +45,23 @@ impl fmt::Display for PrettyByteDisplayer {
         }
 
         write!(f, "{suffix_char}B")
+    }
+}
+
+/// A struct that implements [`fmt::Display`] for pretty-printing an amount of milliseconds, such
+/// as for a ping.
+///
+/// If zero, this will print `<1ms`. If greater than `9999`, this will print `>9999ms`. Otherwise,
+/// the number is printed as-is followed by `ms`. This means printed values are never more than 7
+/// chars long.
+pub struct PrettyMillisDisplay(pub u16);
+
+impl fmt::Display for PrettyMillisDisplay {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.0 {
+            0 => write!(f, "<1ms"),
+            v if v > 9999 => write!(f, ">9999ms"),
+            v => write!(f, "{v}ms"),
+        }
     }
 }

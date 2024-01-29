@@ -368,7 +368,7 @@ where
     Ok(())
 }
 
-#[allow(clippy::await_holding_refcell_ref)] // TODO: Remove once clippy false positive is fixed
+#[allow(clippy::await_holding_refcell_ref)] // TODO: Remove once clippy false positive is fixed (https://github.com/rust-lang/rust-clippy/issues/6353)
 
 impl<W> SandstormRequestManager<W>
 where

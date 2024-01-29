@@ -1,4 +1,10 @@
-use std::{cell::RefCell, fmt::Write, ops::Deref, rc::Rc, time::Duration};
+use std::{
+    cell::RefCell,
+    fmt::Write,
+    ops::Deref,
+    rc::Rc,
+    time::{Duration, Instant},
+};
 
 use ratatui::{
     buffer::Buffer,
@@ -7,16 +13,17 @@ use ratatui::{
     symbols,
     widgets::{Block, BorderType, Borders, Padding, Paragraph, Widget},
 };
+
 use tokio::{
     io::AsyncWrite,
-    select,
-    sync::{broadcast, Notify},
+    join, select,
+    sync::{broadcast, oneshot, Notify},
     task::JoinHandle,
 };
 
 use crate::{
     sandstorm::MutexedSandstormRequestManager,
-    tui::pretty_print::PrettyByteDisplayer,
+    tui::pretty_print::{PrettyByteDisplayer, PrettyMillisDisplay},
     utils::futures::{recv_ignore_lagged, run_with_background},
 };
 
@@ -33,6 +40,7 @@ const SANDSTORM_LABEL: &str = "Sandstorm";
 const USERS_LABEL: &str = "Users";
 const AUTH_LABEL: &str = "Auth";
 const EXTRA_LABEL: &str = "Sandstorm Protocol v1";
+const EXTRA_LOADING_LABEL: &str = "Getting info...";
 
 /// This string should consist only of spaces. The size of this string defined the amount of dots
 /// ('.') to use for the buffer size frame's loading indicator.
@@ -43,6 +51,19 @@ const BUFFER_TEXT_LOADING_COLOR: Color = Color::LightYellow;
 const BUFFER_TEXT_DEFAULT_COLOR: Color = Color::Yellow;
 const BUFFER_TEXT_HIGHLIGHT_COLOR: Color = Color::LightRed;
 const BUFFER_TEXT_HIGHLIGHT_DURATION: Duration = Duration::from_millis(500);
+
+const PING_TEXT_LOADING_COLOR: Color = Color::Reset;
+const PING_LOADING_INDICATOR_LENGTH: i16 = 4;
+const PING_LOADING_INDICATOR_FREQUENCY: Duration = Duration::from_millis(100);
+const PING_MEASURE_INTERVAL: Duration = Duration::from_secs(1);
+
+const fn get_ping_text_color(millis: u16) -> Color {
+    match millis {
+        _ if millis < 100 => Color::Green,
+        _ if millis < 1000 => Color::Yellow,
+        _ => Color::Red,
+    }
+}
 
 pub struct MenuBar {
     state: Rc<RefCell<MenuBarState>>,
@@ -57,7 +78,10 @@ pub struct MenuBarState {
     auth_label: String,
     buffer_frame_text: String,
     buffer_frame_text_color: Color,
+    buffer_frame_loading: bool,
     ping_frame_text: String,
+    ping_frame_text_color: Color,
+    ping_frame_loading: bool,
 }
 
 impl MenuBar {
@@ -77,7 +101,10 @@ impl MenuBar {
             auth_label: format!("{AUTH_LABEL} ({AUTH_KEY})"),
             buffer_frame_text: format!("{BUFFER_SIZE_LOADING_INDICATOR_SIZE} ({BUFFER_KEY})"),
             buffer_frame_text_color: BUFFER_TEXT_LOADING_COLOR,
-            ping_frame_text: String::from("9999ms"),
+            buffer_frame_loading: true,
+            ping_frame_text: String::new(),
+            ping_frame_text_color: PING_TEXT_LOADING_COLOR,
+            ping_frame_loading: true,
         }));
 
         let state1 = Rc::clone(&state);
@@ -111,7 +138,7 @@ async fn buffer_size_loading_indicator(state: &Rc<RefCell<MenuBarState>>, redraw
         let mut state_inner = state.deref().borrow_mut();
 
         unsafe {
-            // SAFETY: We edit the string in place. We always ensure to replace ascii chars with ascii char,
+            // SAFETY: We edit the string in place. We always ensure to replace ascii chars with ascii chars,
             // so the string remains valid UTF-8.
             let loading_indicator_bytes = state_inner.buffer_frame_text[..(TOTAL_DOTS as usize)].as_bytes_mut();
             if current_dots == 0 {
@@ -133,10 +160,10 @@ async fn buffer_size_loading_indicator(state: &Rc<RefCell<MenuBarState>>, redraw
     }
 }
 
-async fn menu_bar_background_task<W>(
-    manager: Rc<MutexedSandstormRequestManager<W>>,
-    state: Rc<RefCell<MenuBarState>>,
-    redraw_notify: Rc<Notify>,
+async fn buffer_frame_background_task<W>(
+    manager: &Rc<MutexedSandstormRequestManager<W>>,
+    state: &Rc<RefCell<MenuBarState>>,
+    redraw_notify: &Rc<Notify>,
     buffer_size_sender: broadcast::Sender<u32>,
 ) where
     W: AsyncWrite + Unpin,
@@ -154,10 +181,12 @@ async fn menu_bar_background_task<W>(
     }
 
     let recv_buffer_size_result = run_with_background(
-        buffer_size_loading_indicator(&state, &redraw_notify),
+        buffer_size_loading_indicator(state, redraw_notify),
         recv_ignore_lagged(&mut buffer_size_receiver),
     )
     .await;
+
+    state.deref().borrow_mut().buffer_frame_loading = false;
 
     match recv_buffer_size_result {
         Ok(buffer_size) => {
@@ -205,6 +234,102 @@ async fn menu_bar_background_task<W>(
     }
 }
 
+async fn ping_frame_loading_indicator(state: &Rc<RefCell<MenuBarState>>, redraw_notify: &Rc<Notify>) {
+    let mut current_i = PING_LOADING_INDICATOR_LENGTH / 2;
+    let mut direction = 1;
+    loop {
+        {
+            let mut state_inner = state.deref().borrow_mut();
+            let text = &mut state_inner.ping_frame_text;
+            text.clear();
+            for _ in 0..current_i {
+                text.push(symbols::half_block::LOWER);
+            }
+            text.push(symbols::half_block::FULL);
+            for _ in (current_i + 1)..PING_LOADING_INDICATOR_LENGTH {
+                text.push(symbols::half_block::LOWER);
+            }
+        }
+        redraw_notify.notify_one();
+
+        tokio::time::sleep(PING_LOADING_INDICATOR_FREQUENCY).await;
+
+        current_i += direction;
+        if current_i == -1 {
+            current_i = 1;
+            direction = 1;
+        } else if current_i == PING_LOADING_INDICATOR_LENGTH {
+            current_i = PING_LOADING_INDICATOR_LENGTH - 2;
+            direction = -1;
+        }
+    }
+}
+
+async fn measure_ping<W: AsyncWrite + Unpin>(manager: &Rc<MutexedSandstormRequestManager<W>>) -> Result<u16, ()> {
+    let (tx, rx) = oneshot::channel();
+    let start_time = Instant::now();
+    let meow_result = manager
+        .meow_fn(move |_result| {
+            let elapsed = start_time.elapsed();
+            let elapsed_millis = elapsed.as_millis().min(u16::MAX as u128) as u16;
+            let _ = tx.send(elapsed_millis);
+        })
+        .await;
+
+    if meow_result.is_err() {
+        return Err(());
+    }
+
+    rx.await.map_err(|_| ())
+}
+
+async fn ping_frame_background_task<W>(
+    manager: &Rc<MutexedSandstormRequestManager<W>>,
+    state: &Rc<RefCell<MenuBarState>>,
+    redraw_notify: &Rc<Notify>,
+) where
+    W: AsyncWrite + Unpin,
+{
+    let first_ping = run_with_background(ping_frame_loading_indicator(state, redraw_notify), measure_ping(manager)).await;
+
+    state.deref().borrow_mut().ping_frame_loading = false;
+    let mut ping_millis = match first_ping {
+        Ok(v) => v,
+        Err(_) => return,
+    };
+
+    loop {
+        {
+            let mut state_inner = state.deref().borrow_mut();
+            let text = &mut state_inner.ping_frame_text;
+            text.clear();
+            let _ = write!(text, "{}", PrettyMillisDisplay(ping_millis));
+            state_inner.ping_frame_text_color = get_ping_text_color(ping_millis);
+        }
+        redraw_notify.notify_one();
+
+        tokio::time::sleep(PING_MEASURE_INTERVAL).await;
+
+        ping_millis = match measure_ping(manager).await {
+            Ok(v) => v,
+            Err(_) => return,
+        };
+    }
+}
+
+async fn menu_bar_background_task<W>(
+    manager: Rc<MutexedSandstormRequestManager<W>>,
+    state: Rc<RefCell<MenuBarState>>,
+    redraw_notify: Rc<Notify>,
+    buffer_size_sender: broadcast::Sender<u32>,
+) where
+    W: AsyncWrite + Unpin,
+{
+    join!(
+        buffer_frame_background_task(&manager, &state, &redraw_notify, buffer_size_sender),
+        ping_frame_background_task(&manager, &state, &redraw_notify),
+    );
+}
 pub struct MenuBarWidget {
     state: Rc<RefCell<MenuBarState>>,
 }
@@ -223,7 +348,7 @@ impl Widget for MenuBarWidget {
                 Constraint::Length(state.auth_label.len() as u16 + 3),
                 Constraint::Length(state.buffer_frame_text.len() as u16 + 3),
                 Constraint::Min(0),
-                Constraint::Length(state.ping_frame_text.len() as u16 + 4),
+                Constraint::Length(state.ping_frame_text.chars().count() as u16 + 4),
             ],
         )
         .split(area);
@@ -294,8 +419,13 @@ impl Widget for MenuBarWidget {
             )
             .render(menu_layout[5], buf);
 
-        let extra_frame_text = match EXTRA_LABEL.len() {
-            l if l + 3 <= menu_layout[6].width as usize => EXTRA_LABEL,
+        let extra_frame_text = match state.buffer_frame_loading || state.ping_frame_loading {
+            true => EXTRA_LOADING_LABEL,
+            false => EXTRA_LABEL,
+        };
+
+        let extra_frame_text = match extra_frame_text.len() {
+            l if l + 3 <= menu_layout[6].width as usize => extra_frame_text,
             _ => "",
         };
 
@@ -309,7 +439,7 @@ impl Widget for MenuBarWidget {
             )
             .render(menu_layout[6], buf);
 
-        Paragraph::new(state.ping_frame_text.as_str())
+        Paragraph::new(state.ping_frame_text.as_str().fg(state.ping_frame_text_color))
             .block(
                 Block::new()
                     .border_type(BorderType::Double)

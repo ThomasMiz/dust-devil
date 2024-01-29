@@ -28,9 +28,14 @@ pub struct UIManager<W: AsyncWrite + Unpin + 'static> {
 }
 
 impl<W: AsyncWrite + Unpin + 'static> UIManager<W> {
-    pub fn new(manager: Rc<MutexedSandstormRequestManager<W>>, redraw_notify: Rc<Notify>, shutdown_sender: oneshot::Sender<()>) -> Self {
+    pub fn new(
+        manager: Rc<MutexedSandstormRequestManager<W>>,
+        metrics: Metrics,
+        redraw_notify: Rc<Notify>,
+        shutdown_sender: oneshot::Sender<()>,
+    ) -> Self {
         let (buffer_size_watch, _) = broadcast::channel(1);
-        let (metrics_watch, _metrics_watch_receiver) = watch::channel(Metrics::default());
+        let (metrics_watch, _metrics_watch_receiver) = watch::channel(metrics);
 
         let menu_bar = MenuBar::new(manager.clone(), redraw_notify, buffer_size_watch.clone());
 
