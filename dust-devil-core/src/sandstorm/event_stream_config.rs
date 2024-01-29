@@ -7,7 +7,7 @@ use crate::serialize::{ByteRead, ByteWrite};
 use super::SandstormCommandType;
 
 /// A snapshot of metrics measured by the server about incoming connections, bytes sent, etc.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Metrics {
     /// The amount of currently connected client connections.
     pub current_client_connections: u32,

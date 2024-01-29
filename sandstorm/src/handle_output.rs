@@ -4,7 +4,10 @@ use dust_devil_core::sandstorm::{EventStreamConfigResponse, EventStreamResponse}
 use time::{OffsetDateTime, UtcOffset};
 use tokio::{io::AsyncWrite, sync::oneshot};
 
-use crate::{printlnif, sandstorm::SandstormRequestManager};
+use crate::{
+    printlnif,
+    sandstorm::{EventStreamReceiver, SandstormRequestManager},
+};
 
 fn get_event_handler_fn() -> impl FnMut(EventStreamResponse) {
     let utc_offset = match UtcOffset::current_local_offset() {
@@ -34,11 +37,11 @@ fn get_event_handler_fn() -> impl FnMut(EventStreamResponse) {
     }
 }
 
-pub async fn handle_output<W>(verbose: bool, manager: &mut SandstormRequestManager<W>) -> Result<(), Error>
+pub async fn handle_output<W>(verbose: bool, mut manager: SandstormRequestManager<W>) -> Result<(), Error>
 where
     W: AsyncWrite + Unpin,
 {
-    printlnif!(verbose, "Enabling event stream");
+    printlnif!(verbose, "Starting log output, enabling event stream");
     let (tx, rx) = oneshot::channel();
     manager
         .event_stream_config_fn(true, |result| match result {
@@ -56,7 +59,7 @@ where
                 println!("current sandstorm connections: {}", metrics.current_sandstorm_connections);
                 println!("historic sandstorm connections: {}", metrics.historic_sandstorm_connections);
                 let _ = tx.send(true);
-                Some(Box::new(get_event_handler_fn()))
+                Some(EventStreamReceiver::Function(Box::new(get_event_handler_fn())))
             }
             EventStreamConfigResponse::WasAlreadyEnabled => {
                 eprintln!("Couldn't enable event streaming: Server responded with WasAlreadyEnabled.");
@@ -77,5 +80,6 @@ where
         println!("Received break signal, shutting down gracefully");
     }
 
-    Ok(())
+    printlnif!(verbose, "Shutting down and waiting for connection to close");
+    manager.shutdown_and_close().await
 }

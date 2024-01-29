@@ -1,36 +1,43 @@
 use std::{
     io::{stdout, Error, Write},
     rc::Rc,
-    time::Duration,
 };
 
 use crossterm::{
     cursor,
-    event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
+    event::{self, KeyCode, KeyEvent, KeyEventKind, KeyModifiers},
     terminal, QueueableCommand,
 };
+use dust_devil_core::sandstorm::Metrics;
 use ratatui::{
     backend::{Backend, CrosstermBackend},
-    layout::Rect,
     Terminal,
 };
 
-use tokio::{io::AsyncWrite, select, sync::Notify};
+use tokio::{
+    io::AsyncWrite,
+    select,
+    sync::{oneshot, Notify},
+};
 
-use crate::{sandstorm::SandstormRequestManager, tui::menu_bar::MenuBar};
+use crate::{printlnif, sandstorm::SandstormRequestManager, tui::event_receiver::StreamEventReceiver};
 
-use self::ui_manager::UIManager;
+use self::{event_receiver::TerminalEventReceiver, ui_manager::UIManager};
 
+mod event_receiver;
 mod menu_bar;
 mod pretty_print;
 mod ui_manager;
 
-const EVENT_POLL_INTERVAL: Duration = Duration::from_millis(10);
-
-pub async fn handle_interactive<W>(manager: &mut SandstormRequestManager<W>) -> Result<(), Error>
+pub async fn handle_interactive<W>(verbose: bool, mut manager: SandstormRequestManager<W>) -> Result<(), Error>
 where
-    W: AsyncWrite + Unpin,
+    W: AsyncWrite + Unpin + 'static,
 {
+    printlnif!(verbose, "Starting interactive mode, enabling event stream");
+
+    let (stream_event_receiver, metrics) = StreamEventReceiver::new(&mut manager).await?;
+    printlnif!(verbose, "Entering interactive mode");
+
     let mut out = std::io::stdout();
 
     terminal::enable_raw_mode()?;
@@ -40,7 +47,7 @@ where
         .flush()?;
 
     let mut terminal = Terminal::new(CrosstermBackend::new(stdout()))?;
-    handle_interactive_inner(&mut terminal, manager).await?;
+    handle_interactive_inner(&mut terminal, manager, stream_event_receiver, metrics).await?;
     drop(terminal);
 
     out.queue(cursor::Show)?
@@ -52,45 +59,49 @@ where
     Ok(())
 }
 
-async fn handle_interactive_inner<B, W>(terminal: &mut Terminal<B>, _manager: &mut SandstormRequestManager<W>) -> Result<(), Error>
+fn is_ctrl_c(key_event: &KeyEvent) -> bool {
+    (key_event.code == KeyCode::Char('c') || key_event.code == KeyCode::Char('C'))
+        && key_event.modifiers.contains(KeyModifiers::CONTROL)
+        && key_event.kind == KeyEventKind::Press
+}
+
+async fn handle_interactive_inner<B, W>(
+    terminal: &mut Terminal<B>,
+    manager: SandstormRequestManager<W>,
+    mut stream_event_receiver: StreamEventReceiver,
+    _metrics: Metrics,
+) -> Result<(), Error>
 where
     B: Backend,
-    W: AsyncWrite + Unpin,
+    W: AsyncWrite + Unpin + 'static,
 {
+    let manager = Rc::new(manager.into_mutexed());
+
+    let (shutdown_sender, mut shutdown_receiver) = oneshot::channel::<()>();
     let redraw_notify = Rc::new(Notify::const_new());
     redraw_notify.notify_one();
 
-    let mut event_poll_interval = tokio::time::interval(EVENT_POLL_INTERVAL);
-    event_poll_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let mut terminal_event_receiver = TerminalEventReceiver::new();
 
-    let mut ui_manager = UIManager::new(Rc::clone(&redraw_notify));
+    let mut ui_manager = UIManager::new(manager, Rc::clone(&redraw_notify), shutdown_sender);
 
     loop {
         select! {
             biased;
-            _ = event_poll_interval.tick() => {
-                while event::poll(Duration::from_secs(0))? {
-                    let event = event::read()?;
-
-                    if let Event::Key(key_event) = event {
-                        if (key_event.code == KeyCode::Char('c') || key_event.code == KeyCode::Char('C'))
-                            && key_event.modifiers.contains(KeyModifiers::CONTROL)
-                            && key_event.kind == KeyEventKind::Press
-                        {
-                            return Ok(());
-                        }
-
-                        if key_event.code == KeyCode::Esc {
-                            return Ok(());
-                        }
-                    }
-
-                    if let Event::Resize(_, _) = event {
-                        redraw_notify.notify_one();
-                    } else {
-                        // TODO: Handle events
-                    }
+            _ = Pin::new(&mut shutdown_receiver) => {
+                return Ok(());
+            }
+            terminal_event_result = terminal_event_receiver.receive() => {
+                let terminal_event = terminal_event_result??;
+                match terminal_event {
+                    event::Event::Resize(_, _) => redraw_notify.notify_one(),
+                    event::Event::Key(key_event) if is_ctrl_c(&key_event) => return Ok(()),
+                    _ => ui_manager.handle_terminal_event(&terminal_event),
                 }
+            }
+            stream_event_result = stream_event_receiver.receive() => {
+                let stream_event = stream_event_result?;
+                ui_manager.handle_stream_event(&stream_event);
             }
             _ = redraw_notify.notified() => {
                 terminal.draw(|frame| ui_manager.draw(frame))?;

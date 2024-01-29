@@ -24,17 +24,21 @@ use dust_devil_core::{
 };
 use tokio::{
     io::{AsyncRead, AsyncWrite, AsyncWriteExt},
-    sync::oneshot,
+    sync::{mpsc, oneshot, Mutex},
     task::JoinHandle,
 };
 
-type EventStreamConfigHandlerFn = dyn FnOnce(EventStreamConfigResponse) -> Option<Box<dyn FnMut(EventStreamResponse)>>;
+pub enum EventStreamReceiver {
+    Function(Box<dyn FnMut(EventStreamResponse)>),
+    Channel(mpsc::Sender<EventStreamResponse>),
+}
 
 struct ResponseHandlers {
     remaining: usize,
+    was_shutdown: bool,
     flush_notifier: Option<oneshot::Sender<()>>,
     shutdown_handlers: VecDeque<Box<dyn FnOnce(ShutdownResponse)>>,
-    event_stream_config_handlers: VecDeque<Box<EventStreamConfigHandlerFn>>,
+    event_stream_config_handlers: VecDeque<Box<dyn FnOnce(EventStreamConfigResponse) -> Option<EventStreamReceiver>>>,
     list_socks5_handlers: VecDeque<Box<dyn FnOnce(ListSocks5SocketsResponse)>>,
     add_socks5_handlers: VecDeque<Box<dyn FnOnce(AddSocks5SocketResponse)>>,
     remove_socks5_handlers: VecDeque<Box<dyn FnOnce(RemoveSocks5SocketResponse)>>,
@@ -62,14 +66,11 @@ where
     handlers: Rc<RefCell<ResponseHandlers>>,
 }
 
-async fn reader_task<R>(mut reader: R, read_error_sender: oneshot::Sender<Error>, handlers: Rc<RefCell<ResponseHandlers>>) -> R
+async fn reader_task<R>(mut reader: R, read_error_sender: oneshot::Sender<Result<(), Error>>, handlers: Rc<RefCell<ResponseHandlers>>) -> R
 where
     R: AsyncRead + Unpin,
 {
-    if let Err(error) = reader_task_inner(&mut reader, handlers).await {
-        let _ = read_error_sender.send(error);
-    }
-
+    let _ = read_error_sender.send(reader_task_inner(&mut reader, handlers).await);
     reader
 }
 
@@ -82,7 +83,19 @@ where
     loop {
         let command = match SandstormCommandType::read(reader).await {
             Ok(cmd) => cmd,
-            Err(error) if error.kind() == ErrorKind::UnexpectedEof => break,
+            Err(error) if error.kind() == ErrorKind::UnexpectedEof => {
+                let handlers = handlers.deref().borrow_mut();
+                match handlers.remaining {
+                    0 => break,
+                    rem if rem == handlers.shutdown_handlers.len() => break,
+                    _ => {
+                        return Err(Error::new(
+                            ErrorKind::UnexpectedEof,
+                            "The server closed the connection before answering all the requests",
+                        ))
+                    }
+                }
+            }
             Err(error) => return Err(error),
         };
 
@@ -115,7 +128,14 @@ where
             SandstormCommandType::EventStream => {
                 let event = EventStreamResponse::read(reader).await?;
                 if let Some(sender) = &mut event_stream_sender {
-                    sender(event);
+                    match sender {
+                        EventStreamReceiver::Function(f) => f(event),
+                        EventStreamReceiver::Channel(s) => {
+                            if s.send(event).await.is_err() {
+                                event_stream_sender = None;
+                            }
+                        }
+                    }
                 }
             }
             SandstormCommandType::ListSocks5Sockets => {
@@ -354,7 +374,7 @@ impl<W> SandstormRequestManager<W>
 where
     W: AsyncWrite + Unpin,
 {
-    pub fn new<R>(reader: R, writer: W) -> (Self, oneshot::Receiver<Error>)
+    pub fn new<R>(reader: R, writer: W) -> (Self, oneshot::Receiver<Result<(), Error>>)
     where
         R: AsyncRead + Unpin + 'static,
     {
@@ -362,6 +382,7 @@ where
 
         let handlers = Rc::new(RefCell::new(ResponseHandlers {
             remaining: 0,
+            was_shutdown: false,
             flush_notifier: None,
             shutdown_handlers: VecDeque::new(),
             event_stream_config_handlers: VecDeque::new(),
@@ -413,19 +434,20 @@ where
         Ok(())
     }
 
+    /// Flushes any remaining requests, indicates to the server that no more requests will be made,
+    /// and closes the connection.
+    ///
+    /// # This future never completes!
+    /// Instead, the completion should be handled through the oneshot channel returned by the
+    /// constructor of this [`SandstormRequestManager`]. If all goes well, an Ok(()) will be
+    /// received.
     pub async fn shutdown_and_close(mut self) -> Result<(), Error> {
+        self.handlers.borrow_mut().was_shutdown = true;
+
         self.writer.shutdown().await?;
         let _ = self.reader_task_handle.await;
-        let handlers = self.handlers.borrow_mut();
-
-        match handlers.remaining {
-            0 => Ok(()),
-            rem if rem == handlers.shutdown_handlers.len() => Ok(()),
-            _ => Err(Error::new(
-                ErrorKind::UnexpectedEof,
-                "The server closed the connection before answering all the requests",
-            )),
-        }
+        std::future::pending::<()>().await;
+        Ok(())
     }
 
     pub async fn shutdown_fn<F: FnOnce(ShutdownResponse) + 'static>(&mut self, f: F) -> Result<(), Error> {
@@ -436,7 +458,7 @@ where
         ShutdownRequest.write(&mut self.writer).await
     }
 
-    pub async fn event_stream_config_fn<F: FnOnce(EventStreamConfigResponse) -> Option<Box<dyn FnMut(EventStreamResponse)>> + 'static>(
+    pub async fn event_stream_config_fn<F: FnOnce(EventStreamConfigResponse) -> Option<EventStreamReceiver> + 'static>(
         &mut self,
         status: bool,
         f: F,
@@ -604,5 +626,159 @@ where
         handlers.remaining += 1;
         drop(handlers);
         MeowRequest.write(&mut self.writer).await
+    }
+
+    pub fn into_mutexed(self) -> MutexedSandstormRequestManager<W> {
+        MutexedSandstormRequestManager { inner: Mutex::new(self) }
+    }
+}
+
+/// A [`SandstormRequestManager`] wrapped in an async [`Mutex`], for easier use in concurrent
+/// environments. Provides the same operations but with `&self` instead of `&mut self`, and
+/// automatically flushes the writer after each request.
+pub struct MutexedSandstormRequestManager<W: AsyncWrite + Unpin> {
+    inner: Mutex<SandstormRequestManager<W>>,
+}
+
+impl<W: AsyncWrite + Unpin> MutexedSandstormRequestManager<W> {
+    pub async fn shutdown_fn<F: FnOnce(ShutdownResponse) + 'static>(&self, f: F) -> Result<(), Error> {
+        let mut guard = self.inner.lock().await;
+        guard.shutdown_fn(f).await?;
+        guard.flush_writer().await
+    }
+
+    pub async fn event_stream_config_fn<F: FnOnce(EventStreamConfigResponse) -> Option<EventStreamReceiver> + 'static>(
+        &self,
+        status: bool,
+        f: F,
+    ) -> Result<(), Error> {
+        let mut guard = self.inner.lock().await;
+        guard.event_stream_config_fn(status, f).await?;
+        guard.flush_writer().await
+    }
+
+    pub async fn list_socks5_sockets_fn<F: FnOnce(ListSocks5SocketsResponse) + 'static>(&self, f: F) -> Result<(), Error> {
+        let mut guard = self.inner.lock().await;
+        guard.list_socks5_sockets_fn(f).await?;
+        guard.flush_writer().await
+    }
+
+    pub async fn add_socks5_socket_fn<F: FnOnce(AddSocks5SocketResponse) + 'static>(&self, address: SocketAddr, f: F) -> Result<(), Error> {
+        let mut guard = self.inner.lock().await;
+        guard.add_socks5_socket_fn(address, f).await?;
+        guard.flush_writer().await
+    }
+
+    pub async fn remove_socks5_socket_fn<F: FnOnce(RemoveSocks5SocketResponse) + 'static>(
+        &self,
+        address: SocketAddr,
+        f: F,
+    ) -> Result<(), Error> {
+        let mut guard = self.inner.lock().await;
+        guard.remove_socks5_socket_fn(address, f).await?;
+        guard.flush_writer().await
+    }
+
+    pub async fn list_sandstorm_sockets_fn<F: FnOnce(ListSandstormSocketsResponse) + 'static>(&self, f: F) -> Result<(), Error> {
+        let mut guard = self.inner.lock().await;
+        guard.list_sandstorm_sockets_fn(f).await?;
+        guard.flush_writer().await
+    }
+
+    pub async fn add_sandstorm_socket_fn<F: FnOnce(AddSandstormSocketResponse) + 'static>(
+        &self,
+        address: SocketAddr,
+        f: F,
+    ) -> Result<(), Error> {
+        let mut guard = self.inner.lock().await;
+        guard.add_sandstorm_socket_fn(address, f).await?;
+        guard.flush_writer().await
+    }
+
+    pub async fn remove_sandstorm_socket_fn<F: FnOnce(RemoveSandstormSocketResponse) + 'static>(
+        &self,
+        address: SocketAddr,
+        f: F,
+    ) -> Result<(), Error> {
+        let mut guard = self.inner.lock().await;
+        guard.remove_sandstorm_socket_fn(address, f).await?;
+        guard.flush_writer().await
+    }
+
+    pub async fn list_users_fn<F: FnOnce(ListUsersResponse) + 'static>(&self, f: F) -> Result<(), Error> {
+        let mut guard = self.inner.lock().await;
+        guard.list_users_fn(f).await?;
+        guard.flush_writer().await
+    }
+
+    pub async fn add_user_fn<F: FnOnce(AddUserResponse) + 'static>(
+        &self,
+        username: &str,
+        password: &str,
+        role: UserRole,
+        f: F,
+    ) -> Result<(), Error> {
+        let mut guard = self.inner.lock().await;
+        guard.add_user_fn(username, password, role, f).await?;
+        guard.flush_writer().await
+    }
+
+    pub async fn update_user_fn<F: FnOnce(UpdateUserResponse) + 'static>(
+        &self,
+        username: &str,
+        password: Option<&str>,
+        role: Option<UserRole>,
+        f: F,
+    ) -> Result<(), Error> {
+        let mut guard = self.inner.lock().await;
+        guard.update_user_fn(username, password, role, f).await?;
+        guard.flush_writer().await
+    }
+
+    pub async fn delete_user_fn<F: FnOnce(DeleteUserResponse) + 'static>(&self, username: &str, f: F) -> Result<(), Error> {
+        let mut guard = self.inner.lock().await;
+        guard.delete_user_fn(username, f).await?;
+        guard.flush_writer().await
+    }
+
+    pub async fn list_auth_methods_fn<F: FnOnce(ListAuthMethodsResponse) + 'static>(&self, f: F) -> Result<(), Error> {
+        let mut guard = self.inner.lock().await;
+        guard.list_auth_methods_fn(f).await?;
+        guard.flush_writer().await
+    }
+
+    pub async fn toggle_auth_method_fn<F: FnOnce(ToggleAuthMethodResponse) + 'static>(
+        &self,
+        auth_method: AuthMethod,
+        status: bool,
+        f: F,
+    ) -> Result<(), Error> {
+        let mut guard = self.inner.lock().await;
+        guard.toggle_auth_method_fn(auth_method, status, f).await?;
+        guard.flush_writer().await
+    }
+
+    pub async fn get_metrics_fn<F: FnOnce(CurrentMetricsResponse) + 'static>(&self, f: F) -> Result<(), Error> {
+        let mut guard = self.inner.lock().await;
+        guard.get_metrics_fn(f).await?;
+        guard.flush_writer().await
+    }
+
+    pub async fn get_buffer_size_fn<F: FnOnce(GetBufferSizeResponse) + 'static>(&self, f: F) -> Result<(), Error> {
+        let mut guard = self.inner.lock().await;
+        guard.get_buffer_size_fn(f).await?;
+        guard.flush_writer().await
+    }
+
+    pub async fn set_buffer_size_fn<F: FnOnce(SetBufferSizeResponse) + 'static>(&self, buffer_size: u32, f: F) -> Result<(), Error> {
+        let mut guard = self.inner.lock().await;
+        guard.set_buffer_size_fn(buffer_size, f).await?;
+        guard.flush_writer().await
+    }
+
+    pub async fn meow_fn<F: FnOnce(MeowResponse) + 'static>(&self, f: F) -> Result<(), Error> {
+        let mut guard = self.inner.lock().await;
+        guard.meow_fn(f).await?;
+        guard.flush_writer().await
     }
 }
