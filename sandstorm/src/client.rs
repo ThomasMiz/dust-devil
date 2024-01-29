@@ -86,7 +86,7 @@ async fn run_client_inner(startup_args: StartupArguments) -> Result<(), Error> {
     let (manager, read_error_recevier) = SandstormRequestManager::new(reader_buf, writer_buf);
 
     select! {
-        result = handle_connection(startup_args.verbose, startup_args.silent, &startup_args.requests, startup_args.output_logs, startup_args.interactive, manager) => result?,
+        biased;
         read_error_result = read_error_recevier => {
             match read_error_result {
                 Ok(Ok(())) => return Ok(()),
@@ -94,6 +94,7 @@ async fn run_client_inner(startup_args: StartupArguments) -> Result<(), Error> {
                 Err(_) => return Err(Error::new(ErrorKind::ConnectionReset, "Server closed unexpectedly")),
             }
         },
+        result = handle_connection(startup_args.verbose, startup_args.silent, &startup_args.requests, startup_args.output_logs, startup_args.interactive, manager) => result?,
     }
 
     Ok(())

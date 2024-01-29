@@ -60,8 +60,9 @@ impl From<ParseRequestError> for SocksStatus {
 
 pub async fn handle_socks5(stream: TcpStream, mut context: ClientContext, cancel_token: CancellationToken) {
     select! {
-        result = handle_socks5_inner(stream, &mut context) => log_socks_finished!(context, result),
+        biased;
         _ = cancel_token.cancelled() => {}
+        result = handle_socks5_inner(stream, &mut context) => log_socks_finished!(context, result),
     }
 }
 

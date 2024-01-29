@@ -37,8 +37,9 @@ const RESPONSE_NOTIFICATION_CHANNEL_SIZE: usize = 16;
 
 pub async fn handle_sandstorm(stream: TcpStream, mut context: SandstormContext, cancel_token: CancellationToken) {
     select! {
-        result = handle_sandstorm_inner(stream, &mut context) => log_sandstorm_finished!(context, result),
+        biased;
         _ = cancel_token.cancelled() => {}
+        result = handle_sandstorm_inner(stream, &mut context) => log_sandstorm_finished!(context, result),
     }
 }
 
