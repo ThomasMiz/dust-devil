@@ -27,7 +27,10 @@ use std::{
     net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6, ToSocketAddrs},
 };
 
-use dust_devil_core::users::REGULAR_PREFIX_CHAR;
+use dust_devil_core::{
+    buffer_size::{parse_pretty_buffer_size, PrettyBufferSizeParseError},
+    users::REGULAR_PREFIX_CHAR,
+};
 
 use crate::users::{self, UserData};
 
@@ -358,7 +361,10 @@ pub enum BufferSizeErrorType {
     UnexpectedEnd(String),
     Empty(String),
     AlreadySpecified(String),
-    InvalidSize(String, String),
+    CannotBeZero(String),
+    InvalidFormat(String, String),
+    InvalidCharacters(String, String),
+    TooLarge(String, String),
 }
 
 impl fmt::Display for BufferSizeErrorType {
@@ -367,7 +373,10 @@ impl fmt::Display for BufferSizeErrorType {
             Self::UnexpectedEnd(arg) => write!(f, "Expected buffer size after {arg}"),
             Self::Empty(arg) => write!(f, "Empty buffer size argument after {arg}"),
             Self::AlreadySpecified(arg) => write!(f, "Buffer size already specified at {arg}"),
-            Self::InvalidSize(arg, arg2) => write!(f, "Invalid buffer size at {arg} {arg2}"),
+            Self::CannotBeZero(arg) => write!(f, "Buffer size cannot be zero at {arg}"),
+            Self::InvalidFormat(arg, arg2) => write!(f, "Invalid buffer size format at {arg} {arg2}"),
+            Self::InvalidCharacters(arg, arg2) => write!(f, "Buffer size contains invalid characters at {arg} {arg2}"),
+            Self::TooLarge(arg, arg2) => write!(f, "Buffer size must be less than 4GB at {arg} {arg2}"),
         }
     }
 }
@@ -388,37 +397,17 @@ fn parse_buffer_size_arg(result: &mut StartupArguments, arg: String, maybe_arg2:
         return Err(BufferSizeErrorType::AlreadySpecified(arg));
     }
 
-    let arg2_trimmed = arg2.trim();
-
-    let mut iter = arg2_trimmed.chars();
-    let (s, radix) = match (iter.next(), iter.next().map(|c| c.to_ascii_lowercase())) {
-        (Some('0'), Some('x')) => (&arg2_trimmed[2..], 16),
-        (Some('0'), Some('o')) => (&arg2_trimmed[2..], 8),
-        (Some('0'), Some('b')) => (&arg2_trimmed[2..], 2),
-        _ => (arg2_trimmed, 10),
-    };
-
-    let (s, multiplier) = match s.chars().last().map(|c| c.to_ascii_lowercase()) {
-        Some('k') => (&s[..(s.len() - 1)], 1024),
-        Some('m') => (&s[..(s.len() - 1)], 1024 * 1024),
-        Some('g') => (&s[..(s.len() - 1)], 1024 * 1024 * 1024),
-        _ => (s, 1),
-    };
-
-    match s.chars().next() {
-        Some(c) if c.is_ascii_alphanumeric() => {}
-        None => return Err(BufferSizeErrorType::Empty(arg)),
-        _ => return Err(BufferSizeErrorType::InvalidSize(arg, arg2)),
-    }
-
-    let size = match u32::from_str_radix(s, radix) {
-        Ok(size) if size != 0 => size,
-        _ => return Err(BufferSizeErrorType::InvalidSize(arg, arg2)),
-    };
-
-    let size = match size.checked_mul(multiplier) {
-        Some(size) => size,
-        None => return Err(BufferSizeErrorType::InvalidSize(arg, arg2)),
+    let size = match parse_pretty_buffer_size(&arg2) {
+        Ok(s) => s,
+        Err(parse_error) => {
+            return Err(match parse_error {
+                PrettyBufferSizeParseError::Empty => BufferSizeErrorType::Empty(arg),
+                PrettyBufferSizeParseError::Zero => BufferSizeErrorType::CannotBeZero(arg),
+                PrettyBufferSizeParseError::InvalidFormat => BufferSizeErrorType::InvalidFormat(arg, arg2),
+                PrettyBufferSizeParseError::InvalidCharacters => BufferSizeErrorType::InvalidCharacters(arg, arg2),
+                PrettyBufferSizeParseError::TooLarge => BufferSizeErrorType::TooLarge(arg, arg2),
+            })
+        }
     };
 
     result.buffer_size = size;

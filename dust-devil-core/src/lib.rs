@@ -27,6 +27,7 @@
 //! [`ByteWrite`][serialize::ByteWrite] traits. These are defined in the [`serialize`] module and
 //! define async `read` and `write` functions.
 
+pub mod buffer_size;
 pub mod logging;
 pub mod sandstorm;
 pub mod serialize;

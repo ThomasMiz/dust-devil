@@ -976,7 +976,7 @@ fn test_buffer_size_unknown_suffix() {
     let result = args("--buffer-size 2q");
     assert_eq!(
         result,
-        Err(ArgumentsError::BufferSizeError(BufferSizeErrorType::InvalidSize(
+        Err(ArgumentsError::BufferSizeError(BufferSizeErrorType::InvalidCharacters(
             "--buffer-size".to_string(),
             "2q".to_string()
         )))
@@ -985,7 +985,7 @@ fn test_buffer_size_unknown_suffix() {
     let result = args("-b 2W");
     assert_eq!(
         result,
-        Err(ArgumentsError::BufferSizeError(BufferSizeErrorType::InvalidSize(
+        Err(ArgumentsError::BufferSizeError(BufferSizeErrorType::InvalidCharacters(
             "-b".to_string(),
             "2W".to_string()
         )))
@@ -997,7 +997,7 @@ fn test_buffer_size_too_big() {
     let result = args("-b 4G");
     assert_eq!(
         result,
-        Err(ArgumentsError::BufferSizeError(BufferSizeErrorType::InvalidSize(
+        Err(ArgumentsError::BufferSizeError(BufferSizeErrorType::TooLarge(
             "-b".to_string(),
             "4G".to_string()
         )))
@@ -1006,7 +1006,7 @@ fn test_buffer_size_too_big() {
     let result = args("-b 4294967296");
     assert_eq!(
         result,
-        Err(ArgumentsError::BufferSizeError(BufferSizeErrorType::InvalidSize(
+        Err(ArgumentsError::BufferSizeError(BufferSizeErrorType::TooLarge(
             "-b".to_string(),
             "4294967296".to_string()
         )))
@@ -1015,7 +1015,7 @@ fn test_buffer_size_too_big() {
     let result = args("-b 4096M");
     assert_eq!(
         result,
-        Err(ArgumentsError::BufferSizeError(BufferSizeErrorType::InvalidSize(
+        Err(ArgumentsError::BufferSizeError(BufferSizeErrorType::TooLarge(
             "-b".to_string(),
             "4096M".to_string()
         )))
@@ -1024,7 +1024,7 @@ fn test_buffer_size_too_big() {
     let result = args("-b 12G");
     assert_eq!(
         result,
-        Err(ArgumentsError::BufferSizeError(BufferSizeErrorType::InvalidSize(
+        Err(ArgumentsError::BufferSizeError(BufferSizeErrorType::TooLarge(
             "-b".to_string(),
             "12G".to_string()
         )))
