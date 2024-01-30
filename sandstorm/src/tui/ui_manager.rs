@@ -5,11 +5,7 @@ use dust_devil_core::{
     logging::{self, EventData},
     sandstorm::Metrics,
 };
-use ratatui::{
-    style::{Style, Stylize},
-    widgets::{Block, Borders},
-    Frame,
-};
+use ratatui::Frame;
 use tokio::{
     io::AsyncWrite,
     sync::{broadcast, oneshot, watch, Notify},
@@ -17,7 +13,11 @@ use tokio::{
 
 use crate::sandstorm::MutexedSandstormRequestManager;
 
-use super::menu_bar::MenuBar;
+use super::{
+    log_block::LogBlock,
+    menu_bar::MenuBar,
+    ui_element::{HandleEventStatus, UIElement},
+};
 
 pub struct UIManager<W: AsyncWrite + Unpin + 'static> {
     _manager: Rc<MutexedSandstormRequestManager<W>>,
@@ -25,6 +25,7 @@ pub struct UIManager<W: AsyncWrite + Unpin + 'static> {
     buffer_size_watch: broadcast::Sender<u32>,
     metrics_watch: watch::Sender<Metrics>,
     menu_bar: MenuBar,
+    log_block: LogBlock,
 }
 
 impl<W: AsyncWrite + Unpin + 'static> UIManager<W> {
@@ -37,7 +38,8 @@ impl<W: AsyncWrite + Unpin + 'static> UIManager<W> {
         let (buffer_size_watch, _) = broadcast::channel(1);
         let (metrics_watch, _metrics_watch_receiver) = watch::channel(metrics);
 
-        let menu_bar = MenuBar::new(manager.clone(), redraw_notify, buffer_size_watch.clone());
+        let menu_bar = MenuBar::new(manager.clone(), redraw_notify.clone(), buffer_size_watch.clone());
+        let log_block = LogBlock::new(redraw_notify);
 
         Self {
             _manager: manager,
@@ -45,10 +47,16 @@ impl<W: AsyncWrite + Unpin + 'static> UIManager<W> {
             buffer_size_watch,
             metrics_watch,
             menu_bar,
+            log_block,
         }
     }
 
     pub fn handle_terminal_event(&mut self, event: &event::Event) {
+        // TODO: Implement focus passing
+        if self.log_block.handle_event(event, true) != HandleEventStatus::Unhandled {
+            return;
+        }
+
         if let event::Event::Key(key_event) = event {
             if key_event.code == KeyCode::Esc {
                 if let Some(shutdown_sender) = self.shutdown_sender.take() {
@@ -58,7 +66,7 @@ impl<W: AsyncWrite + Unpin + 'static> UIManager<W> {
         }
     }
 
-    pub fn handle_stream_event(&mut self, event: &logging::Event) {
+    pub fn handle_stream_event(&mut self, event: logging::Event) {
         match event.data {
             EventData::NewClientConnectionAccepted(_, _) => {
                 self.metrics_watch.send_modify(|metrics| {
@@ -97,24 +105,28 @@ impl<W: AsyncWrite + Unpin + 'static> UIManager<W> {
             }
             _ => {}
         }
+
+        self.log_block.new_stream_event(event);
     }
 
     pub fn draw(&mut self, frame: &mut Frame) {
         let mut menu_area = frame.size();
         menu_area.height = menu_area.height.min(2);
-        frame.render_widget(self.menu_bar.as_widget(), menu_area);
+        self.menu_bar.render(menu_area, frame.buffer_mut());
 
         let mut bottom_area = frame.size();
         bottom_area.y += 2;
         bottom_area.height = bottom_area.height.max(2) - 2;
 
-        frame.render_widget(
+        self.log_block.render(bottom_area, frame.buffer_mut())
+
+        /*frame.render_widget(
             Block::new()
                 .border_type(ratatui::widgets::BorderType::Double)
                 .borders(Borders::ALL)
                 .style(Style::reset().red())
                 .title("Pedro."),
             bottom_area,
-        );
+        );*/
     }
 }

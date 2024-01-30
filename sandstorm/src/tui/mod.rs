@@ -25,8 +25,10 @@ use crate::{printlnif, sandstorm::SandstormRequestManager, tui::event_receiver::
 use self::{event_receiver::TerminalEventReceiver, ui_manager::UIManager};
 
 mod event_receiver;
+mod log_block;
 mod menu_bar;
 mod pretty_print;
+mod ui_element;
 mod ui_manager;
 
 pub async fn handle_interactive<W>(verbose: bool, mut manager: SandstormRequestManager<W>) -> Result<(), Error>
@@ -101,7 +103,7 @@ where
             }
             stream_event_result = stream_event_receiver.receive() => {
                 let stream_event = stream_event_result?;
-                ui_manager.handle_stream_event(&stream_event);
+                ui_manager.handle_stream_event(stream_event);
             }
             _ = redraw_notify.notified() => {
                 terminal.draw(|frame| ui_manager.draw(frame))?;

@@ -6,6 +6,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use crossterm::event;
 use ratatui::{
     buffer::Buffer,
     layout::{Constraint, Direction, Layout, Rect},
@@ -26,6 +27,8 @@ use crate::{
     tui::pretty_print::{PrettyByteDisplayer, PrettyMillisDisplay},
     utils::futures::{recv_ignore_lagged, run_with_background},
 };
+
+use super::ui_element::{HandleEventStatus, UIElement};
 
 const SHUTDOWN_KEY: char = 'x';
 const SOCKS5_KEY: char = 's';
@@ -55,7 +58,7 @@ const BUFFER_TEXT_HIGHLIGHT_DURATION: Duration = Duration::from_millis(500);
 const PING_TEXT_LOADING_COLOR: Color = Color::Reset;
 const PING_LOADING_INDICATOR_LENGTH: i16 = 4;
 const PING_LOADING_INDICATOR_FREQUENCY: Duration = Duration::from_millis(100);
-const PING_MEASURE_INTERVAL: Duration = Duration::from_secs(1);
+const PING_MEASURE_INTERVAL: Duration = Duration::from_secs(10);
 
 const fn get_ping_text_color(millis: u16) -> Color {
     match millis {
@@ -113,12 +116,6 @@ impl MenuBar {
         });
 
         Self { state, task_handle }
-    }
-
-    pub fn as_widget(&self) -> MenuBarWidget {
-        MenuBarWidget {
-            state: Rc::clone(&self.state),
-        }
     }
 }
 
@@ -298,15 +295,18 @@ async fn ping_frame_background_task<W>(
         Err(_) => return,
     };
 
+    let mut previous_ping = !ping_millis;
+
     loop {
-        {
+        if previous_ping != ping_millis {
             let mut state_inner = state.deref().borrow_mut();
             let text = &mut state_inner.ping_frame_text;
             text.clear();
             let _ = write!(text, "{}", PrettyMillisDisplay(ping_millis));
             state_inner.ping_frame_text_color = get_ping_text_color(ping_millis);
+            previous_ping = ping_millis;
+            redraw_notify.notify_one();
         }
-        redraw_notify.notify_one();
 
         tokio::time::sleep(PING_MEASURE_INTERVAL).await;
 
@@ -330,12 +330,9 @@ async fn menu_bar_background_task<W>(
         ping_frame_background_task(&manager, &state, &redraw_notify),
     );
 }
-pub struct MenuBarWidget {
-    state: Rc<RefCell<MenuBarState>>,
-}
 
-impl Widget for MenuBarWidget {
-    fn render(self, area: Rect, buf: &mut Buffer) {
+impl UIElement for MenuBar {
+    fn render(&mut self, area: Rect, buf: &mut Buffer) {
         let state = self.state.deref().borrow_mut();
 
         let menu_layout = Layout::new(
@@ -448,5 +445,19 @@ impl Widget for MenuBarWidget {
                     .padding(HORIZONTAL_PADDING_ONE),
             )
             .render(menu_layout[7], buf);
+    }
+
+    fn handle_event(&mut self, event: &event::Event, is_focused: bool) -> HandleEventStatus {
+        // TODO: Implement event handling
+        HandleEventStatus::Unhandled
+    }
+
+    fn receive_focus(&mut self, focus_position: (u16, u16)) -> bool {
+        // TODO: Implement focus handling
+        false
+    }
+
+    fn focus_lost(&mut self) {
+        // TODO: Implement focus handling
     }
 }
