@@ -116,7 +116,7 @@ impl<W: AsyncWrite + Unpin + 'static> UIManager<W> {
 
         let mut bottom_area = frame.size();
         bottom_area.y += 2;
-        bottom_area.height = bottom_area.height.max(2) - 2;
+        bottom_area.height = bottom_area.height.saturating_sub(2);
 
         self.log_block.render(bottom_area, frame.buffer_mut())
 

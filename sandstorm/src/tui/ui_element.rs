@@ -61,7 +61,7 @@ pub enum PassFocusDirection {
     Away,
 
     /// No specific direction for passing focus (useful for the TAB key).
-    None,
+    Forward,
 
     /// Pass focus upwards.
     Up,
