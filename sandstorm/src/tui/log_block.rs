@@ -1,24 +1,28 @@
-use std::{collections::VecDeque, fmt::Write, rc::Rc};
+use std::{borrow::Cow, collections::VecDeque, rc::Rc};
 
-use crossterm::event::{self, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseEvent};
+use crossterm::event::{self, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseEvent, MouseEventKind};
 use dust_devil_core::logging;
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
-    style::Color,
-    text::Line,
+    style::{Color, Style},
+    text::{Line, Span},
     widgets::{Block, BorderType, Borders, Scrollbar, ScrollbarOrientation, ScrollbarState, StatefulWidget, Widget},
 };
-use time::{OffsetDateTime, UtcOffset};
+use time::UtcOffset;
 use tokio::sync::Notify;
 
-use super::ui_element::{HandleEventStatus, PassFocusDirection, UIElement};
+use super::{
+    colored_logs::{log_event_to_single_line, StaticString},
+    ui_element::{HandleEventStatus, PassFocusDirection, UIElement},
+};
 
 const MAXIMUM_EVENT_HISTORY_LENGTH: usize = 0x10000;
 const INITIAL_EVENT_HISTORY_CAPACITY: usize = 0x1000;
 const LOG_LINE_MIN_LENGTH: u16 = 20;
 
 const SELECTED_EVENT_BACKGROUND_COLOR: Color = Color::DarkGray;
+const SELECTED_TIMESTAMP_BACKGROUND_COLOR: Color = Color::Gray;
 
 /// The log block can be scrolled with the arrow keys. Without shift, the arrow keys scroll by one
 /// event. With shift, they scroll by this amount.
@@ -30,8 +34,8 @@ pub struct LogBlock {
     event_history: VecDeque<(logging::Event, usize)>,
     lines: VecDeque<(Line<'static>, usize)>,
     utc_offset: UtcOffset,
-    tmp_string: String,
-    tmp_vec: Vec<Line<'static>>,
+    tmp_line_vec: Vec<(StaticString, Style)>,
+    tmp_rev_vec: Vec<Line<'static>>,
     selected_event_id: Option<usize>,
 }
 
@@ -43,8 +47,8 @@ impl LogBlock {
             event_history: VecDeque::with_capacity(INITIAL_EVENT_HISTORY_CAPACITY),
             lines: VecDeque::new(),
             utc_offset: UtcOffset::current_local_offset().unwrap_or(UtcOffset::UTC),
-            tmp_string: String::new(),
-            tmp_vec: Vec::new(),
+            tmp_line_vec: Vec::with_capacity(10),
+            tmp_rev_vec: Vec::with_capacity(6),
             selected_event_id: None,
         }
     }
@@ -90,10 +94,44 @@ impl LogBlock {
         )
     }
 
-    fn handle_mouse_event(&mut self, _mouse_event: &MouseEvent, _is_focused: bool) -> HandleEventStatus {
-        // TODO: Implement
+    fn handle_mouse_event(&mut self, mouse_event: &MouseEvent, is_focused: bool) -> HandleEventStatus {
+        if !is_focused {
+            return HandleEventStatus::Unhandled;
+        }
 
-        HandleEventStatus::Unhandled
+        let is_up = match mouse_event.kind {
+            MouseEventKind::ScrollUp => true,
+            MouseEventKind::ScrollDown => false,
+            _ => return HandleEventStatus::Unhandled,
+        };
+
+        let previous_selected_event_id = self.selected_event_id;
+
+        if let Some(selected_event_id) = &mut self.selected_event_id {
+            let scroll_amount = match mouse_event.modifiers {
+                m if m.contains(KeyModifiers::SHIFT) => KEY_SHIFT_SCROLL_AMOUNT,
+                _ => 1,
+            };
+
+            *selected_event_id = match is_up {
+                true => {
+                    let oldest_event_id = self.event_history.front().unwrap().1;
+                    selected_event_id.saturating_sub(scroll_amount).max(oldest_event_id)
+                }
+                false => {
+                    let newest_event_id = self.event_history.back().unwrap().1;
+                    (*selected_event_id + scroll_amount).min(newest_event_id)
+                }
+            };
+        } else {
+            self.selected_event_id = self.event_history.back().map(|(_newest_event, newest_event_id)| *newest_event_id);
+        }
+
+        if self.selected_event_id != previous_selected_event_id {
+            self.redraw_notify.notify_one();
+        }
+
+        HandleEventStatus::Handled
     }
 
     fn handle_key_event(&mut self, key_event: &KeyEvent, is_focused: bool) -> HandleEventStatus {
@@ -316,7 +354,7 @@ impl LogBlock {
                 // The event is not in `self.lines`. We clear the lines deque and add the event alone.
                 let selected_event = &self.event_history[center_event_id - self.event_history.front().unwrap().1].0;
                 self.lines.clear();
-                log_event_to_lines(self.utc_offset, selected_event, wrap_width, &mut self.tmp_string, |line| {
+                log_event_to_lines(self.utc_offset, selected_event, wrap_width, &mut self.tmp_line_vec, |line| {
                     self.lines.push_back((line, center_event_id));
                 });
 
@@ -362,12 +400,12 @@ impl LogBlock {
                         let (event, id) = &self.event_history[older_events_history_current_i];
 
                         // The lines need to be reversed; we have a temporary vector to help with this.
-                        self.tmp_vec.clear();
-                        log_event_to_lines(self.utc_offset, event, wrap_width, &mut self.tmp_string, |line| {
-                            self.tmp_vec.push(line);
+                        self.tmp_rev_vec.clear();
+                        log_event_to_lines(self.utc_offset, event, wrap_width, &mut self.tmp_line_vec, |line| {
+                            self.tmp_rev_vec.push(line);
                         });
 
-                        for line in self.tmp_vec.drain(..).rev() {
+                        for line in self.tmp_rev_vec.drain(..).rev() {
                             self.lines.push_front((line, *id));
                             remaining_older_lines_count -= 1;
                             lines_newer_event_next_i += 1;
@@ -398,7 +436,7 @@ impl LogBlock {
                     if lines_newer_event_next_i == self.lines.len() {
                         // Parse the next newer event into lines and push them to the back of `self.lines`.
                         let (event, id) = &self.event_history[newer_events_history_next_i];
-                        log_event_to_lines(self.utc_offset, event, wrap_width, &mut self.tmp_string, |line| {
+                        log_event_to_lines(self.utc_offset, event, wrap_width, &mut self.tmp_line_vec, |line| {
                             self.lines.push_back((line, *id));
                             remaining_newer_lines_count -= 1;
                         });
@@ -475,16 +513,28 @@ impl UIElement for LogBlock {
         let lines_iter = self.process_lines_get_iter(center_event_id, logs_area.height as usize);
 
         let mut y = logs_area.top();
+        let mut previous_event_id = None;
         if let Some(iter) = lines_iter {
             for (line, event_id) in iter {
-                for ele in line.spans.iter_mut() {
-                    ele.style.bg = match Some(*event_id) == selected_event_id {
-                        true => Some(SELECTED_EVENT_BACKGROUND_COLOR),
-                        false => None,
-                    };
+                let background_color = match Some(*event_id) == selected_event_id {
+                    true => Some(SELECTED_EVENT_BACKGROUND_COLOR),
+                    false => None,
+                };
+
+                let mut spans_iter = line.spans.iter_mut();
+                if previous_event_id != Some(*event_id) {
+                    if let Some(first_ele) = spans_iter.next() {
+                        first_ele.style.bg = background_color.map(|_| SELECTED_TIMESTAMP_BACKGROUND_COLOR);
+                    }
                 }
+
+                for ele in spans_iter {
+                    ele.style.bg = background_color;
+                }
+
                 buf.set_line(logs_area.left(), y, line, logs_area.width);
                 y += 1;
+                previous_event_id = Some(*event_id);
             }
         }
     }
@@ -515,45 +565,59 @@ impl UIElement for LogBlock {
     }
 }
 
-fn log_event_to_lines<F>(utc_offset: UtcOffset, event: &logging::Event, wrap_width: u16, tmp_string: &mut String, mut f: F)
+fn log_event_to_lines<F>(utc_offset: UtcOffset, event: &logging::Event, wrap_width: u16, tmp_vec: &mut Vec<(StaticString, Style)>, mut f: F)
 where
     F: FnMut(Line<'static>),
 {
-    tmp_string.clear();
+    log_event_to_single_line(tmp_vec, utc_offset, event);
+    tmp_vec.reverse();
 
-    let t = OffsetDateTime::from_unix_timestamp(event.timestamp)
-        .map(|t| t.to_offset(utc_offset))
-        .unwrap_or(OffsetDateTime::UNIX_EPOCH);
+    let wrap_width = wrap_width as usize;
+    let mut line_vec = Vec::new();
+    let mut current_line_length = 0;
+    while let Some((text, style)) = tmp_vec.pop() {
+        let mut text_chars_iter = text.as_str().char_indices();
 
-    let _ = write!(
-        tmp_string,
-        "[{:04}-{:02}-{:02} {:02}:{:02}:{:02}] {}",
-        t.year(),
-        t.month() as u8,
-        t.day(),
-        t.hour(),
-        t.minute(),
-        t.second(),
-        event.data
-    );
+        loop {
+            match text_chars_iter.next() {
+                Some((next_char_i, _next_char)) => {
+                    current_line_length += 1;
+                    if current_line_length > wrap_width {
+                        // Split this text at the index next_char_i
+                        match text {
+                            StaticString::Static(s) => {
+                                tmp_vec.push((StaticString::Static(&s[next_char_i..]), style));
+                                line_vec.push(Span::styled(&s[0..next_char_i], style));
+                            }
+                            StaticString::Owned(mut s) => {
+                                tmp_vec.push((StaticString::Owned(String::from(&s[next_char_i..])), style));
+                                s.truncate(next_char_i);
+                                line_vec.push(Span::styled(s, style));
+                            }
+                        }
 
-    let mut chars = tmp_string.chars();
-    let mut s = String::new();
-    let mut keep_going = true;
-    while keep_going {
-        for _ in 0..wrap_width {
-            match chars.next() {
-                Some(c) => s.push(c),
+                        f(Line::from(line_vec));
+                        line_vec = Vec::new();
+                        current_line_length -= wrap_width;
+
+                        break;
+                    }
+                }
                 None => {
-                    keep_going = false;
+                    line_vec.push(match text {
+                        StaticString::Static(s) => Span::styled(s, style),
+                        StaticString::Owned(s) => Span::styled(s, style),
+                    });
+
+                    if current_line_length == wrap_width || tmp_vec.is_empty() {
+                        f(Line::from(line_vec));
+                        line_vec = Vec::new();
+                        current_line_length = 0;
+                    }
+
                     break;
                 }
-            }
-        }
-
-        if !s.is_empty() {
-            f(Line::from(s));
-            s = String::new();
+            };
         }
     }
 }

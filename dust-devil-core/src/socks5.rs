@@ -129,11 +129,18 @@ impl ByteRead for AuthMethod {
     }
 }
 
+impl AuthMethod {
+    /// Gets this `AuthMethod` represented by a `&'static str`.
+    pub const fn to_str(&self) -> &'static str {
+        match self {
+            Self::NoAuth => "noauth",
+            Self::UsernameAndPassword => "userpass",
+        }
+    }
+}
+
 impl std::fmt::Display for AuthMethod {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::NoAuth => write!(f, "noauth"),
-            Self::UsernameAndPassword => write!(f, "userpass"),
-        }
+        write!(f, "{}", self.to_str())
     }
 }

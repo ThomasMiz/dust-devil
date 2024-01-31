@@ -77,12 +77,19 @@ impl ByteRead for UserRole {
     }
 }
 
+impl UserRole {
+    /// Gets this `UserRole` represented by a `&'static str`.
+    pub fn to_str(&self) -> &'static str {
+        match self {
+            Self::Admin => "admin",
+            Self::Regular => "regular",
+        }
+    }
+}
+
 impl fmt::Display for UserRole {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Admin => write!(f, "admin"),
-            Self::Regular => write!(f, "regular"),
-        }
+        write!(f, "{}", self.to_str())
     }
 }
 
