@@ -32,7 +32,20 @@ mod pretty_print;
 mod ui_element;
 mod ui_manager;
 
-pub async fn handle_interactive<W>(verbose: bool, mut manager: SandstormRequestManager<W>) -> Result<(), Error>
+pub fn reset_terminal() -> Result<(), Error> {
+    stdout()
+        .queue(cursor::Show)?
+        .queue(event::DisableMouseCapture)?
+        .queue(terminal::LeaveAlternateScreen)?
+        .flush()?;
+    terminal::disable_raw_mode()
+}
+
+pub async fn handle_interactive<W>(
+    verbose: bool,
+    mut manager: SandstormRequestManager<W>,
+    terminal_reset_required: &mut bool,
+) -> Result<(), Error>
 where
     W: AsyncWrite + Unpin + 'static,
 {
@@ -43,6 +56,7 @@ where
 
     let mut out = std::io::stdout();
 
+    *terminal_reset_required = true;
     terminal::enable_raw_mode()?;
     out.queue(terminal::EnterAlternateScreen)?
         .queue(event::EnableMouseCapture)?
@@ -50,16 +64,12 @@ where
         .flush()?;
 
     let mut terminal = Terminal::new(CrosstermBackend::new(stdout()))?;
-    handle_interactive_inner(&mut terminal, manager, stream_event_receiver, metrics).await?;
-    drop(terminal);
+    handle_interactive_inner(&mut terminal, manager, stream_event_receiver, metrics).await
 
-    out.queue(cursor::Show)?
-        .queue(event::DisableMouseCapture)?
-        .queue(terminal::LeaveAlternateScreen)?
-        .flush()?;
-    terminal::disable_raw_mode()?;
-
-    Ok(())
+    // Note: resetting the terminal is done by the `reset_terminal` function, which gets called in `client.rs`
+    // at the end of the `run_client_inner` function. The reason for this is that if any error occurs with the
+    // sandstorm connection, this task will be aborted and the error will be handled all the way up there. In
+    // other words, we can't handle those errors from here.
 }
 
 fn is_ctrl_c(key_event: &KeyEvent) -> bool {

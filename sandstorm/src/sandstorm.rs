@@ -83,19 +83,7 @@ where
     loop {
         let command = match SandstormCommandType::read(reader).await {
             Ok(cmd) => cmd,
-            Err(error) if error.kind() == ErrorKind::UnexpectedEof => {
-                let handlers = handlers.deref().borrow_mut();
-                match handlers.remaining {
-                    0 => break,
-                    rem if rem == handlers.shutdown_handlers.len() => break,
-                    _ => {
-                        return Err(Error::new(
-                            ErrorKind::UnexpectedEof,
-                            "The server closed the connection before answering all the requests",
-                        ))
-                    }
-                }
-            }
+            Err(error) if error.kind() == ErrorKind::UnexpectedEof => break,
             Err(error) => return Err(error),
         };
 
@@ -365,7 +353,19 @@ where
         }
     }
 
-    Ok(())
+    let handlers = handlers.deref().borrow_mut();
+    if handlers.was_shutdown {
+        match handlers.remaining {
+            0 => Ok(()),
+            rem if rem == handlers.shutdown_handlers.len() => Ok(()),
+            _ => Err(Error::new(
+                ErrorKind::UnexpectedEof,
+                "The server closed the connection before answering all the requests",
+            )),
+        }
+    } else {
+        Err(Error::new(ErrorKind::ConnectionReset, "The server closed unexpectedly"))
+    }
 }
 
 #[allow(clippy::await_holding_refcell_ref)] // TODO: Remove once clippy false positive is fixed (https://github.com/rust-lang/rust-clippy/issues/6353)

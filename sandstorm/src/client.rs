@@ -19,7 +19,7 @@ use crate::{
     handle_requests::handle_requests,
     printlnif,
     sandstorm::SandstormRequestManager,
-    tui::handle_interactive,
+    tui::{self, handle_interactive},
 };
 
 fn choose_buffer_sizes(startup_args: &StartupArguments) -> (usize, usize) {
@@ -85,19 +85,37 @@ async fn run_client_inner(startup_args: StartupArguments) -> Result<(), Error> {
 
     let (manager, read_error_recevier) = SandstormRequestManager::new(reader_buf, writer_buf);
 
-    select! {
+    let mut terminal_reset_required = false;
+    let result = select! {
         biased;
         read_error_result = read_error_recevier => {
+
+            if terminal_reset_required {
+                tui::reset_terminal()?;
+            }
+            terminal_reset_required = false;
             match read_error_result {
-                Ok(Ok(())) => return Ok(()),
-                Ok(Err(error)) => return Err(error),
-                Err(_) => return Err(Error::new(ErrorKind::ConnectionReset, "Server closed unexpectedly")),
+                Ok(Ok(())) => Ok(()),
+                Ok(Err(error)) => Err(error),
+                Err(_) => Err(Error::new(ErrorKind::ConnectionReset, "Sandstorm connection manager unexpectedly")),
             }
         },
-        result = handle_connection(startup_args.verbose, startup_args.silent, &startup_args.requests, startup_args.output_logs, startup_args.interactive, manager) => result?,
+        result = handle_connection(
+            startup_args.verbose,
+            startup_args.silent,
+            &startup_args.requests,
+            startup_args.output_logs,
+            startup_args.interactive,
+            &mut terminal_reset_required,
+            manager
+        ) => result,
+    };
+
+    if terminal_reset_required {
+        tui::reset_terminal()?;
     }
 
-    Ok(())
+    result
 }
 
 async fn connect(verbose: bool, addresses: Vec<SocketAddr>) -> Result<(TcpStream, SocketAddr), Error> {
@@ -163,6 +181,7 @@ async fn handle_connection<W>(
     requests: &Vec<CommandRequest>,
     output_logs: bool,
     interactive: bool,
+    terminal_reset_required: &mut bool,
     mut manager: SandstormRequestManager<W>,
 ) -> Result<(), Error>
 where
@@ -177,7 +196,7 @@ where
         if output_logs {
             handle_output(verbose, manager).await
         } else {
-            handle_interactive(verbose, manager).await
+            handle_interactive(verbose, manager, terminal_reset_required).await
         }
     } else {
         printlnif!(verbose, "Shutting down and waiting for connection to close");

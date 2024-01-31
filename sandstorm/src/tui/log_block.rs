@@ -1,4 +1,4 @@
-use std::{borrow::Cow, collections::VecDeque, rc::Rc};
+use std::{collections::VecDeque, rc::Rc};
 
 use crossterm::event::{self, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseEvent, MouseEventKind};
 use dust_devil_core::logging;
