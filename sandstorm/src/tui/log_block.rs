@@ -178,7 +178,19 @@ impl LogBlock {
                     return HandleEventStatus::Unhandled;
                 }
 
-                // TODO: Implement
+                match &mut self.selected_event_id {
+                    None => {
+                        self.selected_event_id = self.event_history.back().map(|(_newest_event, newest_event_id)| *newest_event_id);
+                    }
+                    Some(selected_event_id) => {
+                        let scroll_amount = match key_event.modifiers {
+                            m if m.contains(KeyModifiers::SHIFT) => KEY_SHIFT_SCROLL_AMOUNT,
+                            _ => 1,
+                        } * (self.current_area.height.saturating_sub(2) as usize);
+
+                        *selected_event_id = selected_event_id.saturating_sub(scroll_amount);
+                    }
+                }
 
                 HandleEventStatus::Handled
             }
@@ -187,7 +199,21 @@ impl LogBlock {
                     return HandleEventStatus::Unhandled;
                 }
 
-                // TODO: Implement
+                match &mut self.selected_event_id {
+                    None => {
+                        self.selected_event_id = self.event_history.back().map(|(_newest_event, newest_event_id)| *newest_event_id);
+                    }
+                    Some(selected_event_id) => {
+                        if let Some((_newest_event, newest_event_id)) = self.event_history.back() {
+                            let scroll_amount = match key_event.modifiers {
+                                m if m.contains(KeyModifiers::SHIFT) => KEY_SHIFT_SCROLL_AMOUNT,
+                                _ => 1,
+                            } * (self.current_area.height.saturating_sub(2) as usize);
+
+                            *selected_event_id = (*selected_event_id + scroll_amount).min(*newest_event_id);
+                        }
+                    }
+                }
 
                 HandleEventStatus::Handled
             }
@@ -196,8 +222,7 @@ impl LogBlock {
                     return HandleEventStatus::Unhandled;
                 }
 
-                // TODO: Implement
-
+                self.selected_event_id = self.event_history.front().map(|(_oldest_event, oldest_event_id)| *oldest_event_id);
                 HandleEventStatus::Handled
             }
             KeyCode::End => {
@@ -205,8 +230,7 @@ impl LogBlock {
                     return HandleEventStatus::Unhandled;
                 }
 
-                // TODO: Implement
-
+                self.selected_event_id = self.event_history.back().map(|(_newest_event, newest_event_id)| *newest_event_id);
                 HandleEventStatus::Handled
             }
             KeyCode::Left => HandleEventStatus::PassFocus(self.get_focus_position(), PassFocusDirection::Left),
