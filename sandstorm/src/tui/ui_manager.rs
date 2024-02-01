@@ -131,10 +131,10 @@ impl<W: AsyncWrite + Unpin + 'static> UIManager<W> {
             FocusedElement::None => match event {
                 event::Event::Key(key_event) => {
                     let menubar_receives_focus = match key_event.code {
-                        KeyCode::Left => Some((true, (0, self.current_area.width))),
+                        KeyCode::Left => Some((true, (self.current_area.width, 0))),
                         KeyCode::Right | KeyCode::Tab => Some((true, (0, 0))),
-                        KeyCode::Up => Some((false, (self.current_area.width / 2, self.current_area.height))),
-                        KeyCode::Down => Some((true, (self.current_area.width / 2, 0))),
+                        KeyCode::Up => Some((false, (0, self.current_area.height))),
+                        KeyCode::Down => Some((true, (0, 0))),
                         _ => None,
                     };
 

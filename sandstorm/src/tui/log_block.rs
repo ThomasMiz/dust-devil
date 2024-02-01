@@ -88,10 +88,7 @@ impl LogBlock {
     }
 
     fn get_focus_position(&self) -> (u16, u16) {
-        (
-            self.current_area.x + self.current_area.width / 2,
-            self.current_area.y + self.current_area.height / 2,
-        )
+        (0, self.current_area.y + self.current_area.height / 2)
     }
 
     fn handle_mouse_event(&mut self, mouse_event: &MouseEvent, is_focused: bool) -> HandleEventStatus {
@@ -152,34 +149,25 @@ impl LogBlock {
 
         let return_value = match key_event.code {
             KeyCode::Up => {
-                let pass_focus = match &mut self.selected_event_id {
+                match &mut self.selected_event_id {
                     None => {
                         self.selected_event_id = self.event_history.back().map(|(_newest_event, newest_event_id)| *newest_event_id);
-                        self.selected_event_id.is_none()
                     }
                     Some(selected_event_id) => {
                         if let Some((_oldest_event, oldest_event_id)) = self.event_history.front() {
-                            if *selected_event_id == *oldest_event_id {
-                                true
-                            } else {
+                            if *selected_event_id != *oldest_event_id {
                                 let scroll_amount = match key_event.modifiers {
                                     m if m.contains(KeyModifiers::SHIFT) => KEY_SHIFT_SCROLL_AMOUNT,
                                     _ => 1,
                                 };
 
                                 *selected_event_id = selected_event_id.saturating_sub(scroll_amount).max(*oldest_event_id);
-                                false
                             }
-                        } else {
-                            true
                         }
                     }
                 };
 
-                match pass_focus {
-                    true => HandleEventStatus::PassFocus(self.get_focus_position(), PassFocusDirection::Up),
-                    false => HandleEventStatus::Handled,
-                }
+                HandleEventStatus::Handled
             }
             KeyCode::Down => {
                 let pass_focus = match &mut self.selected_event_id {
