@@ -1,11 +1,11 @@
 use std::rc::Rc;
 
-use crossterm::event::{self, KeyCode};
+use crossterm::event::{self, KeyCode, KeyEventKind, MouseEventKind};
 use dust_devil_core::{
     logging::{self, EventData},
     sandstorm::Metrics,
 };
-use ratatui::Frame;
+use ratatui::{layout::Rect, Frame};
 use tokio::{
     io::AsyncWrite,
     sync::{broadcast, oneshot, watch, Notify},
@@ -14,9 +14,9 @@ use tokio::{
 use crate::sandstorm::MutexedSandstormRequestManager;
 
 use super::{
-    log_block::LogBlock,
+    bottom_area::BottomArea,
     menu_bar::MenuBar,
-    ui_element::{HandleEventStatus, UIElement},
+    ui_element::{HandleEventStatus, PassFocusDirection, UIElement},
 };
 
 pub struct UIManager<W: AsyncWrite + Unpin + 'static> {
@@ -25,7 +25,16 @@ pub struct UIManager<W: AsyncWrite + Unpin + 'static> {
     buffer_size_watch: broadcast::Sender<u32>,
     metrics_watch: watch::Sender<Metrics>,
     menu_bar: MenuBar,
-    log_block: LogBlock,
+    bottom_area: BottomArea,
+    current_area: Rect,
+    focused_element: FocusedElement,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FocusedElement {
+    None,
+    MenuBar,
+    BottomArea,
 }
 
 impl<W: AsyncWrite + Unpin + 'static> UIManager<W> {
@@ -39,7 +48,7 @@ impl<W: AsyncWrite + Unpin + 'static> UIManager<W> {
         let (metrics_watch, _metrics_watch_receiver) = watch::channel(metrics);
 
         let menu_bar = MenuBar::new(manager.clone(), redraw_notify.clone(), buffer_size_watch.clone());
-        let log_block = LogBlock::new(redraw_notify);
+        let bottom_area = BottomArea::new(redraw_notify);
 
         Self {
             _manager: manager,
@@ -47,22 +56,130 @@ impl<W: AsyncWrite + Unpin + 'static> UIManager<W> {
             buffer_size_watch,
             metrics_watch,
             menu_bar,
-            log_block,
+            bottom_area,
+            current_area: Rect::default(),
+            focused_element: FocusedElement::None,
         }
     }
 
     pub fn handle_terminal_event(&mut self, event: &event::Event) {
-        // TODO: Implement focus passing
-        if self.log_block.handle_event(event, true) != HandleEventStatus::Unhandled {
+        if self.handle_termina_event_internal(event) {
             return;
         }
 
+        // If the event was not handled and Esc was pressed, exit the TUI.
         if let event::Event::Key(key_event) = event {
-            if key_event.code == KeyCode::Esc {
+            if key_event.code == KeyCode::Esc && key_event.kind != KeyEventKind::Release {
                 if let Some(shutdown_sender) = self.shutdown_sender.take() {
                     let _ = shutdown_sender.send(());
                 }
             }
+        }
+    }
+
+    fn handle_termina_event_internal(&mut self, event: &event::Event) -> bool {
+        match self.focused_element {
+            FocusedElement::MenuBar => {
+                let status = self.menu_bar.handle_event(event, true);
+
+                match status {
+                    HandleEventStatus::Handled => true,
+                    HandleEventStatus::Unhandled => self.bottom_area.handle_event(event, false) == HandleEventStatus::Handled,
+                    HandleEventStatus::PassFocus(focus_position, direction) => {
+                        match direction {
+                            PassFocusDirection::Forward | PassFocusDirection::Down => {
+                                if self.bottom_area.receive_focus(focus_position) {
+                                    self.menu_bar.focus_lost();
+                                    self.focused_element = FocusedElement::BottomArea;
+                                }
+                            }
+                            PassFocusDirection::Left | PassFocusDirection::Right | PassFocusDirection::Up => {}
+                            PassFocusDirection::Away => {
+                                self.menu_bar.focus_lost();
+                                self.focused_element = FocusedElement::None;
+                            }
+                        }
+
+                        true
+                    }
+                }
+            }
+            FocusedElement::BottomArea => {
+                let status = self.bottom_area.handle_event(event, true);
+
+                match status {
+                    HandleEventStatus::Handled => true,
+                    HandleEventStatus::Unhandled => self.menu_bar.handle_event(event, false) == HandleEventStatus::Handled,
+                    HandleEventStatus::PassFocus(focus_position, direction) => {
+                        match direction {
+                            PassFocusDirection::Forward | PassFocusDirection::Up => {
+                                if self.menu_bar.receive_focus(focus_position) {
+                                    self.bottom_area.focus_lost();
+                                    self.focused_element = FocusedElement::MenuBar
+                                }
+                            }
+                            PassFocusDirection::Left | PassFocusDirection::Right | PassFocusDirection::Down => {}
+                            PassFocusDirection::Away => {
+                                self.bottom_area.focus_lost();
+                                self.focused_element = FocusedElement::None;
+                            }
+                        }
+                        true
+                    }
+                }
+            }
+            FocusedElement::None => match event {
+                event::Event::Key(key_event) => {
+                    let menubar_receives_focus = match key_event.code {
+                        KeyCode::Left => Some((true, (0, self.current_area.width))),
+                        KeyCode::Right | KeyCode::Tab => Some((true, (0, 0))),
+                        KeyCode::Up => Some((false, (self.current_area.width / 2, self.current_area.height))),
+                        KeyCode::Down => Some((true, (self.current_area.width / 2, 0))),
+                        _ => None,
+                    };
+
+                    match menubar_receives_focus {
+                        Some((true, focus_position)) => {
+                            if self.menu_bar.receive_focus(focus_position) {
+                                self.focused_element = FocusedElement::MenuBar;
+                                true
+                            } else if self.bottom_area.receive_focus(focus_position) {
+                                self.focused_element = FocusedElement::BottomArea;
+                                true
+                            } else {
+                                false
+                            }
+                        }
+                        Some((false, focus_position)) => {
+                            if self.bottom_area.receive_focus(focus_position) {
+                                self.focused_element = FocusedElement::BottomArea;
+                                true
+                            } else if self.menu_bar.receive_focus(focus_position) {
+                                self.focused_element = FocusedElement::MenuBar;
+                                true
+                            } else {
+                                false
+                            }
+                        }
+                        None => {
+                            self.menu_bar.handle_event(event, false) == HandleEventStatus::Handled
+                                || self.bottom_area.handle_event(event, false) == HandleEventStatus::Handled
+                        }
+                    }
+                }
+                event::Event::Mouse(mouse_event) => {
+                    if (mouse_event.kind == MouseEventKind::ScrollUp || mouse_event.kind == MouseEventKind::ScrollDown)
+                        && self.bottom_area.receive_focus((mouse_event.column, mouse_event.row))
+                    {
+                        self.focused_element = FocusedElement::BottomArea;
+                        self.bottom_area.handle_event(event, true);
+                        true
+                    } else {
+                        false
+                    }
+                }
+                _ => false,
+            },
         }
     }
 
@@ -106,10 +223,12 @@ impl<W: AsyncWrite + Unpin + 'static> UIManager<W> {
             _ => {}
         }
 
-        self.log_block.new_stream_event(event);
+        self.bottom_area.new_stream_event(event);
     }
 
     pub fn draw(&mut self, frame: &mut Frame) {
+        self.current_area = frame.size();
+
         let mut menu_area = frame.size();
         menu_area.height = menu_area.height.min(2);
         self.menu_bar.render(menu_area, frame.buffer_mut());
@@ -118,7 +237,7 @@ impl<W: AsyncWrite + Unpin + 'static> UIManager<W> {
         bottom_area.y += 2;
         bottom_area.height = bottom_area.height.saturating_sub(2);
 
-        self.log_block.render(bottom_area, frame.buffer_mut())
+        self.bottom_area.render(bottom_area, frame.buffer_mut())
 
         /*frame.render_widget(
             Block::new()

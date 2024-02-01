@@ -24,6 +24,7 @@ use crate::{printlnif, sandstorm::SandstormRequestManager, tui::event_receiver::
 
 use self::{event_receiver::TerminalEventReceiver, ui_manager::UIManager};
 
+mod bottom_area;
 mod colored_logs;
 mod event_receiver;
 mod log_block;
