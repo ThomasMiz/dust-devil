@@ -19,7 +19,7 @@ use ratatui::{
 use tokio::{
     io::AsyncWrite,
     join, select,
-    sync::{broadcast, oneshot, Notify},
+    sync::{broadcast, mpsc, oneshot, Notify},
     task::JoinHandle,
 };
 
@@ -29,7 +29,10 @@ use crate::{
     utils::futures::{recv_ignore_lagged, run_with_background},
 };
 
-use super::ui_element::{HandleEventStatus, PassFocusDirection, UIElement};
+use super::{
+    ui_element::{HandleEventStatus, PassFocusDirection, UIElement},
+    ui_manager::Popup,
+};
 
 const SHUTDOWN_KEY: char = 'x';
 const SOCKS5_KEY: char = 's';
@@ -71,9 +74,11 @@ const fn get_ping_text_color(millis: u16) -> Color {
     }
 }
 
-pub struct MenuBar {
+pub struct MenuBar<W: AsyncWrite + Unpin + 'static> {
+    manager: Rc<MutexedSandstormRequestManager<W>>,
     state: Rc<RefCell<MenuBarState>>,
     redraw_notify: Rc<Notify>,
+    popup_sender: mpsc::UnboundedSender<Popup>,
     task_handle: JoinHandle<()>,
 }
 
@@ -145,15 +150,13 @@ impl FocusedElement {
     }
 }
 
-impl MenuBar {
-    pub fn new<W>(
+impl<W: AsyncWrite + Unpin + 'static> MenuBar<W> {
+    pub fn new(
         manager: Rc<MutexedSandstormRequestManager<W>>,
         redraw_notify: Rc<Notify>,
         buffer_size_watch: broadcast::Sender<u32>,
-    ) -> Self
-    where
-        W: AsyncWrite + Unpin + 'static,
-    {
+        popup_sender: mpsc::UnboundedSender<Popup>,
+    ) -> Self {
         let state = Rc::new(RefCell::new(MenuBarState {
             current_area: Rect::default(),
             shutdown_label: format!("{SHUTDOWN_LABEL} ({SHUTDOWN_KEY})"),
@@ -179,15 +182,13 @@ impl MenuBar {
             focused_element: FocusedElement::None,
         }));
 
-        let state1 = Rc::clone(&state);
-        let redraw_notify1 = redraw_notify.clone();
-        let task_handle = tokio::task::spawn_local(async move {
-            menu_bar_background_task(manager, state1, redraw_notify1, buffer_size_watch).await;
-        });
+        let task_handle = start_menu_bar_background_task(&manager, &state, &redraw_notify, buffer_size_watch);
 
         Self {
+            manager,
             state,
             task_handle,
+            popup_sender,
             redraw_notify,
         }
     }
@@ -205,7 +206,7 @@ impl MenuBar {
     fn buffer_selected(&self) {}
 }
 
-impl Drop for MenuBar {
+impl<W: AsyncWrite + Unpin + 'static> Drop for MenuBar<W> {
     fn drop(&mut self) {
         self.task_handle.abort();
     }
@@ -489,18 +490,25 @@ async fn ping_frame_background_task<W>(
     }
 }
 
-async fn menu_bar_background_task<W>(
-    manager: Rc<MutexedSandstormRequestManager<W>>,
-    state: Rc<RefCell<MenuBarState>>,
-    redraw_notify: Rc<Notify>,
+fn start_menu_bar_background_task<W>(
+    manager: &Rc<MutexedSandstormRequestManager<W>>,
+    state: &Rc<RefCell<MenuBarState>>,
+    redraw_notify: &Rc<Notify>,
     buffer_size_sender: broadcast::Sender<u32>,
-) where
-    W: AsyncWrite + Unpin,
+) -> JoinHandle<()>
+where
+    W: AsyncWrite + Unpin + 'static,
 {
-    join!(
-        buffer_frame_background_task(&manager, &state, &redraw_notify, buffer_size_sender),
-        ping_frame_background_task(&manager, &state, &redraw_notify),
-    );
+    let manager = Rc::clone(manager);
+    let state = Rc::clone(state);
+    let redraw_notify = Rc::clone(redraw_notify);
+
+    tokio::task::spawn_local(async move {
+        join!(
+            buffer_frame_background_task(&manager, &state, &redraw_notify, buffer_size_sender),
+            ping_frame_background_task(&manager, &state, &redraw_notify),
+        );
+    })
 }
 
 #[inline]
@@ -512,7 +520,7 @@ fn render_frame_chunk(block: Block, label: &str, area: Rect, style: Style, buf: 
     }
 }
 
-impl UIElement for MenuBar {
+impl<W: AsyncWrite + Unpin + 'static> UIElement for MenuBar<W> {
     fn render(&mut self, area: Rect, buf: &mut Buffer) {
         let mut state = self.state.deref().borrow_mut();
         state.resize_if_needed(area);

@@ -14,11 +14,7 @@ use ratatui::{
     Terminal,
 };
 
-use tokio::{
-    io::AsyncWrite,
-    select,
-    sync::{oneshot, Notify},
-};
+use tokio::{io::AsyncWrite, select, sync::Notify};
 
 use crate::{printlnif, sandstorm::SandstormRequestManager, tui::event_receiver::StreamEventReceiver};
 
@@ -29,6 +25,7 @@ mod colored_logs;
 mod event_receiver;
 mod log_block;
 mod menu_bar;
+mod popups;
 mod pretty_print;
 mod ui_element;
 mod ui_manager;
@@ -91,20 +88,21 @@ where
 {
     let manager = Rc::new(manager.into_mutexed());
 
-    let (shutdown_sender, mut shutdown_receiver) = oneshot::channel::<()>();
+    let shutdown_notify = Rc::new(Notify::const_new());
     let redraw_notify = Rc::new(Notify::const_new());
     redraw_notify.notify_one();
 
     let mut terminal_event_receiver = TerminalEventReceiver::new();
 
-    let mut ui_manager = UIManager::new(manager, metrics, Rc::clone(&redraw_notify), shutdown_sender);
+    let mut ui_manager = UIManager::new(manager, metrics, redraw_notify.clone(), shutdown_notify.clone());
 
     loop {
         select! {
             biased;
-            _ = Pin::new(&mut shutdown_receiver) => {
+            _ = shutdown_notify.notified() => {
                 return Ok(());
             }
+            _ = ui_manager.background_process() => {}
             terminal_event_result = terminal_event_receiver.receive() => {
                 let terminal_event = terminal_event_result??;
                 match terminal_event {

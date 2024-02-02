@@ -1,4 +1,4 @@
-use std::rc::Rc;
+use std::{future, rc::Rc};
 
 use crossterm::event::{self, KeyCode, KeyEventKind, MouseEventKind};
 use dust_devil_core::{
@@ -8,33 +8,59 @@ use dust_devil_core::{
 use ratatui::{layout::Rect, Frame};
 use tokio::{
     io::AsyncWrite,
-    sync::{broadcast, oneshot, watch, Notify},
+    select,
+    sync::{broadcast, mpsc, oneshot, watch, Notify},
 };
 
-use crate::sandstorm::MutexedSandstormRequestManager;
+use crate::{sandstorm::MutexedSandstormRequestManager, utils::futures::recv_many_with_index};
 
 use super::{
     bottom_area::BottomArea,
     menu_bar::MenuBar,
+    popups::confirm_close_popup::ConfirmClosePopup,
     ui_element::{HandleEventStatus, PassFocusDirection, UIElement},
 };
 
 pub struct UIManager<W: AsyncWrite + Unpin + 'static> {
-    _manager: Rc<MutexedSandstormRequestManager<W>>,
-    shutdown_sender: Option<oneshot::Sender<()>>,
+    redraw_notify: Rc<Notify>,
+    current_area: Rect,
+    shutdown_notify: Rc<Notify>,
     buffer_size_watch: broadcast::Sender<u32>,
     metrics_watch: watch::Sender<Metrics>,
-    menu_bar: MenuBar,
+    menu_bar: MenuBar<W>,
     bottom_area: BottomArea,
-    current_area: Rect,
     focused_element: FocusedElement,
+    popup_receiver: mpsc::UnboundedReceiver<Popup>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Popup {
+    element: Box<dyn UIElement>,
+    close_receiver: oneshot::Receiver<()>,
+}
+
+impl<T: UIElement + 'static> From<(T, oneshot::Receiver<()>)> for Popup {
+    fn from(value: (T, oneshot::Receiver<()>)) -> Self {
+        Popup {
+            element: Box::new(value.0),
+            close_receiver: value.1,
+        }
+    }
+}
+
 enum FocusedElement {
     None,
     MenuBar,
     BottomArea,
+    Popup(Vec<Popup>),
+}
+
+async fn receive_popup_close_index(focused_element: &mut FocusedElement) -> usize {
+    if let FocusedElement::Popup(popups) = focused_element {
+        let (_, recv_index) = recv_many_with_index(popups, |popup| &mut popup.close_receiver).await;
+        recv_index
+    } else {
+        future::pending().await
+    }
 }
 
 impl<W: AsyncWrite + Unpin + 'static> UIManager<W> {
@@ -42,23 +68,76 @@ impl<W: AsyncWrite + Unpin + 'static> UIManager<W> {
         manager: Rc<MutexedSandstormRequestManager<W>>,
         metrics: Metrics,
         redraw_notify: Rc<Notify>,
-        shutdown_sender: oneshot::Sender<()>,
+        shutdown_notify: Rc<Notify>,
     ) -> Self {
         let (buffer_size_watch, _) = broadcast::channel(1);
         let (metrics_watch, _metrics_watch_receiver) = watch::channel(metrics);
+        let (popup_sender, popup_receiver) = mpsc::unbounded_channel();
 
-        let menu_bar = MenuBar::new(manager.clone(), redraw_notify.clone(), buffer_size_watch.clone());
-        let bottom_area = BottomArea::new(redraw_notify);
+        let menu_bar = MenuBar::new(manager.clone(), redraw_notify.clone(), buffer_size_watch.clone(), popup_sender);
+        let bottom_area = BottomArea::new(redraw_notify.clone());
 
         Self {
-            _manager: manager,
-            shutdown_sender: Some(shutdown_sender),
+            redraw_notify,
+            current_area: Rect::default(),
+            shutdown_notify,
             buffer_size_watch,
             metrics_watch,
             menu_bar,
             bottom_area,
-            current_area: Rect::default(),
             focused_element: FocusedElement::None,
+            popup_receiver,
+        }
+    }
+
+    fn push_popup(&mut self, mut popup: Popup) {
+        if let FocusedElement::Popup(popups) = &mut self.focused_element {
+            if let Some(last) = popups.last_mut() {
+                last.element.focus_lost();
+            }
+            popup.element.receive_focus((0, 0));
+            popups.push(popup);
+        } else {
+            match self.focused_element {
+                FocusedElement::BottomArea => self.bottom_area.focus_lost(),
+                FocusedElement::MenuBar => self.menu_bar.focus_lost(),
+                _ => {}
+            };
+
+            let mut popups = Vec::with_capacity(4);
+            popup.element.receive_focus((0, 0));
+            popups.push(popup);
+            self.focused_element = FocusedElement::Popup(popups);
+        }
+
+        self.redraw_notify.notify_one();
+    }
+
+    pub async fn background_process(&mut self) {
+        select! {
+            received = self.popup_receiver.recv() => {
+                if let Some(p) = received {
+                    self.push_popup(p);
+                }
+            }
+            popup_index = receive_popup_close_index(&mut self.focused_element) => {
+                let popups = match &mut self.focused_element {
+                    FocusedElement::Popup(p) => p,
+                    _ => unreachable!(),
+                };
+
+                let is_last = popup_index + 1 == popups.len();
+                popups.remove(popup_index);
+                if let Some(last) = popups.last_mut() {
+                    if is_last {
+                        last.element.receive_focus((0, 0));
+                    }
+                } else {
+                    self.focused_element = FocusedElement::None;
+                }
+
+                self.redraw_notify.notify_one();
+            }
         }
     }
 
@@ -70,15 +149,13 @@ impl<W: AsyncWrite + Unpin + 'static> UIManager<W> {
         // If the event was not handled and Esc was pressed, exit the TUI.
         if let event::Event::Key(key_event) = event {
             if key_event.code == KeyCode::Esc && key_event.kind != KeyEventKind::Release {
-                if let Some(shutdown_sender) = self.shutdown_sender.take() {
-                    let _ = shutdown_sender.send(());
-                }
+                self.push_popup(ConfirmClosePopup::new(self.redraw_notify.clone(), self.shutdown_notify.clone()).into());
             }
         }
     }
 
     fn handle_termina_event_internal(&mut self, event: &event::Event) -> bool {
-        match self.focused_element {
+        match &mut self.focused_element {
             FocusedElement::MenuBar => {
                 let status = self.menu_bar.handle_event(event, true);
 
@@ -127,6 +204,17 @@ impl<W: AsyncWrite + Unpin + 'static> UIManager<W> {
                         true
                     }
                 }
+            }
+            FocusedElement::Popup(popups) => {
+                let mut is_focused = true;
+                for popup in popups.iter_mut().rev() {
+                    if popup.element.handle_event(event, is_focused) != HandleEventStatus::Unhandled {
+                        break;
+                    }
+                    is_focused = false;
+                }
+
+                true
             }
             FocusedElement::None => match event {
                 event::Event::Key(key_event) => {
@@ -237,15 +325,12 @@ impl<W: AsyncWrite + Unpin + 'static> UIManager<W> {
         bottom_area.y += 2;
         bottom_area.height = bottom_area.height.saturating_sub(2);
 
-        self.bottom_area.render(bottom_area, frame.buffer_mut())
+        self.bottom_area.render(bottom_area, frame.buffer_mut());
 
-        /*frame.render_widget(
-            Block::new()
-                .border_type(ratatui::widgets::BorderType::Double)
-                .borders(Borders::ALL)
-                .style(Style::reset().red())
-                .title("Pedro."),
-            bottom_area,
-        );*/
+        if let FocusedElement::Popup(popups) = &mut self.focused_element {
+            for popup in popups {
+                popup.element.render(frame.size(), frame.buffer_mut());
+            }
+        }
     }
 }

@@ -1,6 +1,13 @@
-use std::future::Future;
+use std::{
+    future::{poll_fn, Future},
+    pin::Pin,
+    task::Poll,
+};
 
-use tokio::{select, sync::broadcast};
+use tokio::{
+    select,
+    sync::{broadcast, oneshot},
+};
 
 /// Runs a background future at the same time as a foreground future, until the foreground future
 /// completes, at which point the background future is aborted. Note that the background future
@@ -32,4 +39,20 @@ pub async fn recv_ignore_lagged<T: Clone>(receiver: &mut broadcast::Receiver<T>)
             Err(broadcast::error::RecvError::Lagged(_)) => {}
         }
     }
+}
+
+pub async fn recv_many_with_index<T, R, F>(vec: &mut [T], f: F) -> (Result<R, oneshot::error::RecvError>, usize)
+where
+    F: Fn(&mut T) -> &mut oneshot::Receiver<R>,
+{
+    poll_fn(|cx| {
+        for (index, receiver) in vec.iter_mut().map(&f).enumerate().rev() {
+            if let Poll::Ready(result) = Pin::new(receiver).poll(cx) {
+                return Poll::Ready((result, index));
+            }
+        }
+
+        Poll::Pending
+    })
+    .await
 }
