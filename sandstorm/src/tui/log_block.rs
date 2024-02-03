@@ -13,7 +13,8 @@ use time::UtcOffset;
 use tokio::sync::Notify;
 
 use super::{
-    colored_logs::{log_event_to_single_line, StaticString},
+    colored_logs::log_event_to_single_line,
+    text_wrapper::{wrap_lines_by_chars, StaticString},
     ui_element::{HandleEventStatus, PassFocusDirection, UIElement},
 };
 
@@ -553,59 +554,10 @@ impl UIElement for LogBlock {
     }
 }
 
-fn log_event_to_lines<F>(utc_offset: UtcOffset, event: &logging::Event, wrap_width: u16, tmp_vec: &mut Vec<(StaticString, Style)>, mut f: F)
+fn log_event_to_lines<F>(utc_offset: UtcOffset, event: &logging::Event, wrap_width: u16, tmp_vec: &mut Vec<(StaticString, Style)>, f: F)
 where
     F: FnMut(Line<'static>),
 {
     log_event_to_single_line(tmp_vec, utc_offset, event);
-    tmp_vec.reverse();
-
-    let wrap_width = wrap_width as usize;
-    let mut line_vec = Vec::new();
-    let mut current_line_length = 0;
-    while let Some((text, style)) = tmp_vec.pop() {
-        let mut text_chars_iter = text.as_str().char_indices();
-
-        loop {
-            match text_chars_iter.next() {
-                Some((next_char_i, _next_char)) => {
-                    current_line_length += 1;
-                    if current_line_length > wrap_width {
-                        // Split this text at the index next_char_i
-                        match text {
-                            StaticString::Static(s) => {
-                                tmp_vec.push((StaticString::Static(&s[next_char_i..]), style));
-                                line_vec.push(Span::styled(&s[0..next_char_i], style));
-                            }
-                            StaticString::Owned(mut s) => {
-                                tmp_vec.push((StaticString::Owned(String::from(&s[next_char_i..])), style));
-                                s.truncate(next_char_i);
-                                line_vec.push(Span::styled(s, style));
-                            }
-                        }
-
-                        f(Line::from(line_vec));
-                        line_vec = Vec::new();
-                        current_line_length -= wrap_width;
-
-                        break;
-                    }
-                }
-                None => {
-                    line_vec.push(match text {
-                        StaticString::Static(s) => Span::styled(s, style),
-                        StaticString::Owned(s) => Span::styled(s, style),
-                    });
-
-                    if current_line_length == wrap_width || tmp_vec.is_empty() {
-                        f(Line::from(line_vec));
-                        line_vec = Vec::new();
-                        current_line_length = 0;
-                    }
-
-                    break;
-                }
-            };
-        }
-    }
+    wrap_lines_by_chars(wrap_width as usize, tmp_vec.drain(..), f);
 }

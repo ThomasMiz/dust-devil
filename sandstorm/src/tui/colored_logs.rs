@@ -1,43 +1,8 @@
-use std::borrow::Cow;
-
 use dust_devil_core::{logging, socks5::SocksRequestAddress};
 use ratatui::style::{Color, Modifier, Style};
 use time::{OffsetDateTime, UtcOffset};
 
-pub enum StaticString {
-    Static(&'static str),
-    Owned(String),
-}
-
-impl StaticString {
-    pub fn as_str(&self) -> &str {
-        match self {
-            Self::Static(s) => s,
-            Self::Owned(s) => s,
-        }
-    }
-}
-
-impl From<StaticString> for Cow<'static, str> {
-    fn from(value: StaticString) -> Self {
-        match value {
-            StaticString::Static(s) => s.into(),
-            StaticString::Owned(s) => s.into(),
-        }
-    }
-}
-
-impl From<String> for StaticString {
-    fn from(value: String) -> Self {
-        StaticString::Owned(value)
-    }
-}
-
-impl From<&'static str> for StaticString {
-    fn from(value: &'static str) -> Self {
-        Self::Static(value)
-    }
-}
+use super::text_wrapper::StaticString;
 
 pub const BOLD_ITALIC: Style = Style::reset().add_modifier(Modifier::BOLD).add_modifier(Modifier::ITALIC);
 pub const DEFAULT_STYLE: Style = Style::reset();

@@ -27,6 +27,7 @@ mod log_block;
 mod menu_bar;
 mod popups;
 mod pretty_print;
+mod text_wrapper;
 mod ui_element;
 mod ui_manager;
 
@@ -58,7 +59,7 @@ where
     terminal::enable_raw_mode()?;
     out.queue(terminal::EnterAlternateScreen)?
         .queue(event::EnableMouseCapture)?
-        .queue(cursor::Hide)?
+        .queue(terminal::SetTitle("Sandstorm Monitor"))?
         .flush()?;
 
     let mut terminal = Terminal::new(CrosstermBackend::new(stdout()))?;
