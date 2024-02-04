@@ -129,3 +129,53 @@ where
         f(Line::from(line_vec));
     }
 }
+
+pub struct WrapTextIter<'a> {
+    remaining_text: &'a str,
+    wrap_width: usize,
+}
+
+impl<'a> WrapTextIter<'a> {
+    pub fn new(text: &'a str, wrap_width: usize) -> Self {
+        Self {
+            remaining_text: text.trim(),
+            wrap_width,
+        }
+    }
+}
+
+impl<'a> Iterator for WrapTextIter<'a> {
+    type Item = &'a str;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let mut chars_iter = self.remaining_text.char_indices().take(self.wrap_width);
+        let mut last_space = None;
+
+        let (mut last_index, mut last_char) = match chars_iter.next() {
+            Some((index, c)) => (index, c),
+            None => return None,
+        };
+
+        for (index, c) in chars_iter {
+            if c.is_whitespace() {
+                last_space = Some((index, c));
+            }
+
+            (last_index, last_char) = (index, c);
+        }
+
+        let (line_end_index, next_line_start_index) = match last_space {
+            _ if (last_index + last_char.len_utf8()) == self.remaining_text.len() => (self.remaining_text.len(), self.remaining_text.len()),
+            Some((space_index, space_char)) => (space_index, space_index + space_char.len_utf8()),
+            None => {
+                let idx = last_index + last_char.len_utf8();
+                (idx, idx)
+            }
+        };
+
+        let retval = &self.remaining_text[..line_end_index];
+        self.remaining_text = &self.remaining_text[next_line_start_index..].trim_start();
+
+        Some(retval)
+    }
+}

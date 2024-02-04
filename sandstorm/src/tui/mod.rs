@@ -22,6 +22,7 @@ use self::{event_receiver::TerminalEventReceiver, ui_manager::UIManager};
 
 mod bottom_area;
 mod colored_logs;
+mod elements;
 mod event_receiver;
 mod log_block;
 mod menu_bar;
@@ -101,7 +102,7 @@ where
         select! {
             biased;
             _ = shutdown_notify.notified() => {
-                return Ok(());
+                return Ok(()); // TODO: We're never shutting down the manager!
             }
             _ = ui_manager.background_process() => {}
             terminal_event_result = terminal_event_receiver.receive() => {

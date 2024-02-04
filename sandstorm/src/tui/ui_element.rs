@@ -54,6 +54,16 @@ pub enum HandleEventStatus {
     PassFocus((u16, u16), PassFocusDirection),
 }
 
+impl HandleEventStatus {
+    pub fn or_else<F: FnOnce() -> Self>(self, f: F) -> Self {
+        if self == HandleEventStatus::Unhandled {
+            f()
+        } else {
+            self
+        }
+    }
+}
+
 /// Directions for passing a focus.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PassFocusDirection {
