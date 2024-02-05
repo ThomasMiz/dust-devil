@@ -1,4 +1,8 @@
-use std::rc::Rc;
+use std::{
+    cell::RefCell,
+    ops::Deref,
+    rc::{Rc, Weak},
+};
 
 use crossterm::event::{self, KeyCode, KeyEventKind};
 use ratatui::{
@@ -15,7 +19,7 @@ use tokio::sync::{oneshot, Notify};
 use crate::tui::{
     elements::{
         centered_text_line::CenteredTextLine,
-        dual_buttons::{Button, DualButtons, DualButtonsEventStatus},
+        dual_buttons::{DualButtons, DualButtonsHandler},
     },
     text_wrapper::WrapTextIter,
     ui_element::{HandleEventStatus, PassFocusDirection, UIElement},
@@ -30,25 +34,50 @@ const POPUP_WIDTH: u16 = 34;
 const TEXT_STYLE: Style = Style::new();
 
 pub struct ConfirmClosePopup {
-    redraw_notify: Rc<Notify>,
     screen_area: Rect,
     current_size: (u16, u16),
-    close_sender: Option<oneshot::Sender<()>>,
-    shutdown_notify: Rc<Notify>,
+    inner: Rc<RefCell<Inner>>,
     prompt_lines: Vec<CenteredTextLine<'static>>,
     focused_element: FocusedElement,
-    popup_state: PopupState,
+    dual_buttons: DualButtons<'static, ButtonHandler>,
+    closing_text: CenteredTextLine<'static>,
+}
+
+struct Inner {
+    redraw_notify: Rc<Notify>,
+    popup_close_sender: Option<oneshot::Sender<()>>,
+    shutdown_notify: Rc<Notify>,
+    shutting_down: bool,
+}
+
+struct ButtonHandler {
+    inner: Weak<RefCell<Inner>>,
+}
+
+impl ButtonHandler {
+    fn new(inner: Weak<RefCell<Inner>>) -> Self {
+        Self { inner }
+    }
+}
+
+impl DualButtonsHandler for ButtonHandler {
+    fn on_left(&mut self) {
+        if let Some(rc) = self.inner.upgrade() {
+            rc.deref().borrow_mut().on_yes_selected();
+        }
+    }
+
+    fn on_right(&mut self) {
+        if let Some(rc) = self.inner.upgrade() {
+            rc.deref().borrow_mut().close();
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum FocusedElement {
     None,
     DualButtons,
-}
-
-enum PopupState {
-    Buttons(DualButtons<'static>),
-    ClosingDown(CenteredTextLine<'static>),
 }
 
 impl ConfirmClosePopup {
@@ -59,12 +88,20 @@ impl ConfirmClosePopup {
             .map(|line| CenteredTextLine::new(line, TEXT_STYLE))
             .collect();
 
+        let inner = Rc::new(RefCell::new(Inner {
+            redraw_notify: Rc::clone(&redraw_notify),
+            popup_close_sender: Some(close_sender),
+            shutdown_notify,
+            shutting_down: false,
+        }));
+
         let dual_buttons = DualButtons::new(
-            redraw_notify.clone(),
+            redraw_notify,
             YES_TITLE,
             CANCEL_TITLE,
             YES_KEYS,
             CANCEL_NO_KEYS,
+            ButtonHandler::new(Rc::downgrade(&inner)),
             Style::new(),
             Style::new().bg(Color::LightBlue),
             Style::new(),
@@ -72,31 +109,32 @@ impl ConfirmClosePopup {
         );
 
         let value = Self {
-            redraw_notify,
             screen_area: Rect::default(),
             current_size: (0, 0),
-            close_sender: Some(close_sender),
-            shutdown_notify,
+            inner,
             prompt_lines,
             focused_element: FocusedElement::None,
-            popup_state: PopupState::Buttons(dual_buttons),
+            dual_buttons,
+            closing_text: CenteredTextLine::new(CLOSING_MESSAGE, Style::reset()),
         };
 
         (value, close_receiver)
     }
+}
 
+impl Inner {
     fn on_yes_selected(&mut self) {
-        if let PopupState::ClosingDown(_) = self.popup_state {
+        if self.shutting_down {
             return;
         }
 
         self.shutdown_notify.notify_one();
-        self.popup_state = PopupState::ClosingDown(CenteredTextLine::new(CLOSING_MESSAGE, Style::reset()));
+        self.shutting_down = true;
         self.redraw_notify.notify_one();
     }
 
     fn close(&mut self) {
-        if let Some(close_sender) = self.close_sender.take() {
+        if let Some(close_sender) = self.popup_close_sender.take() {
             let _ = close_sender.send(());
         }
     }
@@ -143,108 +181,66 @@ impl UIElement for ConfirmClosePopup {
             buttons_area.y = buttons_y;
             buttons_area.height = 1;
 
-            match &mut self.popup_state {
-                PopupState::Buttons(dual_buttons) => dual_buttons.render(buttons_area, buf),
-                PopupState::ClosingDown(closing_text) => closing_text.render(buttons_area, buf),
+            match self.inner.deref().borrow().shutting_down {
+                true => self.closing_text.render(buttons_area, buf),
+                false => self.dual_buttons.render(buttons_area, buf),
             }
         }
     }
 
     fn handle_event(&mut self, event: &event::Event, is_focused: bool) -> HandleEventStatus {
-        let dual_buttons = match &mut self.popup_state {
-            PopupState::Buttons(b) => b,
-            PopupState::ClosingDown(_) => return HandleEventStatus::Handled,
-        };
+        if self.inner.deref().borrow().shutting_down {
+            return HandleEventStatus::Handled;
+        }
 
         if !is_focused {
             return HandleEventStatus::Unhandled;
         }
 
-        if self.focused_element == FocusedElement::None {
-            let key_event = match event {
-                event::Event::Key(e) if e.kind != KeyEventKind::Release => e,
-                _ => return HandleEventStatus::Unhandled,
-            };
-
-            let unfocused_element_result = match key_event.code {
-                KeyCode::Char(CLOSE_KEY) => {
-                    self.close();
-                    HandleEventStatus::Handled
-                }
-                KeyCode::Char(_) => match dual_buttons.handle_event_with_result(event, false) {
-                    DualButtonsEventStatus::Handled(Button::None) => HandleEventStatus::Handled,
-                    DualButtonsEventStatus::Handled(Button::Left) => {
-                        self.on_yes_selected();
-                        HandleEventStatus::Handled
-                    }
-                    DualButtonsEventStatus::Handled(Button::Right) => {
-                        self.close();
-                        HandleEventStatus::Handled
-                    }
-                    _ => HandleEventStatus::Unhandled,
-                },
-                KeyCode::Left | KeyCode::Right | KeyCode::Up | KeyCode::Down | KeyCode::Tab => {
-                    let focus_position_x = match key_event.code {
-                        KeyCode::Left => self.screen_area.right(),
-                        _ => self.screen_area.left(),
-                    };
-
-                    match dual_buttons.receive_focus((focus_position_x, 0)) {
-                        true => {
-                            self.focused_element = FocusedElement::DualButtons;
-                            HandleEventStatus::Handled
-                        }
-                        false => HandleEventStatus::Unhandled,
-                    }
-                }
-                KeyCode::Esc => {
-                    self.close();
-                    HandleEventStatus::Handled
-                }
-                _ => HandleEventStatus::Unhandled,
-            };
-
-            return unfocused_element_result;
+        let are_buttons_focused = is_focused && self.focused_element == FocusedElement::DualButtons;
+        match self.dual_buttons.handle_event(event, are_buttons_focused) {
+            HandleEventStatus::Unhandled => {}
+            HandleEventStatus::PassFocus(_focus_position, PassFocusDirection::Away) => {
+                self.focused_element = FocusedElement::None;
+                self.dual_buttons.focus_lost();
+                return HandleEventStatus::Handled;
+            }
+            other => return other,
         }
 
-        match dual_buttons.handle_event_with_result(event, true) {
-            DualButtonsEventStatus::Handled(Button::None) => HandleEventStatus::Handled,
-            DualButtonsEventStatus::Handled(Button::Left) => {
-                self.on_yes_selected();
-                HandleEventStatus::Handled
-            }
-            DualButtonsEventStatus::Handled(Button::Right) => {
-                self.close();
-                HandleEventStatus::Handled
-            }
-            DualButtonsEventStatus::PassFocus(_, PassFocusDirection::Away) => {
-                dual_buttons.focus_lost();
-                self.focused_element = FocusedElement::None;
-                HandleEventStatus::Handled
-            }
-            DualButtonsEventStatus::Unhandled => {
-                if let event::Event::Key(key_event) = event {
-                    match key_event.code {
-                        _ if key_event.kind == KeyEventKind::Release => HandleEventStatus::Unhandled,
-                        KeyCode::Esc => {
-                            self.close();
-                            HandleEventStatus::Handled
-                        }
-                        KeyCode::Char(c) if c.to_ascii_lowercase() == CLOSE_KEY => {
-                            self.close();
-                            HandleEventStatus::Handled
-                        }
-                        _ => HandleEventStatus::Unhandled,
+        let key_event = match event {
+            event::Event::Key(e) if e.kind != KeyEventKind::Release => e,
+            _ => return HandleEventStatus::Unhandled,
+        };
+
+        match key_event.code {
+            KeyCode::Left | KeyCode::Right | KeyCode::Up | KeyCode::Down | KeyCode::Tab => {
+                let focus_position_x = match key_event.code {
+                    KeyCode::Left => self.screen_area.right(),
+                    _ => self.screen_area.left(),
+                };
+
+                match self.dual_buttons.receive_focus((focus_position_x, 0)) {
+                    true => {
+                        self.focused_element = FocusedElement::DualButtons;
+                        HandleEventStatus::Handled
                     }
-                } else {
-                    HandleEventStatus::Unhandled
+                    false => HandleEventStatus::Unhandled,
                 }
+            }
+            KeyCode::Esc => {
+                self.inner.deref().borrow_mut().close();
+                HandleEventStatus::Handled
+            }
+            KeyCode::Char(c) if c.to_ascii_lowercase() == CLOSE_KEY => {
+                self.inner.deref().borrow_mut().close();
+                HandleEventStatus::Handled
             }
             _ => HandleEventStatus::Unhandled,
         }
     }
 
-    fn receive_focus(&mut self, focus_position: (u16, u16)) -> bool {
+    fn receive_focus(&mut self, _focus_position: (u16, u16)) -> bool {
         true
     }
 

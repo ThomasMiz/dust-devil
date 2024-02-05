@@ -6,12 +6,19 @@ use tokio::sync::Notify;
 
 use crate::tui::ui_element::{HandleEventStatus, PassFocusDirection, UIElement};
 
-pub struct DualButtons<'a> {
+pub trait DualButtonsHandler {
+    fn on_left(&mut self);
+
+    fn on_right(&mut self);
+}
+
+pub struct DualButtons<'a, H: DualButtonsHandler> {
     redraw_notify: Rc<Notify>,
     left_str: &'a str,
     right_str: &'a str,
     left_keys: &'a [char],
     right_keys: &'a [char],
+    pub handlers: H,
     left_style: Style,
     left_selected_style: Style,
     right_style: Style,
@@ -40,30 +47,7 @@ impl FocusedElement {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Button {
-    None,
-    Left,
-    Right,
-}
-
-pub enum DualButtonsEventStatus {
-    Handled(Button),
-    Unhandled,
-    PassFocus((u16, u16), PassFocusDirection),
-}
-
-impl From<DualButtonsEventStatus> for HandleEventStatus {
-    fn from(value: DualButtonsEventStatus) -> Self {
-        match value {
-            DualButtonsEventStatus::Handled(_) => HandleEventStatus::Handled,
-            DualButtonsEventStatus::Unhandled => HandleEventStatus::Unhandled,
-            DualButtonsEventStatus::PassFocus(focus_position, direction) => HandleEventStatus::PassFocus(focus_position, direction),
-        }
-    }
-}
-
-impl<'a> DualButtons<'a> {
+impl<'a, H: DualButtonsHandler> DualButtons<'a, H> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         redraw_notify: Rc<Notify>,
@@ -71,6 +55,7 @@ impl<'a> DualButtons<'a> {
         right_str: &'a str,
         left_keys: &'a [char],
         right_keys: &'a [char],
+        handlers: H,
         left_style: Style,
         left_selected_style: Style,
         right_style: Style,
@@ -82,6 +67,7 @@ impl<'a> DualButtons<'a> {
             right_str,
             left_keys,
             right_keys,
+            handlers,
             left_style,
             left_selected_style,
             right_style,
@@ -138,70 +124,9 @@ impl<'a> DualButtons<'a> {
         self.left_draw_len_chars = left_space;
         self.right_draw_len_chars = right_space;
     }
-
-    pub fn handle_event_with_result(&mut self, event: &event::Event, is_focused: bool) -> DualButtonsEventStatus {
-        let key_event = match event {
-            event::Event::Key(key_event) if key_event.kind != KeyEventKind::Release => key_event,
-            _ => return DualButtonsEventStatus::Unhandled,
-        };
-
-        if let KeyCode::Char(c) = key_event.code {
-            if self.left_keys.contains(&c) {
-                return DualButtonsEventStatus::Handled(Button::Left);
-            }
-
-            if self.right_keys.contains(&c) {
-                return DualButtonsEventStatus::Handled(Button::Right);
-            }
-        }
-
-        if !is_focused {
-            return DualButtonsEventStatus::Unhandled;
-        }
-
-        let previous_focused_element = self.focused_element;
-
-        let result = match key_event.code {
-            KeyCode::Tab => {
-                self.focused_element = self.focused_element.other();
-                DualButtonsEventStatus::Handled(Button::None)
-            }
-            KeyCode::Left => {
-                if self.focused_element == FocusedElement::Left {
-                    DualButtonsEventStatus::PassFocus(self.get_focus_position(), PassFocusDirection::Left)
-                } else {
-                    self.focused_element = FocusedElement::Left;
-                    DualButtonsEventStatus::Handled(Button::None)
-                }
-            }
-            KeyCode::Right => {
-                if self.focused_element == FocusedElement::Right {
-                    DualButtonsEventStatus::PassFocus(self.get_focus_position(), PassFocusDirection::Right)
-                } else {
-                    self.focused_element = FocusedElement::Right;
-                    DualButtonsEventStatus::Handled(Button::None)
-                }
-            }
-            KeyCode::Enter => match self.focused_element {
-                FocusedElement::Left => DualButtonsEventStatus::Handled(Button::Left),
-                FocusedElement::Right => DualButtonsEventStatus::Handled(Button::Right),
-                FocusedElement::None => DualButtonsEventStatus::Unhandled,
-            },
-            KeyCode::Up => DualButtonsEventStatus::PassFocus(self.get_focus_position(), PassFocusDirection::Up),
-            KeyCode::Down => DualButtonsEventStatus::PassFocus(self.get_focus_position(), PassFocusDirection::Down),
-            KeyCode::Esc => DualButtonsEventStatus::PassFocus(self.get_focus_position(), PassFocusDirection::Away),
-            _ => DualButtonsEventStatus::Unhandled,
-        };
-
-        if self.focused_element != previous_focused_element {
-            self.redraw_notify.notify_one();
-        }
-
-        result
-    }
 }
 
-impl<'a> UIElement for DualButtons<'a> {
+impl<'a, H: DualButtonsHandler> UIElement for DualButtons<'a, H> {
     fn render(&mut self, area: Rect, buf: &mut Buffer) {
         self.resize_if_needed(area);
 
@@ -232,7 +157,72 @@ impl<'a> UIElement for DualButtons<'a> {
     }
 
     fn handle_event(&mut self, event: &event::Event, is_focused: bool) -> HandleEventStatus {
-        self.handle_event_with_result(event, is_focused).into()
+        let key_event = match event {
+            event::Event::Key(key_event) if key_event.kind != KeyEventKind::Release => key_event,
+            _ => return HandleEventStatus::Unhandled,
+        };
+
+        if let KeyCode::Char(c) = key_event.code {
+            if self.left_keys.contains(&c) {
+                self.handlers.on_left();
+                return HandleEventStatus::Handled;
+            }
+
+            if self.right_keys.contains(&c) {
+                self.handlers.on_right();
+                return HandleEventStatus::Handled;
+            }
+        }
+
+        if !is_focused {
+            return HandleEventStatus::Unhandled;
+        }
+
+        let previous_focused_element = self.focused_element;
+
+        let result = match key_event.code {
+            KeyCode::Tab => {
+                self.focused_element = self.focused_element.other();
+                HandleEventStatus::Handled
+            }
+            KeyCode::Left => {
+                if self.focused_element == FocusedElement::Left {
+                    HandleEventStatus::PassFocus(self.get_focus_position(), PassFocusDirection::Left)
+                } else {
+                    self.focused_element = FocusedElement::Left;
+                    HandleEventStatus::Handled
+                }
+            }
+            KeyCode::Right => {
+                if self.focused_element == FocusedElement::Right {
+                    HandleEventStatus::PassFocus(self.get_focus_position(), PassFocusDirection::Right)
+                } else {
+                    self.focused_element = FocusedElement::Right;
+                    HandleEventStatus::Handled
+                }
+            }
+            KeyCode::Enter => match self.focused_element {
+                FocusedElement::Left => {
+                    self.handlers.on_left();
+                    HandleEventStatus::Handled
+                }
+                FocusedElement::Right => {
+                    self.handlers.on_right();
+                    HandleEventStatus::Handled
+                }
+                FocusedElement::None => HandleEventStatus::Unhandled,
+            },
+            KeyCode::Up => HandleEventStatus::PassFocus(self.get_focus_position(), PassFocusDirection::Up),
+            KeyCode::Down => HandleEventStatus::PassFocus(self.get_focus_position(), PassFocusDirection::Down),
+            KeyCode::Esc => HandleEventStatus::PassFocus(self.get_focus_position(), PassFocusDirection::Away),
+            _ => HandleEventStatus::Unhandled,
+        };
+
+        if self.focused_element != previous_focused_element {
+            self.redraw_notify.notify_one();
+        }
+
+        result
     }
 
     fn receive_focus(&mut self, focus_position: (u16, u16)) -> bool {
