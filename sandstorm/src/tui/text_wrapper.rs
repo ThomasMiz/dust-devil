@@ -148,33 +148,36 @@ impl<'a> Iterator for WrapTextIter<'a> {
     type Item = &'a str;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let mut chars_iter = self.remaining_text.char_indices().take(self.wrap_width);
-        let mut last_space = None;
+        let mut chars_iter = self.remaining_text.char_indices();
 
-        let (mut last_index, mut last_char) = match chars_iter.next() {
-            Some((index, c)) => (index, c),
-            None => return None,
-        };
+        chars_iter.next()?;
 
-        for (index, c) in chars_iter {
-            if c.is_whitespace() {
-                last_space = Some((index, c));
+        let mut char_count = 1;
+        let mut split_at_index = 0;
+        loop {
+            match chars_iter.next() {
+                Some((index, c)) => {
+                    if c.is_whitespace() {
+                        split_at_index = index;
+                    }
+
+                    char_count += 1;
+                    if char_count >= self.wrap_width {
+                        if !chars_iter.next().is_some_and(|(_i, c)| !c.is_whitespace()) {
+                            split_at_index = index + c.len_utf8();
+                        }
+                        break;
+                    }
+                }
+                None => {
+                    split_at_index = self.remaining_text.len();
+                    break;
+                }
             }
-
-            (last_index, last_char) = (index, c);
         }
 
-        let (line_end_index, next_line_start_index) = match last_space {
-            _ if (last_index + last_char.len_utf8()) == self.remaining_text.len() => (self.remaining_text.len(), self.remaining_text.len()),
-            Some((space_index, space_char)) => (space_index, space_index + space_char.len_utf8()),
-            None => {
-                let idx = last_index + last_char.len_utf8();
-                (idx, idx)
-            }
-        };
-
-        let retval = &self.remaining_text[..line_end_index];
-        self.remaining_text = &self.remaining_text[next_line_start_index..].trim_start();
+        let retval = &self.remaining_text[..split_at_index];
+        self.remaining_text = &self.remaining_text[split_at_index..].trim_start();
 
         Some(retval)
     }

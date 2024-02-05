@@ -1,3 +1,4 @@
-pub mod centered_text_line;
+pub mod centered_text;
 pub mod dual_buttons;
+pub mod focus_cell;
 pub mod vertical_split;

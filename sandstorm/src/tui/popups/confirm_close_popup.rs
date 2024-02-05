@@ -7,39 +7,39 @@ use std::{
 use crossterm::event::{self, KeyCode, KeyEventKind};
 use ratatui::{
     buffer::Buffer,
-    layout::{Alignment, Rect},
+    layout::Rect,
     style::{Color, Style},
-    widgets::{
-        block::{Position, Title},
-        Block, BorderType, Borders, Clear, Padding, Widget,
-    },
+    widgets::{Clear, Widget},
 };
 use tokio::sync::{oneshot, Notify};
 
 use crate::tui::{
     elements::{
-        centered_text_line::CenteredTextLine,
+        centered_text::{CenteredText, CenteredTextLine},
         dual_buttons::{DualButtons, DualButtonsHandler},
+        focus_cell::FocusCell,
     },
-    text_wrapper::WrapTextIter,
-    ui_element::{HandleEventStatus, PassFocusDirection, UIElement},
+    popups::get_popup_block,
+    ui_element::{HandleEventStatus, UIElement},
 };
 
-use super::{get_close_title, BACKGROUND_COLOR, CANCEL_NO_KEYS, CANCEL_TITLE, CLOSE_KEY, YES_KEYS, YES_TITLE};
+use super::{CANCEL_NO_KEYS, CANCEL_TITLE, CLOSE_KEY, YES_KEYS, YES_TITLE};
+
+const BACKGROUND_COLOR: Color = Color::Blue;
+const SELECTED_BACKGROUND_COLOR: Color = Color::LightBlue;
 
 const TITLE: &str = "─Close";
-const PROMPT: &str = "Are you sure you want to close this terminal?";
+const PROMPT_MESSAGE: &str = "Are you sure you want to close this terminal?";
 const CLOSING_MESSAGE: &str = "Closing...";
 const POPUP_WIDTH: u16 = 34;
-const TEXT_STYLE: Style = Style::new();
+const PROMPT_STYLE: Style = Style::new();
 
 pub struct ConfirmClosePopup {
     screen_area: Rect,
     current_size: (u16, u16),
     inner: Rc<RefCell<Inner>>,
-    prompt_lines: Vec<CenteredTextLine<'static>>,
-    focused_element: FocusedElement,
-    dual_buttons: DualButtons<'static, ButtonHandler>,
+    prompt: CenteredText<'static>,
+    dual_buttons: FocusCell<DualButtons<'static, ButtonHandler>>,
     closing_text: CenteredTextLine<'static>,
 }
 
@@ -74,19 +74,9 @@ impl DualButtonsHandler for ButtonHandler {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum FocusedElement {
-    None,
-    DualButtons,
-}
-
 impl ConfirmClosePopup {
     pub fn new(redraw_notify: Rc<Notify>, shutdown_notify: Rc<Notify>) -> (Self, oneshot::Receiver<()>) {
         let (close_sender, close_receiver) = oneshot::channel();
-
-        let prompt_lines: Vec<_> = WrapTextIter::new(PROMPT, POPUP_WIDTH as usize)
-            .map(|line| CenteredTextLine::new(line, TEXT_STYLE))
-            .collect();
 
         let inner = Rc::new(RefCell::new(Inner {
             redraw_notify: Rc::clone(&redraw_notify),
@@ -103,18 +93,17 @@ impl ConfirmClosePopup {
             CANCEL_NO_KEYS,
             ButtonHandler::new(Rc::downgrade(&inner)),
             Style::new(),
-            Style::new().bg(Color::LightBlue),
+            Style::new().bg(SELECTED_BACKGROUND_COLOR),
             Style::new(),
-            Style::new().bg(Color::LightBlue),
+            Style::new().bg(SELECTED_BACKGROUND_COLOR),
         );
 
         let value = Self {
             screen_area: Rect::default(),
             current_size: (0, 0),
             inner,
-            prompt_lines,
-            focused_element: FocusedElement::None,
-            dual_buttons,
+            prompt: CenteredText::new(PROMPT_MESSAGE, PROMPT_STYLE),
+            dual_buttons: FocusCell::new(dual_buttons),
             closing_text: CenteredTextLine::new(CLOSING_MESSAGE, Style::reset()),
         };
 
@@ -142,9 +131,11 @@ impl Inner {
 
 impl UIElement for ConfirmClosePopup {
     fn render(&mut self, area: Rect, buf: &mut Buffer) {
+        self.prompt.resize_if_needed(POPUP_WIDTH - 4);
+
         self.screen_area = area;
         self.current_size.0 = area.width.min(POPUP_WIDTH);
-        self.current_size.1 = area.height.min(self.prompt_lines.len() as u16 + 5);
+        self.current_size.1 = area.height.min(self.prompt.lines_len() + 5);
 
         let popup_area = Rect::new(
             (area.width - self.current_size.0) / 2,
@@ -155,27 +146,14 @@ impl UIElement for ConfirmClosePopup {
 
         Clear.render(popup_area, buf);
 
-        let title = Title::from(TITLE).alignment(Alignment::Left).position(Position::Top);
-
-        let block = Block::new()
-            .borders(Borders::ALL)
-            .border_type(BorderType::Plain)
-            .style(Style::reset().bg(BACKGROUND_COLOR))
-            .padding(Padding::horizontal(1))
-            .title(title)
-            .title(get_close_title());
+        let block = get_popup_block(TITLE, BACKGROUND_COLOR, true);
 
         let inner_area = block.inner(popup_area);
         block.render(popup_area, buf);
 
-        for i in 0..(inner_area.height.min(self.prompt_lines.len() as u16)) {
-            let mut prompt_area = inner_area;
-            prompt_area.height = 1;
-            prompt_area.y += i;
-            self.prompt_lines[i as usize].render(prompt_area, buf);
-        }
+        self.prompt.render(inner_area, buf);
 
-        let buttons_y = inner_area.y + self.prompt_lines.len() as u16 + 1;
+        let buttons_y = inner_area.y + self.prompt.lines_len() + 1;
         if buttons_y < inner_area.bottom() {
             let mut buttons_area = inner_area;
             buttons_area.y = buttons_y;
@@ -197,15 +175,8 @@ impl UIElement for ConfirmClosePopup {
             return HandleEventStatus::Unhandled;
         }
 
-        let are_buttons_focused = is_focused && self.focused_element == FocusedElement::DualButtons;
-        match self.dual_buttons.handle_event(event, are_buttons_focused) {
-            HandleEventStatus::Unhandled => {}
-            HandleEventStatus::PassFocus(_focus_position, PassFocusDirection::Away) => {
-                self.focused_element = FocusedElement::None;
-                self.dual_buttons.focus_lost();
-                return HandleEventStatus::Handled;
-            }
-            other => return other,
+        if self.dual_buttons.handle_event(event, true) != HandleEventStatus::Unhandled {
+            return HandleEventStatus::Handled;
         }
 
         let key_event = match event {
@@ -214,20 +185,6 @@ impl UIElement for ConfirmClosePopup {
         };
 
         match key_event.code {
-            KeyCode::Left | KeyCode::Right | KeyCode::Up | KeyCode::Down | KeyCode::Tab => {
-                let focus_position_x = match key_event.code {
-                    KeyCode::Left => self.screen_area.right(),
-                    _ => self.screen_area.left(),
-                };
-
-                match self.dual_buttons.receive_focus((focus_position_x, 0)) {
-                    true => {
-                        self.focused_element = FocusedElement::DualButtons;
-                        HandleEventStatus::Handled
-                    }
-                    false => HandleEventStatus::Unhandled,
-                }
-            }
             KeyCode::Esc => {
                 self.inner.deref().borrow_mut().close();
                 HandleEventStatus::Handled
