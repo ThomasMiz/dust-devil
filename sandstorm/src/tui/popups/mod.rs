@@ -8,6 +8,7 @@ use ratatui::{
 };
 
 pub mod confirm_close_popup;
+pub mod shutdown_popup;
 
 const CLOSE_KEY: char = 'q';
 const CLOSE_TITLE: &str = "[close (q)]─";

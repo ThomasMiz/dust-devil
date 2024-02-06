@@ -1,4 +1,7 @@
-use std::{future, rc::Rc};
+use std::{
+    future,
+    rc::{Rc, Weak},
+};
 
 use crossterm::event::{self, KeyCode, KeyEventKind, MouseEventKind};
 use dust_devil_core::{
@@ -65,7 +68,7 @@ async fn receive_popup_close_index(focused_element: &mut FocusedElement) -> usiz
 
 impl<W: AsyncWrite + Unpin + 'static> UIManager<W> {
     pub fn new(
-        manager: Rc<MutexedSandstormRequestManager<W>>,
+        manager: Weak<MutexedSandstormRequestManager<W>>,
         metrics: Metrics,
         redraw_notify: Rc<Notify>,
         shutdown_notify: Rc<Notify>,
@@ -74,8 +77,13 @@ impl<W: AsyncWrite + Unpin + 'static> UIManager<W> {
         let (metrics_watch, _metrics_watch_receiver) = watch::channel(metrics);
         let (popup_sender, popup_receiver) = mpsc::unbounded_channel();
 
-        let menu_bar = MenuBar::new(manager.clone(), redraw_notify.clone(), buffer_size_watch.clone(), popup_sender);
-        let bottom_area = BottomArea::new(redraw_notify.clone());
+        let menu_bar = MenuBar::new(
+            Weak::clone(&manager),
+            Rc::clone(&redraw_notify),
+            buffer_size_watch.clone(),
+            popup_sender,
+        );
+        let bottom_area = BottomArea::new(Rc::clone(&redraw_notify));
 
         Self {
             redraw_notify,

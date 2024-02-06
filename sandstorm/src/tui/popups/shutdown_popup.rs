@@ -11,55 +11,60 @@ use ratatui::{
     style::{Color, Style},
     widgets::{Clear, Widget},
 };
-use tokio::sync::{oneshot, Notify};
-
-use crate::tui::{
-    elements::{
-        centered_text::{CenteredText, CenteredTextLine},
-        dual_buttons::{DualButtons, DualButtonsHandler},
-        focus_cell::FocusCell,
-    },
-    popups::get_popup_block,
-    ui_element::{HandleEventStatus, UIElement},
+use tokio::{
+    io::AsyncWrite,
+    sync::{oneshot, Notify},
 };
 
-use super::{CANCEL_NO_KEYS, CANCEL_TITLE, CLOSE_KEY, YES_KEYS, YES_TITLE};
+use crate::{
+    sandstorm::MutexedSandstormRequestManager,
+    tui::{
+        elements::{
+            centered_text::{CenteredText, CenteredTextLine},
+            dual_buttons::{DualButtons, DualButtonsHandler},
+            focus_cell::FocusCell,
+        },
+        ui_element::{HandleEventStatus, UIElement},
+    },
+};
 
-const BACKGROUND_COLOR: Color = Color::Blue;
-const SELECTED_BACKGROUND_COLOR: Color = Color::LightBlue;
+use super::{get_popup_block, CANCEL_NO_KEYS, CANCEL_TITLE, CLOSE_KEY, YES_KEYS, YES_TITLE};
 
-const TITLE: &str = "─Close";
-const PROMPT_MESSAGE: &str = "Are you sure you want to close this terminal?";
-const CLOSING_MESSAGE: &str = "Closing...";
+const BACKGROUND_COLOR: Color = Color::Red;
+const SELECTED_BACKGROUND_COLOR: Color = Color::LightRed;
+
+const TITLE: &str = "─Shutdown";
+const PROMPT_MESSAGE: &str = "Are you sure you want to shut down the server?";
+const SHUTDOWN_MESSAGE: &str = "Shutting down...";
 const POPUP_WIDTH: u16 = 34;
 const PROMPT_STYLE: Style = Style::new();
 
-pub struct ConfirmClosePopup {
+pub struct ShutdownPopup<W: AsyncWrite + Unpin + 'static> {
     current_size: (u16, u16),
-    inner: Rc<RefCell<Inner>>,
+    inner: Rc<RefCell<Inner<W>>>,
     prompt: CenteredText<'static>,
-    dual_buttons: FocusCell<DualButtons<'static, ButtonHandler>>,
-    closing_text: CenteredTextLine<'static>,
+    dual_buttons: FocusCell<DualButtons<'static, ButtonHandler<W>>>,
+    shutdown_text: CenteredTextLine<'static>,
 }
 
-struct Inner {
+struct Inner<W: AsyncWrite + Unpin + 'static> {
     redraw_notify: Rc<Notify>,
     popup_close_sender: Option<oneshot::Sender<()>>,
-    shutdown_notify: Rc<Notify>,
+    manager: Weak<MutexedSandstormRequestManager<W>>,
     shutting_down: bool,
 }
 
-struct ButtonHandler {
-    inner: Weak<RefCell<Inner>>,
+struct ButtonHandler<W: AsyncWrite + Unpin + 'static> {
+    inner: Weak<RefCell<Inner<W>>>,
 }
 
-impl ButtonHandler {
-    fn new(inner: Weak<RefCell<Inner>>) -> Self {
+impl<W: AsyncWrite + Unpin + 'static> ButtonHandler<W> {
+    fn new(inner: Weak<RefCell<Inner<W>>>) -> Self {
         Self { inner }
     }
 }
 
-impl DualButtonsHandler for ButtonHandler {
+impl<W: AsyncWrite + Unpin + 'static> DualButtonsHandler for ButtonHandler<W> {
     fn on_left(&mut self) {
         if let Some(rc) = self.inner.upgrade() {
             rc.deref().borrow_mut().on_yes_selected();
@@ -73,14 +78,14 @@ impl DualButtonsHandler for ButtonHandler {
     }
 }
 
-impl ConfirmClosePopup {
-    pub fn new(redraw_notify: Rc<Notify>, shutdown_notify: Rc<Notify>) -> (Self, oneshot::Receiver<()>) {
+impl<W: AsyncWrite + Unpin + 'static> ShutdownPopup<W> {
+    pub fn new(redraw_notify: Rc<Notify>, manager: Weak<MutexedSandstormRequestManager<W>>) -> (Self, oneshot::Receiver<()>) {
         let (close_sender, close_receiver) = oneshot::channel();
 
         let inner = Rc::new(RefCell::new(Inner {
             redraw_notify: Rc::clone(&redraw_notify),
             popup_close_sender: Some(close_sender),
-            shutdown_notify,
+            manager,
             shutting_down: false,
         }));
 
@@ -102,22 +107,27 @@ impl ConfirmClosePopup {
             inner,
             prompt: CenteredText::new(PROMPT_MESSAGE, PROMPT_STYLE),
             dual_buttons: FocusCell::new(dual_buttons),
-            closing_text: CenteredTextLine::new(CLOSING_MESSAGE, Style::new()),
+            shutdown_text: CenteredTextLine::new(SHUTDOWN_MESSAGE, Style::new()),
         };
 
         (value, close_receiver)
     }
 }
 
-impl Inner {
+impl<W: AsyncWrite + Unpin + 'static> Inner<W> {
     fn on_yes_selected(&mut self) {
         if self.shutting_down {
             return;
         }
 
-        self.shutdown_notify.notify_one();
-        self.shutting_down = true;
         self.redraw_notify.notify_one();
+        self.shutting_down = true;
+
+        if let Some(rc) = self.manager.upgrade() {
+            tokio::task::spawn_local(async move {
+                let _ = rc.shutdown_fn(|_| ()).await;
+            });
+        }
     }
 
     fn close(&mut self) {
@@ -127,7 +137,7 @@ impl Inner {
     }
 }
 
-impl UIElement for ConfirmClosePopup {
+impl<W: AsyncWrite + Unpin + 'static> UIElement for ShutdownPopup<W> {
     fn render(&mut self, area: Rect, buf: &mut Buffer) {
         self.prompt.resize_if_needed(POPUP_WIDTH - 4);
 
@@ -157,7 +167,7 @@ impl UIElement for ConfirmClosePopup {
             buttons_area.height = 1;
 
             match self.inner.deref().borrow().shutting_down {
-                true => self.closing_text.render(buttons_area, buf),
+                true => self.shutdown_text.render(buttons_area, buf),
                 false => self.dual_buttons.render(buttons_area, buf),
             }
         }

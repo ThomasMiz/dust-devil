@@ -1,6 +1,7 @@
 use std::{
     io::{stdout, Error, Write},
     rc::Rc,
+    time::Duration,
 };
 
 use crossterm::{
@@ -16,7 +17,11 @@ use ratatui::{
 
 use tokio::{io::AsyncWrite, select, sync::Notify};
 
-use crate::{printlnif, sandstorm::SandstormRequestManager, tui::event_receiver::StreamEventReceiver};
+use crate::{
+    printlnif,
+    sandstorm::{MutexedSandstormRequestManager, SandstormRequestManager},
+    tui::event_receiver::StreamEventReceiver,
+};
 
 use self::{event_receiver::TerminalEventReceiver, ui_manager::UIManager};
 
@@ -78,6 +83,25 @@ fn is_ctrl_c(key_event: &KeyEvent) -> bool {
         && key_event.kind == KeyEventKind::Press
 }
 
+async fn shutdown_task<W>(mut rc: Rc<MutexedSandstormRequestManager<W>>)
+where
+    W: AsyncWrite + Unpin + 'static,
+{
+    const RC_UNWRAP_RETRY_FREQUENCY: Duration = Duration::from_millis(200);
+
+    let manager = loop {
+        match Rc::try_unwrap(rc) {
+            Ok(mutexed) => break mutexed.into_inner(),
+            Err(rc_again) => {
+                rc = rc_again;
+                tokio::time::sleep(RC_UNWRAP_RETRY_FREQUENCY).await;
+            }
+        }
+    };
+
+    let _ = manager.shutdown_and_close().await;
+}
+
 async fn handle_interactive_inner<B, W>(
     terminal: &mut Terminal<B>,
     manager: SandstormRequestManager<W>,
@@ -96,13 +120,23 @@ where
 
     let mut terminal_event_receiver = TerminalEventReceiver::new();
 
-    let mut ui_manager = UIManager::new(manager, metrics, redraw_notify.clone(), shutdown_notify.clone());
+    let mut ui_manager = UIManager::new(
+        Rc::downgrade(&manager),
+        metrics,
+        Rc::clone(&redraw_notify),
+        Rc::clone(&shutdown_notify),
+    );
+    let mut manager = Some(manager);
 
     loop {
         select! {
             biased;
             _ = shutdown_notify.notified() => {
-                return Ok(()); // TODO: We're never shutting down the manager!
+                if let Some(rc) = manager.take() {
+                    tokio::task::spawn_local(async move {
+                        shutdown_task(rc).await;
+                    });
+                }
             }
             _ = ui_manager.background_process() => {}
             terminal_event_result = terminal_event_receiver.receive() => {

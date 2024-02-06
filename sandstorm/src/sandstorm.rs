@@ -454,6 +454,7 @@ where
         let mut handlers = self.handlers.deref().borrow_mut();
         handlers.shutdown_handlers.push_back(Box::new(f));
         handlers.remaining += 1;
+        handlers.was_shutdown = true;
         drop(handlers);
         ShutdownRequest.write(&mut self.writer).await
     }
@@ -641,6 +642,10 @@ pub struct MutexedSandstormRequestManager<W: AsyncWrite + Unpin> {
 }
 
 impl<W: AsyncWrite + Unpin> MutexedSandstormRequestManager<W> {
+    pub fn into_inner(self) -> SandstormRequestManager<W> {
+        self.inner.into_inner()
+    }
+
     pub async fn shutdown_fn<F: FnOnce(ShutdownResponse) + 'static>(&self, f: F) -> Result<(), Error> {
         let mut guard = self.inner.lock().await;
         guard.shutdown_fn(f).await?;

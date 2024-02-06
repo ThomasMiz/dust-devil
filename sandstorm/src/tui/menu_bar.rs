@@ -2,7 +2,7 @@ use std::{
     cell::RefCell,
     fmt::Write,
     ops::Deref,
-    rc::Rc,
+    rc::{Rc, Weak},
     time::{Duration, Instant},
 };
 
@@ -30,6 +30,7 @@ use crate::{
 };
 
 use super::{
+    popups::shutdown_popup::ShutdownPopup,
     ui_element::{HandleEventStatus, PassFocusDirection, UIElement},
     ui_manager::Popup,
 };
@@ -75,7 +76,7 @@ const fn get_ping_text_color(millis: u16) -> Color {
 }
 
 pub struct MenuBar<W: AsyncWrite + Unpin + 'static> {
-    manager: Rc<MutexedSandstormRequestManager<W>>,
+    manager: Weak<MutexedSandstormRequestManager<W>>,
     state: Rc<RefCell<MenuBarState>>,
     redraw_notify: Rc<Notify>,
     popup_sender: mpsc::UnboundedSender<Popup>,
@@ -152,7 +153,7 @@ impl FocusedElement {
 
 impl<W: AsyncWrite + Unpin + 'static> MenuBar<W> {
     pub fn new(
-        manager: Rc<MutexedSandstormRequestManager<W>>,
+        manager: Weak<MutexedSandstormRequestManager<W>>,
         redraw_notify: Rc<Notify>,
         buffer_size_watch: broadcast::Sender<u32>,
         popup_sender: mpsc::UnboundedSender<Popup>,
@@ -193,7 +194,10 @@ impl<W: AsyncWrite + Unpin + 'static> MenuBar<W> {
         }
     }
 
-    fn shutdown_selected(&self) {}
+    fn shutdown_selected(&self) {
+        let popup = ShutdownPopup::new(Rc::clone(&self.redraw_notify), Weak::clone(&self.manager));
+        let _ = self.popup_sender.send(popup.into());
+    }
 
     fn socsk5_selected(&self) {}
 
@@ -328,7 +332,7 @@ async fn buffer_size_loading_indicator(state: &Rc<RefCell<MenuBarState>>, redraw
 }
 
 async fn buffer_frame_background_task<W>(
-    manager: &Rc<MutexedSandstormRequestManager<W>>,
+    manager: &Weak<MutexedSandstormRequestManager<W>>,
     state: &Rc<RefCell<MenuBarState>>,
     redraw_notify: &Rc<Notify>,
     buffer_size_sender: broadcast::Sender<u32>,
@@ -337,11 +341,17 @@ async fn buffer_frame_background_task<W>(
 {
     let mut buffer_size_receiver = buffer_size_sender.subscribe();
 
-    let get_buffer_size_result = manager
+    let manager_rc = match manager.upgrade() {
+        Some(rc) => rc,
+        None => return,
+    };
+
+    let get_buffer_size_result = manager_rc
         .get_buffer_size_fn(move |response| {
             let _ = buffer_size_sender.send(response.0);
         })
         .await;
+    drop(manager_rc);
 
     if get_buffer_size_result.is_err() {
         return;
@@ -434,16 +444,20 @@ async fn ping_frame_loading_indicator(state: &Rc<RefCell<MenuBarState>>, redraw_
     }
 }
 
-async fn measure_ping<W: AsyncWrite + Unpin>(manager: &Rc<MutexedSandstormRequestManager<W>>) -> Result<u16, ()> {
+async fn measure_ping<W: AsyncWrite + Unpin>(manager: &Weak<MutexedSandstormRequestManager<W>>) -> Result<u16, ()> {
+    let manager_rc = manager.upgrade().ok_or(())?;
+
     let (tx, rx) = oneshot::channel();
     let start_time = Instant::now();
-    let meow_result = manager
+    let meow_result = manager_rc
         .meow_fn(move |_result| {
             let elapsed = start_time.elapsed();
             let elapsed_millis = elapsed.as_millis().min(u16::MAX as u128) as u16;
             let _ = tx.send(elapsed_millis);
         })
         .await;
+
+    drop(manager_rc);
 
     if meow_result.is_err() {
         return Err(());
@@ -453,7 +467,7 @@ async fn measure_ping<W: AsyncWrite + Unpin>(manager: &Rc<MutexedSandstormReques
 }
 
 async fn ping_frame_background_task<W>(
-    manager: &Rc<MutexedSandstormRequestManager<W>>,
+    manager: &Weak<MutexedSandstormRequestManager<W>>,
     state: &Rc<RefCell<MenuBarState>>,
     redraw_notify: &Rc<Notify>,
 ) where
@@ -491,7 +505,7 @@ async fn ping_frame_background_task<W>(
 }
 
 fn start_menu_bar_background_task<W>(
-    manager: &Rc<MutexedSandstormRequestManager<W>>,
+    manager: &Weak<MutexedSandstormRequestManager<W>>,
     state: &Rc<RefCell<MenuBarState>>,
     redraw_notify: &Rc<Notify>,
     buffer_size_sender: broadcast::Sender<u32>,
@@ -499,7 +513,7 @@ fn start_menu_bar_background_task<W>(
 where
     W: AsyncWrite + Unpin + 'static,
 {
-    let manager = Rc::clone(manager);
+    let manager = Weak::clone(manager);
     let state = Rc::clone(state);
     let redraw_notify = Rc::clone(redraw_notify);
 
