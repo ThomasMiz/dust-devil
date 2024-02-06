@@ -1,4 +1,4 @@
-use std::borrow::Cow;
+use std::{borrow::Cow, ops::Deref};
 
 use ratatui::{
     style::Style,
@@ -7,19 +7,13 @@ use ratatui::{
 
 use crate::utils::setnext_iter::SetNextIter;
 
+#[derive(Clone)]
 pub enum StaticString {
     Static(&'static str),
     Owned(String),
 }
 
 impl StaticString {
-    pub fn as_str(&self) -> &str {
-        match self {
-            Self::Static(s) => s,
-            Self::Owned(s) => s,
-        }
-    }
-
     pub fn trim_starting_whitespace(&mut self) {
         match self {
             Self::Static(s) => *s = s.trim_start(),
@@ -68,6 +62,22 @@ impl StaticString {
     }
 }
 
+impl Deref for StaticString {
+    type Target = str;
+    fn deref(&self) -> &Self::Target {
+        match self {
+            Self::Static(s) => s,
+            Self::Owned(s) => s,
+        }
+    }
+}
+
+impl Default for StaticString {
+    fn default() -> Self {
+        StaticString::Static("")
+    }
+}
+
 impl From<String> for StaticString {
     fn from(value: String) -> Self {
         StaticString::Owned(value)
@@ -99,7 +109,7 @@ where
     let mut iter = SetNextIter::new(text);
 
     'outer: while let Some((text, style)) = iter.next() {
-        let text_chars_iter = text.as_str().char_indices();
+        let text_chars_iter = text.char_indices();
 
         for (next_char_i, _next_char) in text_chars_iter {
             current_line_length += 1;
@@ -130,22 +140,25 @@ where
     }
 }
 
-pub struct WrapTextIter<'a> {
-    remaining_text: &'a str,
+pub struct WrapTextIter {
+    remaining_text: StaticString,
     wrap_width: usize,
 }
 
-impl<'a> WrapTextIter<'a> {
-    pub fn new(text: &'a str, wrap_width: usize) -> Self {
+impl WrapTextIter {
+    pub fn new(mut text: StaticString, wrap_width: usize) -> Self {
+        text.trim_starting_whitespace();
+        text.trim_trailing_whitespace();
+
         Self {
-            remaining_text: text.trim(),
+            remaining_text: text,
             wrap_width,
         }
     }
 }
 
-impl<'a> Iterator for WrapTextIter<'a> {
-    type Item = &'a str;
+impl Iterator for WrapTextIter {
+    type Item = StaticString;
 
     fn next(&mut self) -> Option<Self::Item> {
         let mut chars_iter = self.remaining_text.char_indices();
@@ -176,8 +189,9 @@ impl<'a> Iterator for WrapTextIter<'a> {
             }
         }
 
-        let retval = &self.remaining_text[..split_at_index];
-        self.remaining_text = &self.remaining_text[split_at_index..].trim_start();
+        let remaining_text = std::mem::take(&mut self.remaining_text);
+        let (retval, remaining) = remaining_text.split_at(split_at_index, true);
+        self.remaining_text = remaining;
 
         Some(retval)
     }

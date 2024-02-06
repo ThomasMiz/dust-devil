@@ -42,9 +42,9 @@ const PROMPT_STYLE: Style = Style::new();
 pub struct ShutdownPopup<W: AsyncWrite + Unpin + 'static> {
     current_size: (u16, u16),
     inner: Rc<RefCell<Inner<W>>>,
-    prompt: CenteredText<'static>,
-    dual_buttons: FocusCell<DualButtons<'static, ButtonHandler<W>>>,
-    shutdown_text: CenteredTextLine<'static>,
+    prompt: CenteredText,
+    dual_buttons: FocusCell<DualButtons<ButtonHandler<W>>>,
+    shutdown_text: CenteredTextLine,
 }
 
 struct Inner<W: AsyncWrite + Unpin + 'static> {
@@ -91,8 +91,8 @@ impl<W: AsyncWrite + Unpin + 'static> ShutdownPopup<W> {
 
         let dual_buttons = DualButtons::new(
             redraw_notify,
-            YES_TITLE,
-            CANCEL_TITLE,
+            YES_TITLE.into(),
+            CANCEL_TITLE.into(),
             YES_KEYS,
             CANCEL_NO_KEYS,
             ButtonHandler::new(Rc::downgrade(&inner)),
@@ -105,9 +105,9 @@ impl<W: AsyncWrite + Unpin + 'static> ShutdownPopup<W> {
         let value = Self {
             current_size: (0, 0),
             inner,
-            prompt: CenteredText::new(PROMPT_MESSAGE, PROMPT_STYLE),
+            prompt: CenteredText::new(PROMPT_MESSAGE.into(), PROMPT_STYLE),
             dual_buttons: FocusCell::new(dual_buttons),
-            shutdown_text: CenteredTextLine::new(SHUTDOWN_MESSAGE, Style::new()),
+            shutdown_text: CenteredTextLine::new(SHUTDOWN_MESSAGE.into(), Style::new()),
         };
 
         (value, close_receiver)

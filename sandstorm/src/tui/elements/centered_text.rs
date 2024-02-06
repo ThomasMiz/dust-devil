@@ -1,22 +1,24 @@
+use std::ops::Deref;
+
 use crossterm::event;
 use ratatui::{buffer::Buffer, layout::Rect, style::Style};
 
 use crate::tui::{
-    text_wrapper::WrapTextIter,
+    text_wrapper::{StaticString, WrapTextIter},
     ui_element::{HandleEventStatus, UIElement},
 };
 
 /// A single line of centered text.
-pub struct CenteredTextLine<'a> {
-    text: &'a str,
+pub struct CenteredTextLine {
+    text: StaticString,
     style: Style,
     text_len: u16,
     current_width: u16,
     text_draw_offset: u16,
 }
 
-impl<'a> CenteredTextLine<'a> {
-    pub fn new(text: &'a str, style: Style) -> Self {
+impl CenteredTextLine {
+    pub fn new(text: StaticString, style: Style) -> Self {
         Self {
             text_len: text.chars().count().min(u16::MAX as usize) as u16,
             style,
@@ -36,12 +38,12 @@ impl<'a> CenteredTextLine<'a> {
     }
 }
 
-impl<'a> UIElement for CenteredTextLine<'a> {
+impl UIElement for CenteredTextLine {
     fn render(&mut self, area: Rect, buf: &mut Buffer) {
         self.resize_if_needed(area);
 
         let width = self.text_len.min(self.current_width) as usize;
-        buf.set_stringn(area.x + self.text_draw_offset, area.y, self.text, width, self.style);
+        buf.set_stringn(area.x + self.text_draw_offset, area.y, self.text.deref(), width, self.style);
     }
 
     fn handle_event(&mut self, _event: &event::Event, _is_focused: bool) -> HandleEventStatus {
@@ -56,21 +58,21 @@ impl<'a> UIElement for CenteredTextLine<'a> {
 }
 
 /// Multiple automatically word-wrapping lines of centered text.
-pub struct CenteredText<'a> {
-    text: &'a str,
+pub struct CenteredText {
+    text: StaticString,
     style: Style,
-    lines: Vec<InnerLine<'a>>,
+    lines: Vec<InnerLine>,
     current_width: u16,
 }
 
-struct InnerLine<'a> {
-    text: &'a str,
+struct InnerLine {
+    text: StaticString,
     text_draw_width: u16,
     text_draw_offset: u16,
 }
 
-impl<'a> CenteredText<'a> {
-    pub fn new(text: &'a str, style: Style) -> Self {
+impl CenteredText {
+    pub fn new(text: StaticString, style: Style) -> Self {
         Self {
             text,
             style,
@@ -91,7 +93,7 @@ impl<'a> CenteredText<'a> {
         self.current_width = width;
         self.lines.clear();
 
-        for text in WrapTextIter::new(self.text, self.current_width as usize) {
+        for text in WrapTextIter::new(self.text.clone(), self.current_width as usize) {
             let text_len = text.chars().count().min(u16::MAX as usize) as u16;
             let text_draw_offset = self.current_width.saturating_sub(text_len) / 2;
             self.lines.push(InnerLine {
@@ -103,13 +105,14 @@ impl<'a> CenteredText<'a> {
     }
 }
 
-impl<'a> UIElement for CenteredText<'a> {
+impl UIElement for CenteredText {
     fn render(&mut self, area: Rect, buf: &mut Buffer) {
         self.resize_if_needed(area.width);
 
         for (i, line) in self.lines.iter_mut().take(area.height as usize).enumerate() {
             let draw_x = area.x + line.text_draw_offset;
-            buf.set_stringn(draw_x, area.y + i as u16, line.text, line.text_draw_width as usize, self.style);
+            let string = line.text.deref();
+            buf.set_stringn(draw_x, area.y + i as u16, string, line.text_draw_width as usize, self.style);
         }
     }
 

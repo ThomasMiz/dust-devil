@@ -1,10 +1,13 @@
-use std::rc::Rc;
+use std::{ops::Deref, rc::Rc};
 
 use crossterm::event::{self, KeyCode, KeyEventKind};
 use ratatui::{buffer::Buffer, layout::Rect, style::Style};
 use tokio::sync::Notify;
 
-use crate::tui::ui_element::{HandleEventStatus, PassFocusDirection, UIElement};
+use crate::tui::{
+    text_wrapper::StaticString,
+    ui_element::{HandleEventStatus, PassFocusDirection, UIElement},
+};
 
 pub trait DualButtonsHandler {
     fn on_left(&mut self);
@@ -12,12 +15,12 @@ pub trait DualButtonsHandler {
     fn on_right(&mut self);
 }
 
-pub struct DualButtons<'a, H: DualButtonsHandler> {
+pub struct DualButtons<H: DualButtonsHandler> {
     redraw_notify: Rc<Notify>,
-    left_str: &'a str,
-    right_str: &'a str,
-    left_keys: &'a [char],
-    right_keys: &'a [char],
+    left_str: StaticString,
+    right_str: StaticString,
+    left_keys: &'static [char],
+    right_keys: &'static [char],
     pub handlers: H,
     left_style: Style,
     left_selected_style: Style,
@@ -47,14 +50,14 @@ impl FocusedElement {
     }
 }
 
-impl<'a, H: DualButtonsHandler> DualButtons<'a, H> {
+impl<H: DualButtonsHandler> DualButtons<H> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         redraw_notify: Rc<Notify>,
-        left_str: &'a str,
-        right_str: &'a str,
-        left_keys: &'a [char],
-        right_keys: &'a [char],
+        left_str: StaticString,
+        right_str: StaticString,
+        left_keys: &'static [char],
+        right_keys: &'static [char],
         handlers: H,
         left_style: Style,
         left_selected_style: Style,
@@ -126,7 +129,7 @@ impl<'a, H: DualButtonsHandler> DualButtons<'a, H> {
     }
 }
 
-impl<'a, H: DualButtonsHandler> UIElement for DualButtons<'a, H> {
+impl<H: DualButtonsHandler> UIElement for DualButtons<H> {
     fn render(&mut self, area: Rect, buf: &mut Buffer) {
         self.resize_if_needed(area);
 
@@ -142,7 +145,7 @@ impl<'a, H: DualButtonsHandler> UIElement for DualButtons<'a, H> {
         buf.set_stringn(
             area.x + outer_space,
             area.y,
-            self.left_str,
+            self.left_str.deref(),
             self.left_draw_len_chars as usize,
             left_style,
         );
@@ -150,7 +153,7 @@ impl<'a, H: DualButtonsHandler> UIElement for DualButtons<'a, H> {
         buf.set_stringn(
             area.right() - outer_space - self.right_draw_len_chars,
             area.y,
-            self.right_str,
+            self.right_str.deref(),
             self.right_draw_len_chars as usize,
             right_style,
         );
