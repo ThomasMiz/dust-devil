@@ -3,6 +3,10 @@ use ratatui::{buffer::Buffer, layout::Rect};
 
 /// Represents a visual element on the UI.
 pub trait UIElement {
+    /// Indicates the area on the screen this [`UIElement`] will draw to. Future calls to `render`
+    /// will pass the same area as parameter.
+    fn resize(&mut self, area: Rect);
+
     /// A counterpart to [`Widget`][ratatui::widgets::Widget], but with `&mut self` instead of
     /// `self`.
     fn render(&mut self, area: Rect, buf: &mut Buffer);

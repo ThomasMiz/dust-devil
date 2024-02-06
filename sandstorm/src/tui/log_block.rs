@@ -77,17 +77,6 @@ impl LogBlock {
         self.redraw_notify.notify_one();
     }
 
-    fn resize_if_needed(&mut self, new_area: Rect) {
-        let previous_area = self.current_area;
-        self.current_area = new_area;
-
-        if previous_area.width == new_area.width && previous_area.height == new_area.height {
-            return;
-        }
-
-        self.lines.clear();
-    }
-
     fn get_focus_position(&self) -> (u16, u16) {
         (0, self.current_area.y + self.current_area.height / 2)
     }
@@ -479,9 +468,16 @@ impl LogBlock {
 }
 
 impl UIElement for LogBlock {
-    fn render(&mut self, area: Rect, buf: &mut Buffer) {
-        self.resize_if_needed(area);
+    fn resize(&mut self, area: Rect) {
+        let previous_area = self.current_area;
+        self.current_area = area;
 
+        if previous_area.width != area.width || previous_area.height != area.height {
+            self.lines.clear();
+        }
+    }
+
+    fn render(&mut self, area: Rect, buf: &mut Buffer) {
         let block = Block::new().border_type(BorderType::Plain).borders(Borders::ALL).title("─Logs");
         let logs_area = block.inner(area);
         block.render(area, buf);

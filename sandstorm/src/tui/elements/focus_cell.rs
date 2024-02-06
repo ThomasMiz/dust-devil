@@ -44,8 +44,12 @@ impl<I: UIElement> DerefMut for FocusCell<I> {
 }
 
 impl<I: UIElement> UIElement for FocusCell<I> {
-    fn render(&mut self, area: Rect, buf: &mut Buffer) {
+    fn resize(&mut self, area: Rect) {
         self.current_area = area;
+        self.inner.resize(area);
+    }
+
+    fn render(&mut self, area: Rect, buf: &mut Buffer) {
         self.inner.render(area, buf);
     }
 

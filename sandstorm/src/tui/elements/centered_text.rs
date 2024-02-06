@@ -27,8 +27,10 @@ impl CenteredTextLine {
             text_draw_offset: 0,
         }
     }
+}
 
-    fn resize_if_needed(&mut self, area: Rect) {
+impl UIElement for CenteredTextLine {
+    fn resize(&mut self, area: Rect) {
         if area.width == self.current_width {
             return;
         }
@@ -36,12 +38,8 @@ impl CenteredTextLine {
         self.current_width = area.width;
         self.text_draw_offset = self.current_width.saturating_sub(self.text_len) / 2
     }
-}
 
-impl UIElement for CenteredTextLine {
     fn render(&mut self, area: Rect, buf: &mut Buffer) {
-        self.resize_if_needed(area);
-
         let width = self.text_len.min(self.current_width) as usize;
         buf.set_stringn(area.x + self.text_draw_offset, area.y, self.text.deref(), width, self.style);
     }
@@ -85,11 +83,7 @@ impl CenteredText {
         self.lines.len() as u16
     }
 
-    pub fn resize_if_needed(&mut self, width: u16) {
-        if self.current_width == width {
-            return;
-        }
-
+    pub fn resize_with_width(&mut self, width: u16) {
         self.current_width = width;
         self.lines.clear();
 
@@ -106,9 +100,13 @@ impl CenteredText {
 }
 
 impl UIElement for CenteredText {
-    fn render(&mut self, area: Rect, buf: &mut Buffer) {
-        self.resize_if_needed(area.width);
+    fn resize(&mut self, area: Rect) {
+        if self.current_width != area.width {
+            self.resize_with_width(area.width);
+        }
+    }
 
+    fn render(&mut self, area: Rect, buf: &mut Buffer) {
         for (i, line) in self.lines.iter_mut().take(area.height as usize).enumerate() {
             let draw_x = area.x + line.text_draw_offset;
             let string = line.text.deref();

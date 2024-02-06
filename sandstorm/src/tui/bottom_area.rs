@@ -30,6 +30,10 @@ impl BottomArea {
 }
 
 impl UIElement for BottomArea {
+    fn resize(&mut self, area: Rect) {
+        self.log_block.resize(area);
+    }
+
     fn render(&mut self, area: Rect, buf: &mut Buffer) {
         self.log_block.render(area, buf);
     }

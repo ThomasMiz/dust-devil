@@ -7,7 +7,7 @@ use std::{
 use crossterm::event::{self, KeyCode, KeyEventKind};
 use ratatui::{
     buffer::Buffer,
-    layout::Rect,
+    layout::{Margin, Rect},
     style::{Color, Style},
     widgets::{Clear, Widget},
 };
@@ -138,12 +138,31 @@ impl<W: AsyncWrite + Unpin + 'static> Inner<W> {
 }
 
 impl<W: AsyncWrite + Unpin + 'static> UIElement for ShutdownPopup<W> {
-    fn render(&mut self, area: Rect, buf: &mut Buffer) {
-        self.prompt.resize_if_needed(POPUP_WIDTH - 4);
-
+    fn resize(&mut self, area: Rect) {
+        self.prompt.resize_with_width(POPUP_WIDTH - 4);
         self.current_size.0 = area.width.min(POPUP_WIDTH);
         self.current_size.1 = area.height.min(self.prompt.lines_len() + 5);
 
+        let popup_area = Rect::new(
+            (area.width - self.current_size.0) / 2,
+            (area.height - self.current_size.1) / 2,
+            self.current_size.0,
+            self.current_size.1,
+        );
+
+        let inner_area = popup_area.inner(&Margin::new(1, 1));
+
+        let buttons_y = inner_area.y + self.prompt.lines_len() + 1;
+        if buttons_y < inner_area.bottom() {
+            let mut buttons_area = inner_area;
+            buttons_area.y = buttons_y;
+            buttons_area.height = 1;
+            self.shutdown_text.resize(buttons_area);
+            self.dual_buttons.resize(buttons_area);
+        }
+    }
+
+    fn render(&mut self, area: Rect, buf: &mut Buffer) {
         let popup_area = Rect::new(
             (area.width - self.current_size.0) / 2,
             (area.height - self.current_size.1) / 2,
@@ -158,7 +177,9 @@ impl<W: AsyncWrite + Unpin + 'static> UIElement for ShutdownPopup<W> {
         let inner_area = block.inner(popup_area);
         block.render(popup_area, buf);
 
-        self.prompt.render(inner_area, buf);
+        let mut prompt_area = inner_area.inner(&Margin::new(1, 0));
+        prompt_area.height = self.prompt.lines_len().min(prompt_area.height);
+        self.prompt.render(prompt_area, buf);
 
         let buttons_y = inner_area.y + self.prompt.lines_len() + 1;
         if buttons_y < inner_area.bottom() {

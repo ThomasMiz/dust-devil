@@ -217,11 +217,7 @@ impl<W: AsyncWrite + Unpin + 'static> Drop for MenuBar<W> {
 }
 
 impl MenuBarState {
-    fn resize_if_needed(&mut self, new_area: Rect) {
-        if self.current_area == new_area && !self.buffer_size_was_modified && !self.ping_was_modified {
-            return;
-        }
-
+    fn do_resize(&mut self, new_area: Rect) {
         self.current_area = new_area;
         self.buffer_size_was_modified = false;
         self.ping_was_modified = false;
@@ -535,9 +531,15 @@ fn render_frame_chunk(block: Block, label: &str, area: Rect, style: Style, buf: 
 }
 
 impl<W: AsyncWrite + Unpin + 'static> UIElement for MenuBar<W> {
+    fn resize(&mut self, area: Rect) {
+        self.state.deref().borrow_mut().do_resize(area);
+    }
+
     fn render(&mut self, area: Rect, buf: &mut Buffer) {
         let mut state = self.state.deref().borrow_mut();
-        state.resize_if_needed(area);
+        if state.buffer_size_was_modified || state.ping_was_modified {
+            state.do_resize(area);
+        }
 
         const FRAME_CHUNK_BORDER_SET: symbols::border::Set = symbols::border::Set {
             bottom_left: symbols::line::DOUBLE.horizontal_up,

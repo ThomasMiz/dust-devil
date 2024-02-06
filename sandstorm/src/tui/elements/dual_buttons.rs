@@ -91,8 +91,10 @@ impl<H: DualButtonsHandler> DualButtons<H> {
             FocusedElement::Right => (self.current_x + self.current_width * 3 / 4, self.current_y),
         }
     }
+}
 
-    pub fn resize_if_needed(&mut self, area: Rect) {
+impl<H: DualButtonsHandler> UIElement for DualButtons<H> {
+    fn resize(&mut self, area: Rect) {
         self.current_x = area.x;
         self.current_y = area.y;
         if area.width == self.current_width {
@@ -127,12 +129,8 @@ impl<H: DualButtonsHandler> DualButtons<H> {
         self.left_draw_len_chars = left_space;
         self.right_draw_len_chars = right_space;
     }
-}
 
-impl<H: DualButtonsHandler> UIElement for DualButtons<H> {
     fn render(&mut self, area: Rect, buf: &mut Buffer) {
-        self.resize_if_needed(area);
-
         let empty_space = self.current_width - self.left_draw_len_chars - self.right_draw_len_chars;
         let outer_space = empty_space / 3;
 

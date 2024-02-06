@@ -40,6 +40,26 @@ impl<U: UIElement, L: UIElement> VerticalSplit<U, L> {
 }
 
 impl<U: UIElement, L: UIElement> UIElement for VerticalSplit<U, L> {
+    fn resize(&mut self, area: Rect) {
+        let previous_area = self.current_area;
+        self.current_area = area;
+
+        if self.current_area.width != previous_area.width
+            || self.current_area.height < self.upper_height
+            || previous_area.height < self.upper_height
+        {
+            let mut upper_area = area;
+            upper_area.height = upper_area.height.min(self.upper_height);
+            self.upper.resize(upper_area);
+        }
+
+        let upper_height_plus_space = self.upper_height + self.space_between;
+        let mut lower_area = area;
+        lower_area.y += upper_height_plus_space;
+        lower_area.height = lower_area.height.saturating_sub(upper_height_plus_space);
+        self.lower.resize(lower_area);
+    }
+
     fn render(&mut self, area: Rect, buf: &mut Buffer) {
         let mut upper_area = area;
         upper_area.height = upper_area.height.min(self.upper_height);

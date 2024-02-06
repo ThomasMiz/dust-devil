@@ -99,6 +99,8 @@ impl<W: AsyncWrite + Unpin + 'static> UIManager<W> {
     }
 
     fn push_popup(&mut self, mut popup: Popup) {
+        popup.element.resize(self.current_area);
+
         if let FocusedElement::Popup(popups) = &mut self.focused_element {
             if let Some(last) = popups.last_mut() {
                 last.element.focus_lost();
@@ -323,21 +325,36 @@ impl<W: AsyncWrite + Unpin + 'static> UIManager<W> {
     }
 
     pub fn draw(&mut self, frame: &mut Frame) {
+        let previous_area = self.current_area;
         self.current_area = frame.size();
 
-        let mut menu_area = frame.size();
+        let mut menu_area = self.current_area;
         menu_area.height = menu_area.height.min(2);
-        self.menu_bar.render(menu_area, frame.buffer_mut());
 
-        let mut bottom_area = frame.size();
+        let mut bottom_area = self.current_area;
         bottom_area.y += 2;
         bottom_area.height = bottom_area.height.saturating_sub(2);
 
+        if self.current_area != previous_area {
+            if self.current_area.width != previous_area.width || self.current_area.height < 2 || previous_area.height < 2 {
+                self.menu_bar.resize(menu_area);
+            }
+
+            self.bottom_area.resize(bottom_area);
+
+            if let FocusedElement::Popup(popups) = &mut self.focused_element {
+                for popup in popups {
+                    popup.element.resize(self.current_area);
+                }
+            }
+        }
+
+        self.menu_bar.render(menu_area, frame.buffer_mut());
         self.bottom_area.render(bottom_area, frame.buffer_mut());
 
         if let FocusedElement::Popup(popups) = &mut self.focused_element {
             for popup in popups {
-                popup.element.render(frame.size(), frame.buffer_mut());
+                popup.element.render(self.current_area, frame.buffer_mut());
             }
         }
     }
