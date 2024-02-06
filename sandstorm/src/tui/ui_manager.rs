@@ -1,9 +1,6 @@
-use std::{
-    future,
-    rc::{Rc, Weak},
-};
+use std::rc::{Rc, Weak};
 
-use crossterm::event::{self, KeyCode, KeyEventKind, MouseEventKind};
+use crossterm::event::{self, KeyCode, KeyEventKind};
 use dust_devil_core::{
     logging::{self, EventData},
     sandstorm::Metrics,
@@ -19,9 +16,10 @@ use crate::{sandstorm::MutexedSandstormRequestManager, utils::futures::recv_many
 
 use super::{
     bottom_area::BottomArea,
+    elements::{focus_cell::FocusCell, vertical_split::VerticalSplit},
     menu_bar::MenuBar,
     popups::confirm_close_popup::ConfirmClosePopup,
-    ui_element::{HandleEventStatus, PassFocusDirection, UIElement},
+    ui_element::{HandleEventStatus, UIElement},
 };
 
 pub struct UIManager<W: AsyncWrite + Unpin + 'static> {
@@ -30,10 +28,9 @@ pub struct UIManager<W: AsyncWrite + Unpin + 'static> {
     shutdown_notify: Rc<Notify>,
     buffer_size_watch: broadcast::Sender<u32>,
     metrics_watch: watch::Sender<Metrics>,
-    menu_bar: MenuBar<W>,
-    bottom_area: BottomArea,
-    focused_element: FocusedElement,
+    root: FocusCell<VerticalSplit<MenuBar<W>, BottomArea>>,
     popup_receiver: mpsc::UnboundedReceiver<Popup>,
+    popups: Vec<Popup>,
 }
 
 pub struct Popup {
@@ -50,20 +47,9 @@ impl<T: UIElement + 'static> From<(T, oneshot::Receiver<()>)> for Popup {
     }
 }
 
-enum FocusedElement {
-    None,
-    MenuBar,
-    BottomArea,
-    Popup(Vec<Popup>),
-}
-
-async fn receive_popup_close_index(focused_element: &mut FocusedElement) -> usize {
-    if let FocusedElement::Popup(popups) = focused_element {
-        let (_, recv_index) = recv_many_with_index(popups, |popup| &mut popup.close_receiver).await;
-        recv_index
-    } else {
-        future::pending().await
-    }
+async fn receive_popup_close_index(popups: &mut [Popup]) -> usize {
+    let (_, recv_index) = recv_many_with_index(popups, |popup| &mut popup.close_receiver).await;
+    recv_index
 }
 
 impl<W: AsyncWrite + Unpin + 'static> UIManager<W> {
@@ -91,34 +77,22 @@ impl<W: AsyncWrite + Unpin + 'static> UIManager<W> {
             shutdown_notify,
             buffer_size_watch,
             metrics_watch,
-            menu_bar,
-            bottom_area,
-            focused_element: FocusedElement::None,
+            root: FocusCell::new(VerticalSplit::new(menu_bar, bottom_area, 2, 0)),
             popup_receiver,
+            popups: Vec::new(),
         }
     }
 
     fn push_popup(&mut self, mut popup: Popup) {
-        popup.element.resize(self.current_area);
-
-        if let FocusedElement::Popup(popups) = &mut self.focused_element {
-            if let Some(last) = popups.last_mut() {
-                last.element.focus_lost();
-            }
-            popup.element.receive_focus((0, 0));
-            popups.push(popup);
+        if let Some(last) = self.popups.last_mut() {
+            last.element.focus_lost();
         } else {
-            match self.focused_element {
-                FocusedElement::BottomArea => self.bottom_area.focus_lost(),
-                FocusedElement::MenuBar => self.menu_bar.focus_lost(),
-                _ => {}
-            };
-
-            let mut popups = Vec::with_capacity(4);
-            popup.element.receive_focus((0, 0));
-            popups.push(popup);
-            self.focused_element = FocusedElement::Popup(popups);
+            self.root.focus_lost();
         }
+
+        popup.element.receive_focus((0, 0));
+        popup.element.resize(self.current_area);
+        self.popups.push(popup);
 
         self.redraw_notify.notify_one();
     }
@@ -130,20 +104,13 @@ impl<W: AsyncWrite + Unpin + 'static> UIManager<W> {
                     self.push_popup(p);
                 }
             }
-            popup_index = receive_popup_close_index(&mut self.focused_element) => {
-                let popups = match &mut self.focused_element {
-                    FocusedElement::Popup(p) => p,
-                    _ => unreachable!(),
-                };
-
-                let is_last = popup_index + 1 == popups.len();
-                popups.remove(popup_index);
-                if let Some(last) = popups.last_mut() {
+            popup_index = receive_popup_close_index(&mut self.popups) => {
+                let is_last = popup_index + 1 == self.popups.len();
+                self.popups.remove(popup_index);
+                if let Some(last) = self.popups.last_mut() {
                     if is_last {
                         last.element.receive_focus((0, 0));
                     }
-                } else {
-                    self.focused_element = FocusedElement::None;
                 }
 
                 self.redraw_notify.notify_one();
@@ -152,132 +119,24 @@ impl<W: AsyncWrite + Unpin + 'static> UIManager<W> {
     }
 
     pub fn handle_terminal_event(&mut self, event: &event::Event) {
-        if self.handle_termina_event_internal(event) {
-            return;
-        }
-
-        // If the event was not handled and Esc was pressed, exit the TUI.
-        if let event::Event::Key(key_event) = event {
-            if key_event.code == KeyCode::Esc && key_event.kind != KeyEventKind::Release {
-                self.push_popup(ConfirmClosePopup::new(self.redraw_notify.clone(), self.shutdown_notify.clone()).into());
-            }
-        }
-    }
-
-    fn handle_termina_event_internal(&mut self, event: &event::Event) -> bool {
-        match &mut self.focused_element {
-            FocusedElement::MenuBar => {
-                let status = self.menu_bar.handle_event(event, true);
-
-                match status {
-                    HandleEventStatus::Handled => true,
-                    HandleEventStatus::Unhandled => self.bottom_area.handle_event(event, false) == HandleEventStatus::Handled,
-                    HandleEventStatus::PassFocus(focus_position, direction) => {
-                        match direction {
-                            PassFocusDirection::Forward | PassFocusDirection::Down => {
-                                if self.bottom_area.receive_focus(focus_position) {
-                                    self.menu_bar.focus_lost();
-                                    self.focused_element = FocusedElement::BottomArea;
-                                }
-                            }
-                            PassFocusDirection::Left | PassFocusDirection::Right | PassFocusDirection::Up => {}
-                            PassFocusDirection::Away => {
-                                self.menu_bar.focus_lost();
-                                self.focused_element = FocusedElement::None;
-                            }
-                        }
-
-                        true
+        if self.popups.is_empty() {
+            if self.root.handle_event(event, true) == HandleEventStatus::Unhandled {
+                if let event::Event::Key(key_event) = event {
+                    if key_event.code == KeyCode::Esc && key_event.kind != KeyEventKind::Release {
+                        let redraw_notify = Rc::clone(&self.redraw_notify);
+                        let shutdown_notify = Rc::clone(&self.shutdown_notify);
+                        self.push_popup(ConfirmClosePopup::new(redraw_notify, shutdown_notify).into());
                     }
                 }
             }
-            FocusedElement::BottomArea => {
-                let status = self.bottom_area.handle_event(event, true);
-
-                match status {
-                    HandleEventStatus::Handled => true,
-                    HandleEventStatus::Unhandled => self.menu_bar.handle_event(event, false) == HandleEventStatus::Handled,
-                    HandleEventStatus::PassFocus(focus_position, direction) => {
-                        match direction {
-                            PassFocusDirection::Forward | PassFocusDirection::Up => {
-                                if self.menu_bar.receive_focus(focus_position) {
-                                    self.bottom_area.focus_lost();
-                                    self.focused_element = FocusedElement::MenuBar
-                                }
-                            }
-                            PassFocusDirection::Left | PassFocusDirection::Right | PassFocusDirection::Down => {}
-                            PassFocusDirection::Away => {
-                                self.bottom_area.focus_lost();
-                                self.focused_element = FocusedElement::None;
-                            }
-                        }
-                        true
-                    }
+        } else {
+            let mut is_focused = true;
+            for popup in self.popups.iter_mut().rev() {
+                if popup.element.handle_event(event, is_focused) != HandleEventStatus::Unhandled {
+                    break;
                 }
+                is_focused = false;
             }
-            FocusedElement::Popup(popups) => {
-                let mut is_focused = true;
-                for popup in popups.iter_mut().rev() {
-                    if popup.element.handle_event(event, is_focused) != HandleEventStatus::Unhandled {
-                        break;
-                    }
-                    is_focused = false;
-                }
-
-                true
-            }
-            FocusedElement::None => match event {
-                event::Event::Key(key_event) => {
-                    let menubar_receives_focus = match key_event.code {
-                        KeyCode::Left => Some((true, (self.current_area.width, 0))),
-                        KeyCode::Right | KeyCode::Tab => Some((true, (0, 0))),
-                        KeyCode::Up => Some((false, (0, self.current_area.height))),
-                        KeyCode::Down => Some((true, (0, 0))),
-                        _ => None,
-                    };
-
-                    match menubar_receives_focus {
-                        Some((true, focus_position)) => {
-                            if self.menu_bar.receive_focus(focus_position) {
-                                self.focused_element = FocusedElement::MenuBar;
-                                true
-                            } else if self.bottom_area.receive_focus(focus_position) {
-                                self.focused_element = FocusedElement::BottomArea;
-                                true
-                            } else {
-                                false
-                            }
-                        }
-                        Some((false, focus_position)) => {
-                            if self.bottom_area.receive_focus(focus_position) {
-                                self.focused_element = FocusedElement::BottomArea;
-                                true
-                            } else if self.menu_bar.receive_focus(focus_position) {
-                                self.focused_element = FocusedElement::MenuBar;
-                                true
-                            } else {
-                                false
-                            }
-                        }
-                        None => {
-                            self.menu_bar.handle_event(event, false) == HandleEventStatus::Handled
-                                || self.bottom_area.handle_event(event, false) == HandleEventStatus::Handled
-                        }
-                    }
-                }
-                event::Event::Mouse(mouse_event) => {
-                    if (mouse_event.kind == MouseEventKind::ScrollUp || mouse_event.kind == MouseEventKind::ScrollDown)
-                        && self.bottom_area.receive_focus((mouse_event.column, mouse_event.row))
-                    {
-                        self.focused_element = FocusedElement::BottomArea;
-                        self.bottom_area.handle_event(event, true);
-                        true
-                    } else {
-                        false
-                    }
-                }
-                _ => false,
-            },
         }
     }
 
@@ -321,41 +180,25 @@ impl<W: AsyncWrite + Unpin + 'static> UIManager<W> {
             _ => {}
         }
 
-        self.bottom_area.new_stream_event(event);
+        self.root.lower.new_stream_event(event);
     }
 
     pub fn draw(&mut self, frame: &mut Frame) {
         let previous_area = self.current_area;
         self.current_area = frame.size();
 
-        let mut menu_area = self.current_area;
-        menu_area.height = menu_area.height.min(2);
-
-        let mut bottom_area = self.current_area;
-        bottom_area.y += 2;
-        bottom_area.height = bottom_area.height.saturating_sub(2);
-
         if self.current_area != previous_area {
-            if self.current_area.width != previous_area.width || self.current_area.height < 2 || previous_area.height < 2 {
-                self.menu_bar.resize(menu_area);
-            }
+            self.root.resize(self.current_area);
 
-            self.bottom_area.resize(bottom_area);
-
-            if let FocusedElement::Popup(popups) = &mut self.focused_element {
-                for popup in popups {
-                    popup.element.resize(self.current_area);
-                }
+            for popup in self.popups.iter_mut() {
+                popup.element.resize(self.current_area);
             }
         }
 
-        self.menu_bar.render(menu_area, frame.buffer_mut());
-        self.bottom_area.render(bottom_area, frame.buffer_mut());
+        self.root.render(self.current_area, frame.buffer_mut());
 
-        if let FocusedElement::Popup(popups) = &mut self.focused_element {
-            for popup in popups {
-                popup.element.render(self.current_area, frame.buffer_mut());
-            }
+        for popup in self.popups.iter_mut() {
+            popup.element.render(self.current_area, frame.buffer_mut());
         }
     }
 }

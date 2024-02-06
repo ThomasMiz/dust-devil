@@ -17,15 +17,6 @@ enum FocusedElement {
     Lower,
 }
 
-impl FocusedElement {
-    fn other(self) -> Self {
-        match self {
-            Self::Upper => Self::Lower,
-            Self::Lower => Self::Upper,
-        }
-    }
-}
-
 impl<U: UIElement, L: UIElement> VerticalSplit<U, L> {
     pub fn new(upper: U, lower: L, upper_height: u16, space_between: u16) -> Self {
         Self {
@@ -91,6 +82,7 @@ impl<U: UIElement, L: UIElement> UIElement for VerticalSplit<U, L> {
                     }
                     HandleEventStatus::PassFocus(focus_position, PassFocusDirection::Down | PassFocusDirection::Forward) => {
                         if self.lower.receive_focus(focus_position) {
+                            self.upper.focus_lost();
                             self.focused_element = FocusedElement::Lower;
                             status = HandleEventStatus::Handled;
                         }
@@ -109,6 +101,7 @@ impl<U: UIElement, L: UIElement> UIElement for VerticalSplit<U, L> {
                     }
                     HandleEventStatus::PassFocus(focus_position, PassFocusDirection::Up | PassFocusDirection::Forward) => {
                         if self.upper.receive_focus(focus_position) {
+                            self.lower.focus_lost();
                             self.focused_element = FocusedElement::Upper;
                             status = HandleEventStatus::Handled;
                         }
