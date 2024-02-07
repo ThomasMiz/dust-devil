@@ -262,7 +262,7 @@ Authentication methods popup:
 │      method to toggle it.      │
 │                                │
 └────────────────────[close (q)]─┘
-^ The scroll bar is truly unnecessary, but the code for this types of lists will be shared anyway
+^ The scroll bar isnt truly unnecessary, but the code for this types of lists will be shared anyway
 
 When a method is selected:
 

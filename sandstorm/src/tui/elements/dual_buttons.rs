@@ -5,6 +5,7 @@ use ratatui::{buffer::Buffer, layout::Rect, style::Style};
 use tokio::sync::Notify;
 
 use crate::tui::{
+    popups::PopupContent,
     text_wrapper::StaticString,
     ui_element::{HandleEventStatus, PassFocusDirection, UIElement},
 };
@@ -19,6 +20,8 @@ pub struct DualButtons<H: DualButtonsHandler> {
     redraw_notify: Rc<Notify>,
     left_str: StaticString,
     right_str: StaticString,
+    left_len_chars: u16,
+    right_len_chars: u16,
     left_keys: &'static [char],
     right_keys: &'static [char],
     pub handlers: H,
@@ -64,10 +67,15 @@ impl<H: DualButtonsHandler> DualButtons<H> {
         right_style: Style,
         right_selected_style: Style,
     ) -> Self {
+        let left_len_chars = left_str.chars().count().min(u16::MAX as usize) as u16;
+        let right_len_chars = right_str.chars().count().min(u16::MAX as usize) as u16;
+
         Self {
             redraw_notify,
             left_str,
             right_str,
+            left_len_chars,
+            right_len_chars,
             left_keys,
             right_keys,
             handlers,
@@ -103,14 +111,11 @@ impl<H: DualButtonsHandler> UIElement for DualButtons<H> {
 
         self.current_width = area.width;
 
-        let left_len_chars = self.left_str.chars().count().min(u16::MAX as usize) as u16;
-        let right_len_chars = self.right_str.chars().count().min(u16::MAX as usize) as u16;
-
         let mut available_text_space = self.current_width.saturating_sub(1);
         let mut left_space = 0;
         let mut right_space = 0;
 
-        while available_text_space != 0 && left_space != left_len_chars && right_space != right_len_chars {
+        while available_text_space != 0 && left_space != self.left_len_chars && right_space != self.right_len_chars {
             if left_space >= right_space {
                 left_space += 1;
             } else {
@@ -120,10 +125,10 @@ impl<H: DualButtonsHandler> UIElement for DualButtons<H> {
             available_text_space -= 1;
         }
 
-        if left_space != left_len_chars {
-            left_space = (left_space + available_text_space).min(left_len_chars);
-        } else if right_space != right_len_chars {
-            right_space = (right_space + available_text_space).min(right_len_chars);
+        if left_space != self.left_len_chars {
+            left_space = (left_space + available_text_space).min(self.left_len_chars);
+        } else if right_space != self.right_len_chars {
+            right_space = (right_space + available_text_space).min(self.right_len_chars);
         }
 
         self.left_draw_len_chars = left_space;
@@ -242,5 +247,11 @@ impl<H: DualButtonsHandler> UIElement for DualButtons<H> {
             self.focused_element = FocusedElement::None;
             self.redraw_notify.notify_one();
         }
+    }
+}
+
+impl<H: DualButtonsHandler> PopupContent for DualButtons<H> {
+    fn begin_resize(&mut self, _width: u16, _height: u16) -> (u16, u16) {
+        (self.left_len_chars + self.right_len_chars + 3, 1)
     }
 }

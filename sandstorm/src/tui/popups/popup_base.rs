@@ -15,7 +15,11 @@ use crate::tui::{
     ui_element::{HandleEventStatus, UIElement},
 };
 
-use super::{get_popup_block, ConstrainedPopupContent, PopupContent, CLOSE_KEY};
+use super::{
+    get_popup_block,
+    size_constraint::{ConstrainedPopupContent, SizeConstraint},
+    PopupContent, CLOSE_KEY,
+};
 
 pub trait PopupBaseController {
     fn redraw_notify(&self);
@@ -33,10 +37,6 @@ pub struct PopupBase<C: PopupBaseController, T: PopupContent> {
     content: ConstrainedPopupContent<FocusCell<T>>,
 }
 
-pub struct PopupBaseSimpleController {
-    inner: RefCell<PopupBaseControllerInner>,
-}
-
 pub struct PopupBaseControllerInner {
     redraw_notify: Rc<Notify>,
     popup_close_sender: Option<oneshot::Sender<()>>,
@@ -48,7 +48,7 @@ impl PopupBaseControllerInner {
         self.redraw_notify.notify_one();
     }
 
-    pub fn close(&mut self) {
+    pub fn close_popup(&mut self) {
         if let Some(close_sender) = self.popup_close_sender.take() {
             let _ = close_sender.send(());
         }
@@ -66,6 +66,10 @@ impl PopupBaseControllerInner {
     }
 }
 
+pub struct PopupBaseSimpleController {
+    inner: RefCell<PopupBaseControllerInner>,
+}
+
 impl PopupBaseSimpleController {
     pub fn new(inner: PopupBaseControllerInner) -> Self {
         Self {
@@ -80,7 +84,7 @@ impl PopupBaseController for PopupBaseSimpleController {
     }
 
     fn close_popup(&self) {
-        self.inner.borrow_mut().close();
+        self.inner.borrow_mut().close_popup();
     }
 
     fn set_closable(&self, closable: bool) {
@@ -100,7 +104,7 @@ impl<C: PopupBaseController, T: PopupContent> PopupBase<C, T> {
         border_color: Color,
         background_color: Color,
         has_close_title: bool,
-        size_constraint: (u16, u16),
+        size_constraint: SizeConstraint,
         controller_builder: CF,
         content_builder: TF,
     ) -> (Self, oneshot::Receiver<()>)

@@ -91,11 +91,7 @@ impl<I: UIElement> UIElement for FocusCell<I> {
         }
     }
 
-    fn receive_focus(&mut self, focus_position: (u16, u16)) -> bool {
-        if self.inner.receive_focus(focus_position) {
-            self.is_inner_focused = true;
-        }
-
+    fn receive_focus(&mut self, _focus_position: (u16, u16)) -> bool {
         true
     }
 

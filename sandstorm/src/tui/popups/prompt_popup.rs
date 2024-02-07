@@ -16,6 +16,7 @@ use crate::tui::{
 
 use super::{
     popup_base::{PopupBase, PopupBaseController, PopupBaseControllerInner},
+    size_constraint::SizeConstraint,
     PopupContent,
 };
 
@@ -34,7 +35,7 @@ impl<C: PopupBaseController, T: PopupContent> PromptPopup<C, T> {
         border_color: Color,
         background_color: Color,
         has_close_title: bool,
-        size_constraint: (u16, u16),
+        size_constraint: SizeConstraint,
         controller_builder: CF,
         content_builder: TF,
     ) -> (Self, oneshot::Receiver<()>)
