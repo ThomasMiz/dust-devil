@@ -172,7 +172,7 @@ impl<W: AsyncWrite + Unpin + 'static> UIElement for ShutdownPopup<W> {
 
         Clear.render(popup_area, buf);
 
-        let block = get_popup_block(TITLE, BACKGROUND_COLOR, true);
+        let block = get_popup_block(TITLE, BACKGROUND_COLOR, Color::Reset, true);
 
         let inner_area = block.inner(popup_area);
         block.render(popup_area, buf);

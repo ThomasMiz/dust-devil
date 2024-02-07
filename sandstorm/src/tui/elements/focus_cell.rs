@@ -3,7 +3,10 @@ use std::ops::{Deref, DerefMut};
 use crossterm::event::{self, KeyCode, KeyEventKind};
 use ratatui::{buffer::Buffer, layout::Rect};
 
-use crate::tui::ui_element::{HandleEventStatus, PassFocusDirection, UIElement};
+use crate::tui::{
+    popups::PopupContent,
+    ui_element::{HandleEventStatus, PassFocusDirection, UIElement},
+};
 
 /// A wrapper around another [`UIElement`] that holds onto focus when the inner element requests
 /// focus to be passed away with [`PassFocusDirection::Away`]. When that happens, the inner element
@@ -54,8 +57,7 @@ impl<I: UIElement> UIElement for FocusCell<I> {
     }
 
     fn handle_event(&mut self, event: &event::Event, is_focused: bool) -> HandleEventStatus {
-        let are_buttons_focused = is_focused && self.is_inner_focused;
-        match self.inner.handle_event(event, are_buttons_focused) {
+        match self.inner.handle_event(event, is_focused && self.is_inner_focused) {
             HandleEventStatus::Unhandled => {}
             HandleEventStatus::PassFocus(_focus_position, PassFocusDirection::Away) => {
                 self.is_inner_focused = false;
@@ -102,5 +104,11 @@ impl<I: UIElement> UIElement for FocusCell<I> {
             self.inner.focus_lost();
             self.is_inner_focused = false;
         }
+    }
+}
+
+impl<I: PopupContent> PopupContent for FocusCell<I> {
+    fn begin_resize(&mut self, width: u16, height: u16) -> (u16, u16) {
+        self.inner.begin_resize(width, height)
     }
 }

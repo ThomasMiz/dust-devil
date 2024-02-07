@@ -140,25 +140,30 @@ where
     }
 }
 
-pub struct WrapTextIter {
-    remaining_text: StaticString,
+pub struct WrapTextIter<'a> {
+    remaining_text: &'a str,
+    remaining_text_index: usize,
     wrap_width: usize,
 }
 
-impl WrapTextIter {
-    pub fn new(mut text: StaticString, wrap_width: usize) -> Self {
-        text.trim_starting_whitespace();
-        text.trim_trailing_whitespace();
-
+impl<'a> WrapTextIter<'a> {
+    pub fn new(text: &'a str, wrap_width: usize) -> Self {
         Self {
-            remaining_text: text,
+            remaining_text: text.trim(),
+            remaining_text_index: 0,
             wrap_width,
         }
     }
 }
 
-impl Iterator for WrapTextIter {
-    type Item = StaticString;
+pub struct WrapTextIterItem {
+    pub index_start: usize,
+    pub len_bytes: usize,
+    pub len_chars: usize,
+}
+
+impl<'a> Iterator for WrapTextIter<'a> {
+    type Item = WrapTextIterItem;
 
     fn next(&mut self) -> Option<Self::Item> {
         let mut chars_iter = self.remaining_text.char_indices();
@@ -167,31 +172,41 @@ impl Iterator for WrapTextIter {
 
         let mut char_count = 1;
         let mut split_at_index = 0;
+        let mut char_count_at_split_index = 0;
         loop {
             match chars_iter.next() {
                 Some((index, c)) => {
                     if c.is_whitespace() {
                         split_at_index = index;
+                        char_count_at_split_index = char_count;
                     }
 
                     char_count += 1;
                     if char_count >= self.wrap_width {
                         if !chars_iter.next().is_some_and(|(_i, c)| !c.is_whitespace()) {
                             split_at_index = index + c.len_utf8();
+                            char_count_at_split_index = char_count;
                         }
                         break;
                     }
                 }
                 None => {
                     split_at_index = self.remaining_text.len();
+                    char_count_at_split_index = char_count;
                     break;
                 }
             }
         }
 
-        let remaining_text = std::mem::take(&mut self.remaining_text);
-        let (retval, remaining) = remaining_text.split_at(split_at_index, true);
-        self.remaining_text = remaining;
+        let retval = WrapTextIterItem {
+            index_start: self.remaining_text_index,
+            len_bytes: split_at_index,
+            len_chars: char_count_at_split_index,
+        };
+
+        let remaining_trimmed = self.remaining_text[split_at_index..].trim_start();
+        self.remaining_text_index += self.remaining_text.len() - remaining_trimmed.len();
+        self.remaining_text = remaining_trimmed;
 
         Some(retval)
     }

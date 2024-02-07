@@ -30,7 +30,7 @@ use crate::{
 };
 
 use super::{
-    popups::shutdown_popup::ShutdownPopup,
+    popups::{popup_base::PopupBaseController, prompt_popup::PromptPopup, shutdown_popup::ShutdownPopup},
     ui_element::{HandleEventStatus, PassFocusDirection, UIElement},
     ui_manager::Popup,
 };
@@ -205,7 +205,37 @@ impl<W: AsyncWrite + Unpin + 'static> MenuBar<W> {
 
     fn users_selected(&self) {}
 
-    fn auth_selected(&self) {}
+    fn auth_selected(&self) {
+        // Temporary popup to show off the new popup system. This popup has a maximum width of 80, a long prompt text,
+        // a title, and a background tasks that turns on and off the ability to close the popup (alongside the bottom
+        // text that says [close (q)]) every two seconds.
+        let popup = PromptPopup::new(
+            Rc::clone(&self.redraw_notify),
+            "─Boludo".into(),
+            "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. "
+                .repeat(3)
+                .into(),
+            Style::new(),
+            1,
+            Color::Reset,
+            Color::Magenta,
+            true,
+            (80, u16::MAX),
+            |controller_inner| super::popups::popup_base::PopupBaseSimpleController::new(controller_inner),
+            |controller| {
+                let weak = Rc::downgrade(controller);
+                tokio::task::spawn_local(async move {
+                    while let Some(rc) = weak.upgrade() {
+                        rc.set_closable(!rc.get_closable());
+                        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                    }
+                });
+                super::elements::centered_text::CenteredTextLine::new("¡Hola! ¿Cómo estás? ((boludo))".into(), Style::new())
+            },
+        );
+
+        let _ = self.popup_sender.send(popup.into());
+    }
 
     fn buffer_selected(&self) {}
 }

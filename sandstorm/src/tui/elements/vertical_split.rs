@@ -1,7 +1,10 @@
 use crossterm::event;
 use ratatui::{buffer::Buffer, layout::Rect};
 
-use crate::tui::ui_element::{HandleEventStatus, PassFocusDirection, UIElement};
+use crate::tui::{
+    popups::PopupContent,
+    ui_element::{HandleEventStatus, PassFocusDirection, UIElement},
+};
 
 pub struct VerticalSplit<U: UIElement, L: UIElement> {
     pub upper: U,
@@ -32,17 +35,11 @@ impl<U: UIElement, L: UIElement> VerticalSplit<U, L> {
 
 impl<U: UIElement, L: UIElement> UIElement for VerticalSplit<U, L> {
     fn resize(&mut self, area: Rect) {
-        let previous_area = self.current_area;
         self.current_area = area;
 
-        if self.current_area.width != previous_area.width
-            || self.current_area.height < self.upper_height
-            || previous_area.height < self.upper_height
-        {
-            let mut upper_area = area;
-            upper_area.height = upper_area.height.min(self.upper_height);
-            self.upper.resize(upper_area);
-        }
+        let mut upper_area = area;
+        upper_area.height = upper_area.height.min(self.upper_height);
+        self.upper.resize(upper_area);
 
         let upper_height_plus_space = self.upper_height + self.space_between;
         let mut lower_area = area;
@@ -140,5 +137,21 @@ impl<U: UIElement, L: UIElement> UIElement for VerticalSplit<U, L> {
             FocusedElement::Upper => self.upper.focus_lost(),
             FocusedElement::Lower => self.lower.focus_lost(),
         }
+    }
+}
+
+impl<U: PopupContent, L: PopupContent> PopupContent for VerticalSplit<U, L> {
+    fn begin_resize(&mut self, width: u16, height: u16) -> (u16, u16) {
+        let (upper_width, upper_height) = self.upper.begin_resize(width, height);
+
+        self.upper_height = upper_height;
+        let lower_available_height = height.saturating_sub(upper_height + self.space_between);
+
+        let (lower_width, lower_height) = match lower_available_height {
+            0 => (0, 0),
+            _ => self.lower.begin_resize(width, lower_available_height),
+        };
+
+        (upper_width.max(lower_width), upper_height + self.space_between + lower_height)
     }
 }
