@@ -91,8 +91,7 @@ impl CenteredText {
         self.lines.len() as u16
     }
 
-    pub fn resize_with_width(&mut self, width: u16) {
-        // TODO: Make this private
+    fn resize_with_width(&mut self, width: u16) {
         if self.current_width == width {
             return;
         }

@@ -5,11 +5,12 @@ use ratatui::{
     buffer::Buffer,
     layout::Rect,
     style::{Color, Style},
+    widgets::Padding,
 };
 use tokio::sync::{oneshot, Notify};
 
 use crate::tui::{
-    elements::{centered_text::CenteredText, vertical_split::VerticalSplit},
+    elements::{centered_text::CenteredText, padded::Padded, vertical_split::VerticalSplit},
     text_wrapper::StaticString,
     ui_element::{HandleEventStatus, UIElement},
 };
@@ -21,7 +22,7 @@ use super::{
 };
 
 pub struct PromptPopup<C: PopupBaseController, T: PopupContent> {
-    base: PopupBase<C, VerticalSplit<CenteredText, T>>,
+    base: PopupBase<C, VerticalSplit<Padded<CenteredText>, T>>,
 }
 
 impl<C: PopupBaseController, T: PopupContent> PromptPopup<C, T> {
@@ -53,7 +54,7 @@ impl<C: PopupBaseController, T: PopupContent> PromptPopup<C, T> {
             controller_builder,
             |controller| {
                 VerticalSplit::new(
-                    CenteredText::new(prompt_str, prompt_style),
+                    Padded::new(Padding::horizontal(1), CenteredText::new(prompt_str, prompt_style)),
                     content_builder(controller),
                     0,
                     prompt_space,

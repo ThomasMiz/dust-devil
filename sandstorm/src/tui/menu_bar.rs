@@ -10,7 +10,7 @@ use crossterm::event::{self, KeyCode, KeyEventKind};
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
-    style::{Color, Style, Stylize},
+    style::{Color, Style},
     symbols,
     text::Line,
     widgets::{Block, BorderType, Borders, Padding, Widget},
@@ -30,14 +30,7 @@ use crate::{
 };
 
 use super::{
-    popups::{
-        popup_base::PopupBaseController,
-        prompt_popup::PromptPopup,
-        shutdown_popup::ShutdownPopup,
-        size_constraint::SizeConstraint,
-        yes_no_popup::{YesNoClosureHandler, YesNoPopup, YesNoPopupController, YesNoSimpleController},
-        CANCEL_TITLE, YES_TITLE,
-    },
+    popups::shutdown_popup::ShutdownPopup,
     ui_element::{HandleEventStatus, PassFocusDirection, UIElement},
     ui_manager::Popup,
 };
@@ -212,83 +205,9 @@ impl<W: AsyncWrite + Unpin + 'static> MenuBar<W> {
 
     fn users_selected(&self) {}
 
-    fn auth_selected(&self) {
-        // Temporary popup to show off the new popup system. This popup has a maximum width of 80, a long prompt text,
-        // a title, and a background tasks that turns on and off the ability to close the popup (alongside the bottom
-        // text that says [close (q)]) every two seconds.
-        let popup = PromptPopup::new(
-            Rc::clone(&self.redraw_notify),
-            "─Boludo".into(),
-            "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. ".repeat(3).into(),
-            Style::new(),
-            1,
-            Color::Reset,
-            Color::Magenta,
-            true,
-            SizeConstraint::new().max(80, u16::MAX),
-            |controller_inner| super::popups::popup_base::PopupBaseSimpleController::new(controller_inner),
-            |controller| {
-                let weak = Rc::downgrade(controller);
-                tokio::task::spawn_local(async move {
-                    while let Some(rc) = weak.upgrade() {
-                        rc.set_closable(!rc.get_closable());
-                        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-                    }
-                });
-                super::elements::centered_text::CenteredTextLine::new("¡Hola! ¿Cómo estás? ((boludo))".into(), Style::new())
-            },
-        );
+    fn auth_selected(&self) {}
 
-        let _ = self.popup_sender.send(popup.into());
-    }
-
-    fn buffer_selected(&self) {
-        // Temporary popup to show off the YesNoPopup
-        let popup = YesNoPopup::new(
-            Rc::clone(&self.redraw_notify),
-            "─Chicken or pasta?".into(),
-            "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. ".repeat(3).into(),
-            Style::new().italic(),
-            0,
-            YES_TITLE.into(),
-            CANCEL_TITLE.into(),
-            Style::new(),
-            Style::new().bg(Color::LightGreen),
-            Style::new(),
-            Style::new().bg(Color::LightGreen),
-            "We dont have either :D".into(),
-            Style::new().bold(),
-            Color::Reset,
-            Color::Green,
-            true,
-            SizeConstraint::new().max(80, u16::MAX),
-            |inner| YesNoSimpleController::new(inner),
-            |controller| {
-                let weak = Rc::downgrade(controller);
-                tokio::task::spawn_local(async move {
-                    while let Some(rc) = weak.upgrade() {
-                        rc.set_closable(!rc.get_closable());
-                        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-                    }
-                });
-                let weak = Rc::downgrade(controller);
-                tokio::task::spawn_local(async move {
-                    while let Some(rc) = weak.upgrade() {
-                        rc.set_showing_buttons(!rc.get_showing_buttons());
-                        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
-                    }
-                });
-                super::elements::empty::Empty
-            },
-            |controller| YesNoClosureHandler::new(
-                controller,
-                |controller| {},
-                |controller| controller.close_popup(),
-            ),
-        );
-
-        let _ = self.popup_sender.send(popup.into());
-    }
+    fn buffer_selected(&self) {}
 }
 
 impl<W: AsyncWrite + Unpin + 'static> Drop for MenuBar<W> {
