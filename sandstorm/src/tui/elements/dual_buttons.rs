@@ -1,7 +1,7 @@
 use std::{ops::Deref, rc::Rc};
 
 use crossterm::event::{self, KeyCode, KeyEventKind};
-use ratatui::{buffer::Buffer, layout::Rect, style::Style};
+use ratatui::{layout::Rect, style::Style, Frame};
 use tokio::sync::Notify;
 
 use crate::tui::{
@@ -135,7 +135,7 @@ impl<H: DualButtonsHandler> UIElement for DualButtons<H> {
         self.right_draw_len_chars = right_space;
     }
 
-    fn render(&mut self, area: Rect, buf: &mut Buffer) {
+    fn render(&mut self, area: Rect, frame: &mut Frame) {
         let empty_space = self.current_width - self.left_draw_len_chars - self.right_draw_len_chars;
         let outer_space = empty_space / 3;
 
@@ -144,6 +144,8 @@ impl<H: DualButtonsHandler> UIElement for DualButtons<H> {
             FocusedElement::Right => (self.left_style, self.right_selected_style),
             _ => (self.left_style, self.right_style),
         };
+
+        let buf = frame.buffer_mut();
 
         buf.set_stringn(
             area.x + outer_space,

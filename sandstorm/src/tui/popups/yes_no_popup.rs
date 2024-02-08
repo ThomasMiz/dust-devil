@@ -5,10 +5,10 @@ use std::{
 
 use crossterm::event;
 use ratatui::{
-    buffer::Buffer,
     layout::Rect,
     style::{Color, Style},
     widgets::Padding,
+    Frame,
 };
 use tokio::sync::{oneshot, Notify};
 
@@ -51,10 +51,10 @@ impl<C: YesNoPopupController, H: DualButtonsHandler> UIElement for ButtonsOrText
         self.alternative_text.resize(area);
     }
 
-    fn render(&mut self, area: Rect, buf: &mut Buffer) {
+    fn render(&mut self, area: Rect, frame: &mut Frame) {
         match self.controller.get_showing_buttons() {
-            true => self.buttons.render(area, buf),
-            false => self.alternative_text.render(area, buf),
+            true => self.buttons.render(area, frame),
+            false => self.alternative_text.render(area, frame),
         }
     }
 
@@ -225,8 +225,8 @@ impl<C: YesNoPopupController, T: PopupContent, H: DualButtonsHandler> UIElement 
         self.base.resize(area);
     }
 
-    fn render(&mut self, area: Rect, buf: &mut Buffer) {
-        self.base.render(area, buf);
+    fn render(&mut self, area: Rect, frame: &mut Frame) {
+        self.base.render(area, frame);
     }
 
     fn handle_event(&mut self, event: &event::Event, is_focused: bool) -> HandleEventStatus {

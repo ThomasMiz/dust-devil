@@ -2,10 +2,10 @@ use std::rc::Rc;
 
 use crossterm::event;
 use ratatui::{
-    buffer::Buffer,
     layout::Rect,
     style::{Color, Style},
     widgets::Padding,
+    Frame,
 };
 use tokio::sync::{oneshot, Notify};
 
@@ -72,8 +72,8 @@ impl<C: PopupBaseController, T: PopupContent> UIElement for PromptPopup<C, T> {
         self.base.resize(area);
     }
 
-    fn render(&mut self, area: Rect, buf: &mut Buffer) {
-        self.base.render(area, buf);
+    fn render(&mut self, area: Rect, frame: &mut Frame) {
+        self.base.render(area, frame);
     }
 
     fn handle_event(&mut self, event: &event::Event, is_focused: bool) -> HandleEventStatus {

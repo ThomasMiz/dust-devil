@@ -2,10 +2,10 @@ use std::{cell::RefCell, ops::Deref, rc::Rc};
 
 use crossterm::event::{self, KeyCode, KeyEventKind};
 use ratatui::{
-    buffer::Buffer,
     layout::{Margin, Rect},
     style::Color,
-    widgets::{Clear, Widget},
+    widgets::Clear,
+    Frame,
 };
 use tokio::sync::{oneshot, Notify};
 
@@ -158,7 +158,7 @@ impl<C: PopupBaseController, T: PopupContent> UIElement for PopupBase<C, T> {
         }
     }
 
-    fn render(&mut self, area: Rect, buf: &mut Buffer) {
+    fn render(&mut self, area: Rect, frame: &mut Frame) {
         let popup_area = Rect::new(
             (area.width - self.current_size.0) / 2,
             (area.height - self.current_size.1) / 2,
@@ -166,15 +166,15 @@ impl<C: PopupBaseController, T: PopupContent> UIElement for PopupBase<C, T> {
             self.current_size.1,
         );
 
-        Clear.render(popup_area, buf);
+        frame.render_widget(Clear, popup_area);
 
         let has_close_title = self.controller.get_closable();
         let block = get_popup_block(self.title.deref(), self.background_color, self.border_color, has_close_title);
 
         let content_area = block.inner(popup_area);
-        block.render(popup_area, buf);
+        frame.render_widget(block, popup_area);
 
-        self.content.render(content_area, buf);
+        self.content.render(content_area, frame);
     }
 
     fn handle_event(&mut self, event: &event::Event, is_focused: bool) -> HandleEventStatus {

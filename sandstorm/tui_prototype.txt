@@ -120,6 +120,8 @@ When [expand] in Client Activity is selected, the graph is expanded to the whole
 ██████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████
                                                                              Always keeps the latest line on the right ^
 
+The graph is colored! Each vertical line will be split into a bottom green part and an upper blue part. The size of each
+part represents the amount of send and received bytes respectively.
 
 Shutdown popup:
 ┌─Shutdown───────────────────────┐

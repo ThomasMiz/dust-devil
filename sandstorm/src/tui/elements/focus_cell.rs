@@ -1,7 +1,7 @@
 use std::ops::{Deref, DerefMut};
 
 use crossterm::event::{self, KeyCode, KeyEventKind};
-use ratatui::{buffer::Buffer, layout::Rect};
+use ratatui::{layout::Rect, Frame};
 
 use crate::tui::{
     popups::PopupContent,
@@ -52,8 +52,8 @@ impl<I: UIElement> UIElement for FocusCell<I> {
         self.inner.resize(area);
     }
 
-    fn render(&mut self, area: Rect, buf: &mut Buffer) {
-        self.inner.render(area, buf);
+    fn render(&mut self, area: Rect, frame: &mut Frame) {
+        self.inner.render(area, frame);
     }
 
     fn handle_event(&mut self, event: &event::Event, is_focused: bool) -> HandleEventStatus {

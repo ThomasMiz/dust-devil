@@ -14,6 +14,7 @@ use ratatui::{
     symbols,
     text::Line,
     widgets::{Block, BorderType, Borders, Padding, Widget},
+    Frame,
 };
 
 use tokio::{
@@ -535,7 +536,7 @@ impl<W: AsyncWrite + Unpin + 'static> UIElement for MenuBar<W> {
         self.state.deref().borrow_mut().do_resize(area);
     }
 
-    fn render(&mut self, area: Rect, buf: &mut Buffer) {
+    fn render(&mut self, area: Rect, frame: &mut Frame) {
         let mut state = self.state.deref().borrow_mut();
         if state.buffer_size_was_modified || state.ping_was_modified {
             state.do_resize(area);
@@ -586,6 +587,7 @@ impl<W: AsyncWrite + Unpin + 'static> UIElement for MenuBar<W> {
             *style = style.bg(SELECTED_BACKGROUND_COLOR);
         }
 
+        let buf = frame.buffer_mut();
         render_frame_chunk(LEFTMOST_FRAME, &state.shutdown_label, state.shutdown_area(), shutdown_style, buf);
         render_frame_chunk(MIDDLE_FRAME, &state.socks5_label, state.socks5_area(), socks5_style, buf);
         render_frame_chunk(MIDDLE_FRAME, &state.sandstorm_label, state.sandstorm_area(), sandstorm_style, buf);

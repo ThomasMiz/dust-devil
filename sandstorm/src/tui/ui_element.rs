@@ -1,5 +1,5 @@
 use crossterm::event;
-use ratatui::{buffer::Buffer, layout::Rect};
+use ratatui::{layout::Rect, Frame};
 
 /// Represents a visual element on the UI.
 pub trait UIElement {
@@ -9,7 +9,7 @@ pub trait UIElement {
 
     /// A counterpart to [`Widget`][ratatui::widgets::Widget], but with `&mut self` instead of
     /// `self`.
-    fn render(&mut self, area: Rect, buf: &mut Buffer);
+    fn render(&mut self, area: Rect, frame: &mut Frame);
 
     /// Handles an input event, such as keyboard and/or mouse. Returns a [`HandleEventStatus`],
     /// which indicates whether the event was handled, unhandled, or requests to pass the focus

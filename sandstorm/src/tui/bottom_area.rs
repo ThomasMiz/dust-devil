@@ -2,7 +2,7 @@ use std::rc::Rc;
 
 use crossterm::event;
 use dust_devil_core::logging;
-use ratatui::{buffer::Buffer, layout::Rect};
+use ratatui::{layout::Rect, Frame};
 use tokio::sync::Notify;
 
 use super::{
@@ -34,8 +34,8 @@ impl UIElement for BottomArea {
         self.log_block.resize(area);
     }
 
-    fn render(&mut self, area: Rect, buf: &mut Buffer) {
-        self.log_block.render(area, buf);
+    fn render(&mut self, area: Rect, frame: &mut Frame) {
+        self.log_block.render(area, frame);
     }
 
     fn handle_event(&mut self, event: &event::Event, is_focused: bool) -> HandleEventStatus {

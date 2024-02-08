@@ -195,10 +195,10 @@ impl<W: AsyncWrite + Unpin + 'static> UIManager<W> {
             }
         }
 
-        self.root.render(self.current_area, frame.buffer_mut());
+        self.root.render(self.current_area, frame);
 
         for popup in self.popups.iter_mut() {
-            popup.element.render(self.current_area, frame.buffer_mut());
+            popup.element.render(self.current_area, frame);
         }
     }
 }

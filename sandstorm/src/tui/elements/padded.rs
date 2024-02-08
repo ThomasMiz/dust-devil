@@ -1,5 +1,5 @@
 use crossterm::event;
-use ratatui::{buffer::Buffer, layout::Rect, widgets::Padding};
+use ratatui::{layout::Rect, widgets::Padding, Frame};
 
 use crate::tui::{
     popups::PopupContent,
@@ -31,8 +31,8 @@ impl<T: UIElement> UIElement for Padded<T> {
         self.inner.resize(self.inner_area(area));
     }
 
-    fn render(&mut self, area: Rect, buf: &mut Buffer) {
-        self.inner.render(self.inner_area(area), buf);
+    fn render(&mut self, area: Rect, frame: &mut Frame) {
+        self.inner.render(self.inner_area(area), frame);
     }
 
     fn handle_event(&mut self, event: &event::Event, is_focused: bool) -> HandleEventStatus {

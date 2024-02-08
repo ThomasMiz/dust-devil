@@ -1,7 +1,7 @@
 use std::ops::Deref;
 
 use crossterm::event;
-use ratatui::{buffer::Buffer, layout::Rect, style::Style};
+use ratatui::{layout::Rect, style::Style, Frame};
 
 use crate::tui::{
     popups::PopupContent,
@@ -40,8 +40,9 @@ impl UIElement for CenteredTextLine {
         self.text_draw_offset = self.current_width.saturating_sub(self.text_len) / 2
     }
 
-    fn render(&mut self, area: Rect, buf: &mut Buffer) {
+    fn render(&mut self, area: Rect, frame: &mut Frame) {
         let width = self.text_len.min(self.current_width) as usize;
+        let buf = frame.buffer_mut();
         buf.set_stringn(area.x + self.text_draw_offset, area.y, self.text.deref(), width, self.style);
     }
 
@@ -116,10 +117,11 @@ impl UIElement for CenteredText {
         self.resize_with_width(area.width);
     }
 
-    fn render(&mut self, area: Rect, buf: &mut Buffer) {
+    fn render(&mut self, area: Rect, frame: &mut Frame) {
         for (i, line) in self.lines.iter_mut().take(area.height as usize).enumerate() {
             let draw_x = area.x + line.text_draw_offset;
             let string = &self.text[line.text_index..(line.text_index + line.text_len_bytes as usize)];
+            let buf = frame.buffer_mut();
             buf.set_stringn(draw_x, area.y + i as u16, string, line.text_draw_width as usize, self.style);
         }
     }

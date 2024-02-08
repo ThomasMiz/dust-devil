@@ -2,9 +2,9 @@ use std::rc::{Rc, Weak};
 
 use crossterm::event;
 use ratatui::{
-    buffer::Buffer,
     layout::Rect,
     style::{Color, Style},
+    Frame,
 };
 use tokio::sync::{oneshot, Notify};
 
@@ -98,8 +98,8 @@ impl UIElement for ConfirmClosePopup {
         self.base.resize(area)
     }
 
-    fn render(&mut self, area: Rect, buf: &mut Buffer) {
-        self.base.render(area, buf);
+    fn render(&mut self, area: Rect, frame: &mut Frame) {
+        self.base.render(area, frame);
     }
 
     fn handle_event(&mut self, event: &event::Event, is_focused: bool) -> HandleEventStatus {

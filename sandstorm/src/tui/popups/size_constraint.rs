@@ -1,5 +1,5 @@
 use crossterm::event;
-use ratatui::{buffer::Buffer, layout::Rect};
+use ratatui::{layout::Rect, Frame};
 
 use crate::tui::ui_element::{HandleEventStatus, UIElement};
 
@@ -55,8 +55,8 @@ impl<T: PopupContent> UIElement for ConstrainedPopupContent<T> {
         self.inner.resize(area);
     }
 
-    fn render(&mut self, area: Rect, buf: &mut Buffer) {
-        self.inner.render(area, buf);
+    fn render(&mut self, area: Rect, frame: &mut Frame) {
+        self.inner.render(area, frame);
     }
 
     fn handle_event(&mut self, event: &event::Event, is_focused: bool) -> HandleEventStatus {

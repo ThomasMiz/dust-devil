@@ -1,5 +1,5 @@
 use crossterm::event;
-use ratatui::{buffer::Buffer, layout::Rect};
+use ratatui::{layout::Rect, Frame};
 
 use crate::tui::{
     popups::PopupContent,
@@ -42,23 +42,24 @@ impl<U: UIElement, L: UIElement> UIElement for VerticalSplit<U, L> {
         self.upper.resize(upper_area);
 
         let upper_height_plus_space = self.upper_height + self.space_between;
+
         let mut lower_area = area;
         lower_area.y += upper_height_plus_space;
         lower_area.height = lower_area.height.saturating_sub(upper_height_plus_space);
         self.lower.resize(lower_area);
     }
 
-    fn render(&mut self, area: Rect, buf: &mut Buffer) {
+    fn render(&mut self, area: Rect, frame: &mut Frame) {
         let mut upper_area = area;
         upper_area.height = upper_area.height.min(self.upper_height);
-        self.upper.render(upper_area, buf);
+        self.upper.render(upper_area, frame);
 
         let upper_height_plus_space = self.upper_height + self.space_between;
 
         let mut lower_area = area;
         lower_area.y += upper_height_plus_space;
         lower_area.height = lower_area.height.saturating_sub(upper_height_plus_space);
-        self.lower.render(lower_area, buf);
+        self.lower.render(lower_area, frame);
     }
 
     fn handle_event(&mut self, event: &event::Event, is_focused: bool) -> HandleEventStatus {
@@ -112,7 +113,7 @@ impl<U: UIElement, L: UIElement> UIElement for VerticalSplit<U, L> {
     }
 
     fn receive_focus(&mut self, focus_position: (u16, u16)) -> bool {
-        let try_upper_first = focus_position.1 <= self.current_area.y + self.upper_height;
+        let try_upper_first = focus_position.1 <= self.current_area.y + self.upper_height + self.space_between / 2;
 
         if try_upper_first && self.upper.receive_focus(focus_position) {
             self.focused_element = FocusedElement::Upper;

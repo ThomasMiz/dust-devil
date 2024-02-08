@@ -3,11 +3,11 @@ use std::{collections::VecDeque, rc::Rc};
 use crossterm::event::{self, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseEvent, MouseEventKind};
 use dust_devil_core::logging;
 use ratatui::{
-    buffer::Buffer,
     layout::Rect,
     style::{Color, Style},
     text::Line,
-    widgets::{Block, BorderType, Borders, Scrollbar, ScrollbarOrientation, ScrollbarState, StatefulWidget, Widget},
+    widgets::{Block, BorderType, Borders, Scrollbar, ScrollbarOrientation, ScrollbarState},
+    Frame,
 };
 use time::UtcOffset;
 use tokio::sync::Notify;
@@ -477,10 +477,10 @@ impl UIElement for LogBlock {
         }
     }
 
-    fn render(&mut self, area: Rect, buf: &mut Buffer) {
+    fn render(&mut self, area: Rect, frame: &mut Frame) {
         let block = Block::new().border_type(BorderType::Plain).borders(Borders::ALL).title("─Logs");
         let logs_area = block.inner(area);
-        block.render(area, buf);
+        frame.render_widget(block, area);
 
         let selected_event_id = self.selected_event_id;
         let oldest_event_id = self.event_history.front().map(|(_, id)| *id).unwrap_or(0);
@@ -489,14 +489,15 @@ impl UIElement for LogBlock {
             .viewport_content_length(logs_area.height as usize)
             .position(scroll_bar_position.unwrap_or(self.event_history.len().saturating_sub(1)));
 
-        Scrollbar::new(ScrollbarOrientation::VerticalRight)
+        let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
             .begin_symbol(Some("↑"))
-            .end_symbol(Some("↓"))
-            .render(area, buf, &mut scrollbar_state);
+            .end_symbol(Some("↓"));
+        frame.render_stateful_widget(scrollbar, area, &mut scrollbar_state);
 
         let center_event_id = selected_event_id.unwrap_or(self.event_history.back().map(|(_, id)| *id).unwrap_or(0));
         let lines_iter = self.process_lines_get_iter(center_event_id, logs_area.height as usize);
 
+        let buf = frame.buffer_mut();
         let mut y = logs_area.top();
         let mut previous_event_id = None;
         if let Some(iter) = lines_iter {
