@@ -47,9 +47,10 @@ const PROMPT_STYLE: Style = Style::new();
 const OFFER_MESSAGE: &str = "Do you want to set a new buffer size?";
 const NEW_BUFFER_SIZE_LABEL: &str = "New buffer size:";
 
+type BufferSizePopupContent = Padded<VerticalSplit<CenteredText, HorizontalSplit<CenteredTextLine, TextEntry>>>;
+
 pub struct BufferSizePopup {
-    base:
-        YesNoPopup<YesNoSimpleController, Padded<VerticalSplit<CenteredText, HorizontalSplit<CenteredTextLine, TextEntry>>>, ButtonHandler>,
+    base: YesNoPopup<YesNoSimpleController, BufferSizePopupContent, ButtonHandler>,
 }
 
 struct ButtonHandler {

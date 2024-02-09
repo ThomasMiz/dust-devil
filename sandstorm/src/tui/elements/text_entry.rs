@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use crossterm::event::{self, KeyCode, KeyEventKind};
+use crossterm::event::{self, KeyCode, KeyEventKind, KeyModifiers};
 use ratatui::{
     layout::Rect,
     style::{Style, Stylize},
@@ -46,6 +46,52 @@ impl TextEntry {
     fn get_focus_position(&self) -> (u16, u16) {
         self.current_position
     }
+}
+
+/// Calculates how many characters to skip left when skipping a whole word (with Ctrl-Left or
+/// Ctrl-Backspace). The cursor is assumed to be at the end of the given string slice.
+///
+/// Returns a tuple with (bytes_to_skip, chars_to_skip).
+fn calc_wordskip_left(s: &str) -> (usize, usize) {
+    let mut chars = s.chars().rev().peekable();
+    let mut byte_count = 0;
+    let mut char_count = 0;
+
+    while chars.peek().is_some_and(|c| !c.is_alphanumeric()) {
+        let c = chars.next().unwrap();
+        byte_count += c.len_utf8();
+        char_count += 1;
+    }
+
+    while let Some(c) = chars.next().filter(|c| c.is_alphanumeric()) {
+        byte_count += c.len_utf8();
+        char_count += 1;
+    }
+
+    (byte_count, char_count)
+}
+
+/// Calculates how many characters to skip right when skipping a whole word (with Ctrl-Right or
+/// Ctrl-Delete). The cursor is assumed to be at the start of the given string slice.
+///
+/// Returns a tuple with (bytes_to_skip, chars_to_skip).
+fn calc_wordskip_right(s: &str) -> (usize, usize) {
+    let mut chars = s.chars().peekable();
+    let mut byte_count = 0;
+    let mut char_count = 0;
+
+    while chars.peek().is_some_and(|c| c.is_alphanumeric()) {
+        let c = chars.next().unwrap();
+        byte_count += c.len_utf8();
+        char_count += 1;
+    }
+
+    while let Some(c) = chars.next().filter(|c| !c.is_alphanumeric()) {
+        byte_count += c.len_utf8();
+        char_count += 1;
+    }
+
+    (byte_count, char_count)
 }
 
 impl UIElement for TextEntry {
@@ -145,42 +191,80 @@ impl UIElement for TextEntry {
                 HandleEventStatus::Handled
             }
             KeyCode::Backspace => {
-                // TODO: Implement Ctrl-Backspace
-                if let Some((index, _char)) = self.text[..cursor_position.index_bytes].char_indices().next_back() {
-                    self.text.remove(index);
-                    self.text_len_chars -= 1;
-                    cursor_position.index_bytes = index;
-                    cursor_position.index_chars -= 1;
+                let (byte_count, char_count) = if key_event.modifiers.contains(KeyModifiers::CONTROL) {
+                    calc_wordskip_left(&self.text[..cursor_position.index_bytes])
+                } else {
+                    self.text[..cursor_position.index_bytes]
+                        .chars()
+                        .next_back()
+                        .map(|c| (c.len_utf8(), 1))
+                        .unwrap_or((0, 0))
+                };
+
+                if byte_count != 0 {
+                    let from_byte = cursor_position.index_bytes - byte_count;
+                    self.text.drain(from_byte..cursor_position.index_bytes);
+                    self.text_len_chars -= char_count;
+                    cursor_position.index_bytes -= byte_count;
+                    cursor_position.index_chars -= char_count;
                     needs_notify = true;
                 }
 
                 HandleEventStatus::Handled
             }
             KeyCode::Delete => {
-                // TODO: Implement Ctrl-Delete
-                if cursor_position.index_bytes != self.text.len() {
-                    self.text.remove(cursor_position.index_bytes);
-                    self.text_len_chars -= 1;
+                let (byte_count, char_count) = if key_event.modifiers.contains(KeyModifiers::CONTROL) {
+                    calc_wordskip_right(&self.text[cursor_position.index_bytes..])
+                } else {
+                    self.text[cursor_position.index_bytes..]
+                        .chars()
+                        .next()
+                        .map(|c| (c.len_utf8(), 1))
+                        .unwrap_or((0, 0))
+                };
+
+                if byte_count != 0 {
+                    let to_byte = cursor_position.index_bytes + byte_count;
+                    self.text.drain(cursor_position.index_bytes..to_byte);
+                    self.text_len_chars -= char_count;
                     needs_notify = true;
                 }
 
                 HandleEventStatus::Handled
             }
             KeyCode::Left => {
-                // TODO: Implement Ctrl-Left
-                if let Some((index, _char)) = self.text[..cursor_position.index_bytes].char_indices().next_back() {
-                    cursor_position.index_bytes = index;
-                    cursor_position.index_chars -= 1;
+                let (byte_count, char_count) = if key_event.modifiers.contains(KeyModifiers::CONTROL) {
+                    calc_wordskip_left(&self.text[..cursor_position.index_bytes])
+                } else {
+                    self.text[..cursor_position.index_bytes]
+                        .chars()
+                        .next_back()
+                        .map(|c| (c.len_utf8(), 1))
+                        .unwrap_or((0, 0))
+                };
+
+                if byte_count != 0 {
+                    cursor_position.index_bytes -= byte_count;
+                    cursor_position.index_chars -= char_count;
                     needs_notify = true;
                 }
 
                 HandleEventStatus::Handled
             }
             KeyCode::Right => {
-                // TODO: Implement Ctrl-Right
-                if let Some(c) = self.text[cursor_position.index_bytes..].chars().next() {
-                    cursor_position.index_bytes += c.len_utf8();
-                    cursor_position.index_chars += 1;
+                let (byte_count, char_count) = if key_event.modifiers.contains(KeyModifiers::CONTROL) {
+                    calc_wordskip_right(&self.text[cursor_position.index_bytes..])
+                } else {
+                    self.text[cursor_position.index_bytes..]
+                        .chars()
+                        .next()
+                        .map(|c| (c.len_utf8(), 1))
+                        .unwrap_or((0, 0))
+                };
+
+                if byte_count != 0 {
+                    cursor_position.index_bytes += byte_count;
+                    cursor_position.index_chars += char_count;
                     needs_notify = true;
                 }
 
