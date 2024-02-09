@@ -146,13 +146,14 @@ impl<U: PopupContent, L: PopupContent> PopupContent for VerticalSplit<U, L> {
         let (upper_width, upper_height) = self.upper.begin_resize(width, height);
 
         self.upper_height = upper_height;
-        let lower_available_height = height.saturating_sub(upper_height + self.space_between);
+        let lower_available_height = height.saturating_sub(upper_height).saturating_sub(self.space_between);
 
         let (lower_width, lower_height) = match lower_available_height {
             0 => (0, 0),
             _ => self.lower.begin_resize(width, lower_available_height),
         };
 
-        (upper_width.max(lower_width), upper_height + self.space_between + lower_height)
+        let optimal_height = upper_height.saturating_add(self.space_between).saturating_add(lower_height);
+        (upper_width.max(lower_width), height.min(optimal_height))
     }
 }

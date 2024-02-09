@@ -9,6 +9,7 @@ use ratatui::{
 
 use super::ui_element::UIElement;
 
+pub mod buffer_size_popup;
 pub mod confirm_close_popup;
 pub mod popup_base;
 pub mod prompt_popup;
@@ -21,6 +22,7 @@ pub const CLOSE_TITLE: &str = "[close (q)]─";
 
 pub const YES_KEY: char = 'y';
 pub const YES_TITLE: &str = "[YES (y)]";
+pub const CONFIRM_TITLE: &str = "[CONFIRM (y)]";
 pub const YES_KEYS: &[char] = &[YES_KEY];
 
 pub const NO_KEY: char = 'n';

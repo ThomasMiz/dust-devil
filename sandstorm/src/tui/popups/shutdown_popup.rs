@@ -32,7 +32,7 @@ const SELECTED_BACKGROUND_COLOR: Color = Color::LightRed;
 const TITLE: &str = "─Shutdown";
 const PROMPT_MESSAGE: &str = "Are you sure you want to shut down the server?";
 const SHUTDOWN_MESSAGE: &str = "Shutting down...";
-const POPUP_WIDTH: u16 = 34;
+const POPUP_WIDTH: u16 = 32;
 const PROMPT_STYLE: Style = Style::new();
 
 pub struct ShutdownPopup<W: AsyncWrite + Unpin + 'static> {

@@ -31,7 +31,7 @@ use crate::{
 };
 
 use super::{
-    popups::shutdown_popup::ShutdownPopup,
+    popups::{buffer_size_popup::BufferSizePopup, shutdown_popup::ShutdownPopup},
     ui_element::{HandleEventStatus, PassFocusDirection, UIElement},
     ui_manager::Popup,
 };
@@ -95,6 +95,7 @@ pub struct MenuBarState {
     users_area_x: u16,
     auth_label: String,
     auth_area_x: u16,
+    buffer_size: u32,
     buffer_label: String,
     buffer_area_x: u16,
     buffer_color: Color,
@@ -170,6 +171,7 @@ impl<W: AsyncWrite + Unpin + 'static> MenuBar<W> {
             users_area_x: 0,
             auth_label: format!("{AUTH_LABEL} ({AUTH_KEY})"),
             auth_area_x: 0,
+            buffer_size: 0,
             buffer_label: format!("{BUFFER_SIZE_LOADING_INDICATOR_SIZE} ({BUFFER_KEY})"),
             buffer_area_x: 0,
             buffer_color: BUFFER_TEXT_LOADING_COLOR,
@@ -208,7 +210,15 @@ impl<W: AsyncWrite + Unpin + 'static> MenuBar<W> {
 
     fn auth_selected(&self) {}
 
-    fn buffer_selected(&self) {}
+    fn buffer_selected(&self) {
+        let state = self.state.deref().borrow();
+        if state.buffer_loading {
+            return;
+        }
+
+        let popup = BufferSizePopup::new(Rc::clone(&self.redraw_notify), Weak::clone(&self.manager), state.buffer_size);
+        let _ = self.popup_sender.send(popup.into());
+    }
 }
 
 impl<W: AsyncWrite + Unpin + 'static> Drop for MenuBar<W> {
@@ -365,6 +375,7 @@ async fn buffer_frame_background_task<W>(
     match recv_buffer_size_result {
         Ok(buffer_size) => {
             let mut state_inner = state.deref().borrow_mut();
+            state_inner.buffer_size = buffer_size;
             state_inner.buffer_label.clear();
             let _ = write!(
                 state_inner.buffer_label,
@@ -391,6 +402,7 @@ async fn buffer_frame_background_task<W>(
                 };
 
                 let mut state_inner = state.deref().borrow_mut();
+                state_inner.buffer_size = buffer_size;
                 state_inner.buffer_label.clear();
                 let _ = write!(
                     state_inner.buffer_label,
@@ -617,8 +629,6 @@ impl<W: AsyncWrite + Unpin + 'static> UIElement for MenuBar<W> {
             _ => return HandleEventStatus::Unhandled,
         };
 
-        let mut state_inner = self.state.deref().borrow_mut();
-
         if let KeyCode::Char(c) = key_event.code {
             let mut handled = true;
 
@@ -642,13 +652,14 @@ impl<W: AsyncWrite + Unpin + 'static> UIElement for MenuBar<W> {
             return HandleEventStatus::Unhandled;
         }
 
-        let previous_focused_element = state_inner.focused_element;
+        let previous_focused_element = self.state.deref().borrow().focused_element;
 
         let result = match key_event.code {
             KeyCode::Enter => {
                 let mut handled = true;
 
-                match state_inner.focused_element {
+                let focused_element = self.state.deref().borrow().focused_element;
+                match focused_element {
                     FocusedElement::Shutdown => self.shutdown_selected(),
                     FocusedElement::Socks5 => self.socsk5_selected(),
                     FocusedElement::Sandstorm => self.sandstorm_selected(),
@@ -664,6 +675,7 @@ impl<W: AsyncWrite + Unpin + 'static> UIElement for MenuBar<W> {
                 }
             }
             KeyCode::Left => {
+                let mut state_inner = self.state.deref().borrow_mut();
                 if state_inner.focused_element == FocusedElement::None {
                     state_inner.focused_element = FocusedElement::rightmost();
                     HandleEventStatus::Handled
@@ -675,6 +687,7 @@ impl<W: AsyncWrite + Unpin + 'static> UIElement for MenuBar<W> {
                 }
             }
             KeyCode::Right | KeyCode::Tab => {
+                let mut state_inner = self.state.deref().borrow_mut();
                 if state_inner.focused_element == FocusedElement::None {
                     state_inner.focused_element = FocusedElement::leftmost();
                     HandleEventStatus::Handled
@@ -690,13 +703,13 @@ impl<W: AsyncWrite + Unpin + 'static> UIElement for MenuBar<W> {
                     HandleEventStatus::PassFocus(state_inner.get_focus_position(), direction)
                 }
             }
-            KeyCode::Down => HandleEventStatus::PassFocus(state_inner.get_focus_position(), PassFocusDirection::Down),
-            KeyCode::Up => HandleEventStatus::PassFocus(state_inner.get_focus_position(), PassFocusDirection::Up),
-            KeyCode::Esc => HandleEventStatus::PassFocus(state_inner.get_focus_position(), PassFocusDirection::Away),
+            KeyCode::Down => HandleEventStatus::PassFocus(self.state.deref().borrow().get_focus_position(), PassFocusDirection::Down),
+            KeyCode::Up => HandleEventStatus::PassFocus(self.state.deref().borrow().get_focus_position(), PassFocusDirection::Up),
+            KeyCode::Esc => HandleEventStatus::PassFocus(self.state.deref().borrow().get_focus_position(), PassFocusDirection::Away),
             _ => HandleEventStatus::Unhandled,
         };
 
-        if state_inner.focused_element != previous_focused_element {
+        if self.state.deref().borrow().focused_element != previous_focused_element {
             self.redraw_notify.notify_one();
         }
 

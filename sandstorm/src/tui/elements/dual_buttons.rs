@@ -111,24 +111,18 @@ impl<H: DualButtonsHandler> UIElement for DualButtons<H> {
 
         self.current_width = area.width;
 
-        let mut available_text_space = self.current_width.saturating_sub(1);
-        let mut left_space = 0;
-        let mut right_space = 0;
+        let available_text_space = self.current_width.saturating_sub(1);
+        let min = self.left_len_chars.min(self.right_len_chars).min(available_text_space / 2);
+        let mut left_space = min;
+        let mut right_space = min;
 
-        while available_text_space != 0 && left_space != self.left_len_chars && right_space != self.right_len_chars {
-            if left_space >= right_space {
-                left_space += 1;
-            } else {
-                right_space += 1;
+        let remaining_text_space = available_text_space - min - min;
+        if remaining_text_space != 0 {
+            if left_space != self.left_len_chars {
+                left_space = (left_space + remaining_text_space).min(self.left_len_chars);
+            } else if right_space != self.right_len_chars {
+                right_space = (right_space + remaining_text_space).min(self.right_len_chars);
             }
-
-            available_text_space -= 1;
-        }
-
-        if left_space != self.left_len_chars {
-            left_space = (left_space + available_text_space).min(self.left_len_chars);
-        } else if right_space != self.right_len_chars {
-            right_space = (right_space + available_text_space).min(self.right_len_chars);
         }
 
         self.left_draw_len_chars = left_space;
@@ -253,7 +247,8 @@ impl<H: DualButtonsHandler> UIElement for DualButtons<H> {
 }
 
 impl<H: DualButtonsHandler> PopupContent for DualButtons<H> {
-    fn begin_resize(&mut self, _width: u16, _height: u16) -> (u16, u16) {
-        (self.left_len_chars + self.right_len_chars + 3, 1)
+    fn begin_resize(&mut self, width: u16, _height: u16) -> (u16, u16) {
+        let optimal_width = self.left_len_chars.saturating_add(self.right_len_chars).saturating_add(3);
+        (width.min(optimal_width), 1)
     }
 }

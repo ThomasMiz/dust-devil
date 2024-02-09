@@ -26,7 +26,7 @@ const SELECTED_BACKGROUND_COLOR: Color = Color::LightBlue;
 const TITLE: &str = "─Close";
 const PROMPT_MESSAGE: &str = "Are you sure you want to close this terminal?";
 const CLOSING_MESSAGE: &str = "Closing...";
-const POPUP_WIDTH: u16 = 34;
+const POPUP_WIDTH: u16 = 32;
 const PROMPT_STYLE: Style = Style::new();
 
 pub struct ConfirmClosePopup {

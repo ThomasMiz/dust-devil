@@ -50,13 +50,13 @@ impl<T: UIElement> UIElement for Padded<T> {
 
 impl<T: PopupContent> PopupContent for Padded<T> {
     fn begin_resize(&mut self, width: u16, height: u16) -> (u16, u16) {
-        let width = width.saturating_sub(self.padding.left + self.padding.right);
-        let height = height.saturating_sub(self.padding.top + self.padding.bottom);
+        let width = width.saturating_sub(self.padding.left).saturating_sub(self.padding.right);
+        let height = height.saturating_sub(self.padding.top).saturating_sub(self.padding.bottom);
 
         let (width, height) = self.inner.begin_resize(width, height);
 
-        let width = width + self.padding.left + self.padding.right;
-        let height = height + self.padding.top + self.padding.bottom;
+        let width = width.saturating_add(self.padding.left).saturating_add(self.padding.right);
+        let height = height.saturating_add(self.padding.top).saturating_add(self.padding.bottom);
 
         (width, height)
     }

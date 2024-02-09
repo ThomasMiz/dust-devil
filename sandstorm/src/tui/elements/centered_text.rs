@@ -58,8 +58,8 @@ impl UIElement for CenteredTextLine {
 }
 
 impl PopupContent for CenteredTextLine {
-    fn begin_resize(&mut self, _width: u16, _height: u16) -> (u16, u16) {
-        (self.text_len, 1)
+    fn begin_resize(&mut self, width: u16, _height: u16) -> (u16, u16) {
+        (width.min(self.text_len), 1)
     }
 }
 

@@ -148,13 +148,14 @@ impl<L: PopupContent, R: PopupContent> PopupContent for HorizontalSplit<L, R> {
         let (left_width, left_height) = self.left.begin_resize(width, height);
 
         self.left_width = left_width;
-        let right_available_width = width.saturating_sub(left_width + self.space_between);
+        let right_available_width = width.saturating_sub(left_width).saturating_sub(self.space_between);
 
         let (right_width, right_height) = match right_available_width {
             0 => (0, 0),
             _ => self.right.begin_resize(right_available_width, height),
         };
 
-        (left_width + self.space_between + right_width, left_height.max(right_height))
+        let optimal_width = left_width.saturating_add(self.space_between).saturating_add(right_width);
+        (width.min(optimal_width), left_height.max(right_height))
     }
 }
