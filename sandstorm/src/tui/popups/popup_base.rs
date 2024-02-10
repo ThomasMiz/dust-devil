@@ -44,6 +44,18 @@ pub struct PopupBaseControllerInner {
 }
 
 impl PopupBaseControllerInner {
+    pub fn new(redraw_notify: Rc<Notify>, has_close_title: bool) -> (Self, oneshot::Receiver<()>) {
+        let (close_sender, close_receiver) = oneshot::channel();
+
+        let value = Self {
+            redraw_notify,
+            popup_close_sender: Some(close_sender),
+            has_close_title,
+        };
+
+        (value, close_receiver)
+    }
+
     pub fn redraw_notify(&mut self) {
         self.redraw_notify.notify_one();
     }
@@ -97,42 +109,22 @@ impl PopupBaseController for PopupBaseSimpleController {
 }
 
 impl<C: PopupBaseController, T: PopupContent> PopupBase<C, T> {
-    #[allow(clippy::too_many_arguments)]
-    pub fn new<CF, TF>(
-        redraw_notify: Rc<Notify>,
+    pub fn new(
         title: StaticString,
         border_color: Color,
         background_color: Color,
-        has_close_title: bool,
         size_constraint: SizeConstraint,
-        controller_builder: CF,
-        content_builder: TF,
-    ) -> (Self, oneshot::Receiver<()>)
-    where
-        CF: FnOnce(PopupBaseControllerInner) -> C,
-        TF: FnOnce(&Rc<C>) -> T,
-    {
-        let (close_sender, close_receiver) = oneshot::channel();
-
-        let controller_inner = PopupBaseControllerInner {
-            redraw_notify,
-            popup_close_sender: Some(close_sender),
-            has_close_title,
-        };
-
-        let controller = Rc::new(controller_builder(controller_inner));
-        let content = ConstrainedPopupContent::new(size_constraint, FocusCell::new(content_builder(&controller)));
-
-        let value = Self {
+        controller: Rc<C>,
+        content: T,
+    ) -> Self {
+        Self {
             current_size: (0, 0),
             title,
             border_color,
             background_color,
             controller,
-            content,
-        };
-
-        (value, close_receiver)
+            content: ConstrainedPopupContent::new(size_constraint, FocusCell::new(content)),
+        }
     }
 }
 

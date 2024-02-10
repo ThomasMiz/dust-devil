@@ -88,6 +88,16 @@ pub struct YesNoControllerInner {
 }
 
 impl YesNoControllerInner {
+    pub fn new(redraw_notify: Rc<Notify>, has_close_title: bool) -> (Self, oneshot::Receiver<()>) {
+        let (base, receiver) = PopupBaseControllerInner::new(redraw_notify, has_close_title);
+        let value = YesNoControllerInner {
+            base,
+            is_showing_buttons: true,
+        };
+
+        (value, receiver)
+    }
+
     pub fn set_showing_buttons(&mut self, showing: bool) {
         if self.is_showing_buttons != showing {
             self.is_showing_buttons = showing;
@@ -105,10 +115,14 @@ pub struct YesNoSimpleController {
 }
 
 impl YesNoSimpleController {
-    pub fn new(inner: YesNoControllerInner) -> Self {
-        Self {
+    pub fn new(redraw_notify: Rc<Notify>, has_close_title: bool) -> (Self, oneshot::Receiver<()>) {
+        let (inner, close_receiver) = YesNoControllerInner::new(redraw_notify, has_close_title);
+
+        let value = Self {
             inner: RefCell::new(inner),
-        }
+        };
+
+        (value, close_receiver)
     }
 }
 
@@ -142,7 +156,7 @@ impl YesNoPopupController for YesNoSimpleController {
 
 impl<C: YesNoPopupController, T: PopupContent, H: DualButtonsHandler> YesNoPopup<C, T, H> {
     #[allow(clippy::too_many_arguments)]
-    pub fn new<CF, TF, HF>(
+    pub fn new(
         redraw_notify: Rc<Notify>,
         title: StaticString,
         prompt_str: StaticString,
@@ -158,65 +172,47 @@ impl<C: YesNoPopupController, T: PopupContent, H: DualButtonsHandler> YesNoPopup
         alternative_text_style: Style,
         border_color: Color,
         background_color: Color,
-        has_close_title: bool,
         size_constraint: SizeConstraint,
-        controller_builder: CF,
-        content_builder: TF,
-        handler_builder: HF,
-    ) -> (Self, oneshot::Receiver<()>)
-    where
-        CF: FnOnce(YesNoControllerInner) -> C,
-        TF: FnOnce(&Rc<C>) -> T,
-        HF: FnOnce(&Rc<C>) -> H,
-    {
-        // base: PromptPopup<C, VerticalSplit<T, Padded<ButtonsOrTextLine<C, H>>>>,
-
-        let (base, receiver) = PromptPopup::new(
-            Rc::clone(&redraw_notify),
+        controller: Rc<C>,
+        content: T,
+        handlers: H,
+    ) -> Self {
+        let base = PromptPopup::new(
             title,
             prompt_str,
             prompt_style,
             prompt_space,
             border_color,
             background_color,
-            has_close_title,
             size_constraint,
-            |base| {
-                controller_builder(YesNoControllerInner {
-                    base,
-                    is_showing_buttons: true,
-                })
-            },
-            |controller| {
-                VerticalSplit::new(
-                    content_builder(controller),
-                    Padded::new(
-                        Padding::vertical(1),
-                        ButtonsOrTextLine {
-                            controller: Rc::clone(controller),
-                            buttons: DualButtons::new(
-                                redraw_notify,
-                                yes_text,
-                                no_text,
-                                YES_KEYS,
-                                CANCEL_NO_KEYS,
-                                handler_builder(controller),
-                                yes_style,
-                                yes_selected_style,
-                                no_style,
-                                no_selected_style,
-                            ),
-                            alternative_text: CenteredTextLine::new(alternative_text, alternative_text_style),
-                        },
-                    ),
-                    0,
-                    0,
-                )
-            },
+            Rc::clone(&controller),
+            VerticalSplit::new(
+                content,
+                Padded::new(
+                    Padding::vertical(1),
+                    ButtonsOrTextLine {
+                        controller,
+                        buttons: DualButtons::new(
+                            redraw_notify,
+                            yes_text,
+                            no_text,
+                            YES_KEYS,
+                            CANCEL_NO_KEYS,
+                            handlers,
+                            yes_style,
+                            yes_selected_style,
+                            no_style,
+                            no_selected_style,
+                        ),
+                        alternative_text: CenteredTextLine::new(alternative_text, alternative_text_style),
+                    },
+                ),
+                0,
+                0,
+            ),
         );
 
-        let value = YesNoPopup { base };
-        (value, receiver)
+        YesNoPopup { base }
     }
 }
 

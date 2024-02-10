@@ -40,16 +40,13 @@ pub struct ShutdownPopup<W: AsyncWrite + Unpin + 'static> {
 }
 
 struct ButtonHandler<W: AsyncWrite + Unpin + 'static> {
-    controller: Weak<YesNoSimpleController>,
+    controller: Rc<YesNoSimpleController>,
     manager: Weak<MutexedSandstormRequestManager<W>>,
 }
 
 impl<W: AsyncWrite + Unpin + 'static> ButtonHandler<W> {
-    fn new(controller: &Rc<YesNoSimpleController>, manager: Weak<MutexedSandstormRequestManager<W>>) -> Self {
-        Self {
-            controller: Rc::downgrade(controller),
-            manager,
-        }
+    fn new(controller: Rc<YesNoSimpleController>, manager: Weak<MutexedSandstormRequestManager<W>>) -> Self {
+        Self { controller, manager }
     }
 }
 
@@ -60,23 +57,24 @@ impl<W: AsyncWrite + Unpin + 'static> DualButtonsHandler for ButtonHandler<W> {
                 let _ = rc.shutdown_fn(|_| ()).await;
             });
 
-            if let Some(rc) = self.controller.upgrade() {
-                rc.set_showing_buttons(false);
-                rc.set_closable(false);
-            }
+            self.controller.set_showing_buttons(false);
+            self.controller.set_closable(false);
         }
     }
 
     fn on_right(&mut self) {
-        if let Some(rc) = self.controller.upgrade() {
-            rc.close_popup();
-        }
+        self.controller.close_popup();
     }
 }
 
 impl<W: AsyncWrite + Unpin + 'static> ShutdownPopup<W> {
     pub fn new(redraw_notify: Rc<Notify>, manager: Weak<MutexedSandstormRequestManager<W>>) -> (Self, oneshot::Receiver<()>) {
-        let (base, close_receiver) = YesNoPopup::new(
+        let (controller, close_receiver) = YesNoSimpleController::new(Rc::clone(&redraw_notify), true);
+        let controller = Rc::new(controller);
+
+        let handlers = ButtonHandler::new(Rc::clone(&controller), manager);
+
+        let base = YesNoPopup::new(
             redraw_notify,
             TITLE.into(),
             PROMPT_MESSAGE.into(),
@@ -92,11 +90,10 @@ impl<W: AsyncWrite + Unpin + 'static> ShutdownPopup<W> {
             Style::new(),
             Color::Reset,
             BACKGROUND_COLOR,
-            true,
             SizeConstraint::new().max(POPUP_WIDTH, u16::MAX),
-            YesNoSimpleController::new,
-            |_controller| Empty,
-            |controller| ButtonHandler::new(controller, manager),
+            controller,
+            Empty,
+            handlers,
         );
 
         let value = ShutdownPopup { base };

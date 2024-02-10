@@ -1,4 +1,4 @@
-use std::rc::{Rc, Weak};
+use std::rc::Rc;
 
 use crossterm::event;
 use ratatui::{
@@ -34,14 +34,14 @@ pub struct ConfirmClosePopup {
 }
 
 struct ButtonHandler {
-    controller: Weak<YesNoSimpleController>,
+    controller: Rc<YesNoSimpleController>,
     shutdown_notify: Rc<Notify>,
 }
 
 impl ButtonHandler {
-    fn new(controller: &Rc<YesNoSimpleController>, shutdown_notify: Rc<Notify>) -> Self {
+    fn new(controller: Rc<YesNoSimpleController>, shutdown_notify: Rc<Notify>) -> Self {
         Self {
-            controller: Rc::downgrade(controller),
+            controller,
             shutdown_notify,
         }
     }
@@ -49,23 +49,24 @@ impl ButtonHandler {
 
 impl DualButtonsHandler for ButtonHandler {
     fn on_left(&mut self) {
-        if let Some(rc) = self.controller.upgrade() {
-            rc.set_showing_buttons(false);
-            rc.set_closable(false);
-            self.shutdown_notify.notify_one();
-        }
+        self.controller.set_showing_buttons(false);
+        self.controller.set_closable(false);
+        self.shutdown_notify.notify_one();
     }
 
     fn on_right(&mut self) {
-        if let Some(rc) = self.controller.upgrade() {
-            rc.close_popup();
-        }
+        self.controller.close_popup();
     }
 }
 
 impl ConfirmClosePopup {
     pub fn new(redraw_notify: Rc<Notify>, shutdown_notify: Rc<Notify>) -> (Self, oneshot::Receiver<()>) {
-        let (base, close_receiver) = YesNoPopup::new(
+        let (controller, close_receiver) = YesNoSimpleController::new(Rc::clone(&redraw_notify), true);
+        let controller = Rc::new(controller);
+
+        let handlers = ButtonHandler::new(Rc::clone(&controller), shutdown_notify);
+
+        let base = YesNoPopup::new(
             redraw_notify,
             TITLE.into(),
             PROMPT_MESSAGE.into(),
@@ -81,11 +82,10 @@ impl ConfirmClosePopup {
             Style::new(),
             Color::Reset,
             BACKGROUND_COLOR,
-            true,
             SizeConstraint::new().max(POPUP_WIDTH, u16::MAX),
-            YesNoSimpleController::new,
-            |_controller| Empty,
-            |controller| ButtonHandler::new(controller, shutdown_notify),
+            controller,
+            Empty,
+            handlers,
         );
 
         let value = ConfirmClosePopup { base };

@@ -80,6 +80,7 @@ pub struct MenuBar<W: AsyncWrite + Unpin + 'static> {
     manager: Weak<MutexedSandstormRequestManager<W>>,
     state: Rc<RefCell<MenuBarState>>,
     redraw_notify: Rc<Notify>,
+    buffer_size_watch: broadcast::Sender<u32>,
     popup_sender: mpsc::UnboundedSender<Popup>,
     task_handle: JoinHandle<()>,
 }
@@ -186,14 +187,15 @@ impl<W: AsyncWrite + Unpin + 'static> MenuBar<W> {
             focused_element: FocusedElement::None,
         }));
 
-        let task_handle = start_menu_bar_background_task(&manager, &state, &redraw_notify, buffer_size_watch);
+        let task_handle = start_menu_bar_background_task(&manager, &state, &redraw_notify, buffer_size_watch.clone());
 
         Self {
             manager,
             state,
-            task_handle,
-            popup_sender,
             redraw_notify,
+            buffer_size_watch,
+            popup_sender,
+            task_handle,
         }
     }
 
@@ -216,7 +218,13 @@ impl<W: AsyncWrite + Unpin + 'static> MenuBar<W> {
             return;
         }
 
-        let popup = BufferSizePopup::new(Rc::clone(&self.redraw_notify), Weak::clone(&self.manager), state.buffer_size);
+        let popup = BufferSizePopup::new(
+            Rc::clone(&self.redraw_notify),
+            Weak::clone(&self.manager),
+            state.buffer_size,
+            self.buffer_size_watch.clone(),
+        );
+
         let _ = self.popup_sender.send(popup.into());
     }
 }

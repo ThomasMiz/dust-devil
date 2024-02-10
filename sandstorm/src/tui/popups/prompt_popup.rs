@@ -7,7 +7,6 @@ use ratatui::{
     widgets::Padding,
     Frame,
 };
-use tokio::sync::{oneshot, Notify};
 
 use crate::tui::{
     elements::{centered_text::CenteredText, padded::Padded, vertical_split::VerticalSplit},
@@ -16,7 +15,7 @@ use crate::tui::{
 };
 
 use super::{
-    popup_base::{PopupBase, PopupBaseController, PopupBaseControllerInner},
+    popup_base::{PopupBase, PopupBaseController},
     size_constraint::SizeConstraint,
     PopupContent,
 };
@@ -27,43 +26,32 @@ pub struct PromptPopup<C: PopupBaseController, T: PopupContent> {
 
 impl<C: PopupBaseController, T: PopupContent> PromptPopup<C, T> {
     #[allow(clippy::too_many_arguments)]
-    pub fn new<CF, TF>(
-        redraw_notify: Rc<Notify>,
+    pub fn new(
         title: StaticString,
         prompt_str: StaticString,
         prompt_style: Style,
         prompt_space: u16,
         border_color: Color,
         background_color: Color,
-        has_close_title: bool,
         size_constraint: SizeConstraint,
-        controller_builder: CF,
-        content_builder: TF,
-    ) -> (Self, oneshot::Receiver<()>)
-    where
-        CF: FnOnce(PopupBaseControllerInner) -> C,
-        TF: FnOnce(&Rc<C>) -> T,
-    {
-        let (base, receiver) = PopupBase::new(
-            redraw_notify,
+        controller: Rc<C>,
+        content: T,
+    ) -> Self {
+        let base = PopupBase::new(
             title,
             border_color,
             background_color,
-            has_close_title,
             size_constraint,
-            controller_builder,
-            |controller| {
-                VerticalSplit::new(
-                    Padded::new(Padding::horizontal(1), CenteredText::new(prompt_str, prompt_style)),
-                    content_builder(controller),
-                    0,
-                    prompt_space,
-                )
-            },
+            controller,
+            VerticalSplit::new(
+                Padded::new(Padding::horizontal(1), CenteredText::new(prompt_str, prompt_style)),
+                content,
+                0,
+                prompt_space,
+            ),
         );
 
-        let value = PromptPopup { base };
-        (value, receiver)
+        PromptPopup { base }
     }
 }
 

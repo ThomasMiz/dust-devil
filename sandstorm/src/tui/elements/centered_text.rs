@@ -92,11 +92,12 @@ impl CenteredText {
         self.lines.len() as u16
     }
 
-    fn resize_with_width(&mut self, width: u16) {
-        if self.current_width == width {
-            return;
-        }
+    pub fn modify_text<F: FnOnce(&mut StaticString)>(&mut self, f: F) {
+        f(&mut self.text);
+        self.resize_no_check(self.current_width);
+    }
 
+    fn resize_no_check(&mut self, width: u16) {
         self.current_width = width;
         self.lines.clear();
 
@@ -109,6 +110,14 @@ impl CenteredText {
                 text_draw_offset,
             });
         }
+    }
+
+    fn resize_with_width(&mut self, width: u16) {
+        if self.current_width == width {
+            return;
+        }
+
+        self.resize_no_check(width);
     }
 }
 

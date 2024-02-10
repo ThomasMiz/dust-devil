@@ -652,122 +652,112 @@ impl<W: AsyncWrite + Unpin> MutexedSandstormRequestManager<W> {
         guard.flush_writer().await
     }
 
-    pub async fn event_stream_config_fn<F: FnOnce(EventStreamConfigResponse) -> Option<EventStreamReceiver> + 'static>(
-        &self,
-        status: bool,
-        f: F,
-    ) -> Result<(), Error> {
-        let mut guard = self.inner.lock().await;
-        guard.event_stream_config_fn(status, f).await?;
-        guard.flush_writer().await
-    }
+    // pub async fn list_socks5_sockets_fn<F: FnOnce(ListSocks5SocketsResponse) + 'static>(&self, f: F) -> Result<(), Error> {
+    //     let mut guard = self.inner.lock().await;
+    //     guard.list_socks5_sockets_fn(f).await?;
+    //     guard.flush_writer().await
+    // }
 
-    pub async fn list_socks5_sockets_fn<F: FnOnce(ListSocks5SocketsResponse) + 'static>(&self, f: F) -> Result<(), Error> {
-        let mut guard = self.inner.lock().await;
-        guard.list_socks5_sockets_fn(f).await?;
-        guard.flush_writer().await
-    }
+    // pub async fn add_socks5_socket_fn<F: FnOnce(AddSocks5SocketResponse) + 'static>(&self, address: SocketAddr, f: F) -> Result<(), Error> {
+    //     let mut guard = self.inner.lock().await;
+    //     guard.add_socks5_socket_fn(address, f).await?;
+    //     guard.flush_writer().await
+    // }
 
-    pub async fn add_socks5_socket_fn<F: FnOnce(AddSocks5SocketResponse) + 'static>(&self, address: SocketAddr, f: F) -> Result<(), Error> {
-        let mut guard = self.inner.lock().await;
-        guard.add_socks5_socket_fn(address, f).await?;
-        guard.flush_writer().await
-    }
+    // pub async fn remove_socks5_socket_fn<F: FnOnce(RemoveSocks5SocketResponse) + 'static>(
+    //     &self,
+    //     address: SocketAddr,
+    //     f: F,
+    // ) -> Result<(), Error> {
+    //     let mut guard = self.inner.lock().await;
+    //     guard.remove_socks5_socket_fn(address, f).await?;
+    //     guard.flush_writer().await
+    // }
 
-    pub async fn remove_socks5_socket_fn<F: FnOnce(RemoveSocks5SocketResponse) + 'static>(
-        &self,
-        address: SocketAddr,
-        f: F,
-    ) -> Result<(), Error> {
-        let mut guard = self.inner.lock().await;
-        guard.remove_socks5_socket_fn(address, f).await?;
-        guard.flush_writer().await
-    }
+    // pub async fn list_sandstorm_sockets_fn<F: FnOnce(ListSandstormSocketsResponse) + 'static>(&self, f: F) -> Result<(), Error> {
+    //     let mut guard = self.inner.lock().await;
+    //     guard.list_sandstorm_sockets_fn(f).await?;
+    //     guard.flush_writer().await
+    // }
 
-    pub async fn list_sandstorm_sockets_fn<F: FnOnce(ListSandstormSocketsResponse) + 'static>(&self, f: F) -> Result<(), Error> {
-        let mut guard = self.inner.lock().await;
-        guard.list_sandstorm_sockets_fn(f).await?;
-        guard.flush_writer().await
-    }
+    // pub async fn add_sandstorm_socket_fn<F: FnOnce(AddSandstormSocketResponse) + 'static>(
+    //     &self,
+    //     address: SocketAddr,
+    //     f: F,
+    // ) -> Result<(), Error> {
+    //     let mut guard = self.inner.lock().await;
+    //     guard.add_sandstorm_socket_fn(address, f).await?;
+    //     guard.flush_writer().await
+    // }
 
-    pub async fn add_sandstorm_socket_fn<F: FnOnce(AddSandstormSocketResponse) + 'static>(
-        &self,
-        address: SocketAddr,
-        f: F,
-    ) -> Result<(), Error> {
-        let mut guard = self.inner.lock().await;
-        guard.add_sandstorm_socket_fn(address, f).await?;
-        guard.flush_writer().await
-    }
+    // pub async fn remove_sandstorm_socket_fn<F: FnOnce(RemoveSandstormSocketResponse) + 'static>(
+    //     &self,
+    //     address: SocketAddr,
+    //     f: F,
+    // ) -> Result<(), Error> {
+    //     let mut guard = self.inner.lock().await;
+    //     guard.remove_sandstorm_socket_fn(address, f).await?;
+    //     guard.flush_writer().await
+    // }
 
-    pub async fn remove_sandstorm_socket_fn<F: FnOnce(RemoveSandstormSocketResponse) + 'static>(
-        &self,
-        address: SocketAddr,
-        f: F,
-    ) -> Result<(), Error> {
-        let mut guard = self.inner.lock().await;
-        guard.remove_sandstorm_socket_fn(address, f).await?;
-        guard.flush_writer().await
-    }
+    // pub async fn list_users_fn<F: FnOnce(ListUsersResponse) + 'static>(&self, f: F) -> Result<(), Error> {
+    //     let mut guard = self.inner.lock().await;
+    //     guard.list_users_fn(f).await?;
+    //     guard.flush_writer().await
+    // }
 
-    pub async fn list_users_fn<F: FnOnce(ListUsersResponse) + 'static>(&self, f: F) -> Result<(), Error> {
-        let mut guard = self.inner.lock().await;
-        guard.list_users_fn(f).await?;
-        guard.flush_writer().await
-    }
+    // pub async fn add_user_fn<F: FnOnce(AddUserResponse) + 'static>(
+    //     &self,
+    //     username: &str,
+    //     password: &str,
+    //     role: UserRole,
+    //     f: F,
+    // ) -> Result<(), Error> {
+    //     let mut guard = self.inner.lock().await;
+    //     guard.add_user_fn(username, password, role, f).await?;
+    //     guard.flush_writer().await
+    // }
 
-    pub async fn add_user_fn<F: FnOnce(AddUserResponse) + 'static>(
-        &self,
-        username: &str,
-        password: &str,
-        role: UserRole,
-        f: F,
-    ) -> Result<(), Error> {
-        let mut guard = self.inner.lock().await;
-        guard.add_user_fn(username, password, role, f).await?;
-        guard.flush_writer().await
-    }
+    // pub async fn update_user_fn<F: FnOnce(UpdateUserResponse) + 'static>(
+    //     &self,
+    //     username: &str,
+    //     password: Option<&str>,
+    //     role: Option<UserRole>,
+    //     f: F,
+    // ) -> Result<(), Error> {
+    //     let mut guard = self.inner.lock().await;
+    //     guard.update_user_fn(username, password, role, f).await?;
+    //     guard.flush_writer().await
+    // }
 
-    pub async fn update_user_fn<F: FnOnce(UpdateUserResponse) + 'static>(
-        &self,
-        username: &str,
-        password: Option<&str>,
-        role: Option<UserRole>,
-        f: F,
-    ) -> Result<(), Error> {
-        let mut guard = self.inner.lock().await;
-        guard.update_user_fn(username, password, role, f).await?;
-        guard.flush_writer().await
-    }
+    // pub async fn delete_user_fn<F: FnOnce(DeleteUserResponse) + 'static>(&self, username: &str, f: F) -> Result<(), Error> {
+    //     let mut guard = self.inner.lock().await;
+    //     guard.delete_user_fn(username, f).await?;
+    //     guard.flush_writer().await
+    // }
 
-    pub async fn delete_user_fn<F: FnOnce(DeleteUserResponse) + 'static>(&self, username: &str, f: F) -> Result<(), Error> {
-        let mut guard = self.inner.lock().await;
-        guard.delete_user_fn(username, f).await?;
-        guard.flush_writer().await
-    }
+    // pub async fn list_auth_methods_fn<F: FnOnce(ListAuthMethodsResponse) + 'static>(&self, f: F) -> Result<(), Error> {
+    //     let mut guard = self.inner.lock().await;
+    //     guard.list_auth_methods_fn(f).await?;
+    //     guard.flush_writer().await
+    // }
 
-    pub async fn list_auth_methods_fn<F: FnOnce(ListAuthMethodsResponse) + 'static>(&self, f: F) -> Result<(), Error> {
-        let mut guard = self.inner.lock().await;
-        guard.list_auth_methods_fn(f).await?;
-        guard.flush_writer().await
-    }
+    // pub async fn toggle_auth_method_fn<F: FnOnce(ToggleAuthMethodResponse) + 'static>(
+    //     &self,
+    //     auth_method: AuthMethod,
+    //     status: bool,
+    //     f: F,
+    // ) -> Result<(), Error> {
+    //     let mut guard = self.inner.lock().await;
+    //     guard.toggle_auth_method_fn(auth_method, status, f).await?;
+    //     guard.flush_writer().await
+    // }
 
-    pub async fn toggle_auth_method_fn<F: FnOnce(ToggleAuthMethodResponse) + 'static>(
-        &self,
-        auth_method: AuthMethod,
-        status: bool,
-        f: F,
-    ) -> Result<(), Error> {
-        let mut guard = self.inner.lock().await;
-        guard.toggle_auth_method_fn(auth_method, status, f).await?;
-        guard.flush_writer().await
-    }
-
-    pub async fn get_metrics_fn<F: FnOnce(CurrentMetricsResponse) + 'static>(&self, f: F) -> Result<(), Error> {
-        let mut guard = self.inner.lock().await;
-        guard.get_metrics_fn(f).await?;
-        guard.flush_writer().await
-    }
+    // pub async fn get_metrics_fn<F: FnOnce(CurrentMetricsResponse) + 'static>(&self, f: F) -> Result<(), Error> {
+    //     let mut guard = self.inner.lock().await;
+    //     guard.get_metrics_fn(f).await?;
+    //     guard.flush_writer().await
+    // }
 
     pub async fn get_buffer_size_fn<F: FnOnce(GetBufferSizeResponse) + 'static>(&self, f: F) -> Result<(), Error> {
         let mut guard = self.inner.lock().await;
