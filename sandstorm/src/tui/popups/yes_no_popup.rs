@@ -20,14 +20,14 @@ use crate::tui::{
         vertical_split::VerticalSplit,
     },
     text_wrapper::StaticString,
-    ui_element::{HandleEventStatus, UIElement},
+    ui_element::{AutosizeUIElement, HandleEventStatus, UIElement},
 };
 
 use super::{
     popup_base::{PopupBaseController, PopupBaseControllerInner},
     prompt_popup::PromptPopup,
     size_constraint::SizeConstraint,
-    PopupContent, CANCEL_NO_KEYS, YES_KEYS,
+    CANCEL_NO_KEYS, YES_KEYS,
 };
 
 pub trait YesNoPopupController: PopupBaseController {
@@ -35,7 +35,7 @@ pub trait YesNoPopupController: PopupBaseController {
     fn get_showing_buttons(&self) -> bool;
 }
 
-pub struct YesNoPopup<C: YesNoPopupController, T: PopupContent, H: DualButtonsHandler> {
+pub struct YesNoPopup<C: YesNoPopupController, T: AutosizeUIElement, H: DualButtonsHandler> {
     base: PromptPopup<C, VerticalSplit<T, Padded<ButtonsOrTextLine<C, H>>>>,
 }
 
@@ -76,7 +76,7 @@ impl<C: YesNoPopupController, H: DualButtonsHandler> UIElement for ButtonsOrText
     }
 }
 
-impl<C: YesNoPopupController, H: DualButtonsHandler> PopupContent for ButtonsOrTextLine<C, H> {
+impl<C: YesNoPopupController, H: DualButtonsHandler> AutosizeUIElement for ButtonsOrTextLine<C, H> {
     fn begin_resize(&mut self, width: u16, height: u16) -> (u16, u16) {
         self.buttons.begin_resize(width, height)
     }
@@ -154,7 +154,7 @@ impl YesNoPopupController for YesNoSimpleController {
     }
 }
 
-impl<C: YesNoPopupController, T: PopupContent, H: DualButtonsHandler> YesNoPopup<C, T, H> {
+impl<C: YesNoPopupController, T: AutosizeUIElement, H: DualButtonsHandler> YesNoPopup<C, T, H> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         redraw_notify: Rc<Notify>,
@@ -216,7 +216,7 @@ impl<C: YesNoPopupController, T: PopupContent, H: DualButtonsHandler> YesNoPopup
     }
 }
 
-impl<C: YesNoPopupController, T: PopupContent, H: DualButtonsHandler> UIElement for YesNoPopup<C, T, H> {
+impl<C: YesNoPopupController, T: AutosizeUIElement, H: DualButtonsHandler> UIElement for YesNoPopup<C, T, H> {
     fn resize(&mut self, area: Rect) {
         self.base.resize(area);
     }

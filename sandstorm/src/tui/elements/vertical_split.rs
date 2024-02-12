@@ -1,10 +1,7 @@
 use crossterm::event;
 use ratatui::{layout::Rect, Frame};
 
-use crate::tui::{
-    popups::PopupContent,
-    ui_element::{HandleEventStatus, PassFocusDirection, UIElement},
-};
+use crate::tui::ui_element::{AutosizeUIElement, HandleEventStatus, PassFocusDirection, UIElement};
 
 pub struct VerticalSplit<U: UIElement, L: UIElement> {
     pub upper: U,
@@ -141,7 +138,7 @@ impl<U: UIElement, L: UIElement> UIElement for VerticalSplit<U, L> {
     }
 }
 
-impl<U: PopupContent, L: PopupContent> PopupContent for VerticalSplit<U, L> {
+impl<U: AutosizeUIElement, L: AutosizeUIElement> AutosizeUIElement for VerticalSplit<U, L> {
     fn begin_resize(&mut self, width: u16, height: u16) -> (u16, u16) {
         let (upper_width, upper_height) = self.upper.begin_resize(width, height);
 

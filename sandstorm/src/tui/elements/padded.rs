@@ -1,10 +1,7 @@
 use crossterm::event;
 use ratatui::{layout::Rect, widgets::Padding, Frame};
 
-use crate::tui::{
-    popups::PopupContent,
-    ui_element::{HandleEventStatus, UIElement},
-};
+use crate::tui::ui_element::{AutosizeUIElement, HandleEventStatus, UIElement};
 
 pub struct Padded<T: UIElement> {
     pub padding: Padding,
@@ -48,7 +45,7 @@ impl<T: UIElement> UIElement for Padded<T> {
     }
 }
 
-impl<T: PopupContent> PopupContent for Padded<T> {
+impl<T: AutosizeUIElement> AutosizeUIElement for Padded<T> {
     fn begin_resize(&mut self, width: u16, height: u16) -> (u16, u16) {
         let width = width.saturating_sub(self.padding.left).saturating_sub(self.padding.right);
         let height = height.saturating_sub(self.padding.top).saturating_sub(self.padding.bottom);

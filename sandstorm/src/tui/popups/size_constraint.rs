@@ -1,9 +1,7 @@
 use crossterm::event;
 use ratatui::{layout::Rect, Frame};
 
-use crate::tui::ui_element::{HandleEventStatus, UIElement};
-
-use super::PopupContent;
+use crate::tui::ui_element::{AutosizeUIElement, HandleEventStatus, UIElement};
 
 pub struct SizeConstraint {
     min: (u16, u16),
@@ -39,18 +37,18 @@ impl Default for SizeConstraint {
     }
 }
 
-pub struct ConstrainedPopupContent<T: PopupContent> {
+pub struct ConstrainedPopupContent<T: AutosizeUIElement> {
     pub size_constraint: SizeConstraint,
     pub inner: T,
 }
 
-impl<T: PopupContent> ConstrainedPopupContent<T> {
+impl<T: AutosizeUIElement> ConstrainedPopupContent<T> {
     pub fn new(size_constraint: SizeConstraint, inner: T) -> Self {
         Self { size_constraint, inner }
     }
 }
 
-impl<T: PopupContent> UIElement for ConstrainedPopupContent<T> {
+impl<T: AutosizeUIElement> UIElement for ConstrainedPopupContent<T> {
     fn resize(&mut self, area: Rect) {
         self.inner.resize(area);
     }
@@ -72,7 +70,7 @@ impl<T: PopupContent> UIElement for ConstrainedPopupContent<T> {
     }
 }
 
-impl<T: PopupContent> PopupContent for ConstrainedPopupContent<T> {
+impl<T: AutosizeUIElement> AutosizeUIElement for ConstrainedPopupContent<T> {
     fn begin_resize(&mut self, mut width: u16, mut height: u16) -> (u16, u16) {
         width = width.clamp(self.size_constraint.min.0, self.size_constraint.max.0);
         height = height.clamp(self.size_constraint.min.1, self.size_constraint.max.1);

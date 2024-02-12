@@ -3,10 +3,7 @@ use std::ops::{Deref, DerefMut};
 use crossterm::event::{self, KeyCode, KeyEventKind};
 use ratatui::{layout::Rect, Frame};
 
-use crate::tui::{
-    popups::PopupContent,
-    ui_element::{HandleEventStatus, PassFocusDirection, UIElement},
-};
+use crate::tui::ui_element::{AutosizeUIElement, HandleEventStatus, PassFocusDirection, UIElement};
 
 /// A wrapper around another [`UIElement`] that holds onto focus when the inner element requests
 /// focus to be passed away with [`PassFocusDirection::Away`]. When that happens, the inner element
@@ -103,7 +100,7 @@ impl<I: UIElement> UIElement for FocusCell<I> {
     }
 }
 
-impl<I: PopupContent> PopupContent for FocusCell<I> {
+impl<I: AutosizeUIElement> AutosizeUIElement for FocusCell<I> {
     fn begin_resize(&mut self, width: u16, height: u16) -> (u16, u16) {
         self.inner.begin_resize(width, height)
     }

@@ -1,4 +1,8 @@
-use std::{cell::RefCell, rc::Rc};
+use std::{
+    cell::RefCell,
+    ops::{Deref, DerefMut},
+    rc::Rc,
+};
 
 use crossterm::event::{self, KeyCode, KeyEventKind, KeyModifiers};
 use ratatui::{
@@ -8,10 +12,7 @@ use ratatui::{
 };
 use tokio::sync::Notify;
 
-use crate::tui::{
-    popups::PopupContent,
-    ui_element::{HandleEventStatus, PassFocusDirection, UIElement},
-};
+use crate::tui::ui_element::{AutosizeUIElement, HandleEventStatus, PassFocusDirection, UIElement};
 
 // An interface for handling events from inside a text entry.
 pub trait TextEntryHandler {
@@ -129,6 +130,14 @@ impl<H: TextEntryHandler> TextEntry<H> {
     }
 }
 
+impl<H: TextEntryHandler> Deref for TextEntry<H> {
+    type Target = Rc<TextEntryController>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.controller
+    }
+}
+
 /// Calculates how many characters to skip left when skipping a whole word (with Ctrl-Left or
 /// Ctrl-Backspace). The cursor is assumed to be at the end of the given string slice.
 ///
@@ -181,7 +190,8 @@ impl<H: TextEntryHandler> UIElement for TextEntry<H> {
     }
 
     fn render(&mut self, area: Rect, frame: &mut Frame) {
-        let controller_inner = self.controller.inner.borrow();
+        let inner_guard = self.inner.borrow();
+        let inner = inner_guard.deref();
 
         let max_text_x = if let Some(cursor_position) = &self.cursor {
             let mut from_char_index: isize = cursor_position.index_chars as isize - (area.width as isize + 1) / 2;
@@ -193,9 +203,9 @@ impl<H: TextEntryHandler> UIElement for TextEntry<H> {
             }
             let mut from_char_index = from_char_index as usize;
 
-            if to_char_index > controller_inner.text_len_chars {
-                from_char_index = from_char_index.saturating_sub(to_char_index - controller_inner.text_len_chars);
-                to_char_index = controller_inner.text_len_chars;
+            if to_char_index > inner.text_len_chars {
+                from_char_index = from_char_index.saturating_sub(to_char_index - inner.text_len_chars);
+                to_char_index = inner.text_len_chars;
             }
 
             let mut max_chars_before = cursor_position.index_chars.saturating_sub(from_char_index) as u16;
@@ -208,16 +218,16 @@ impl<H: TextEntryHandler> UIElement for TextEntry<H> {
             let buf = frame.buffer_mut();
 
             let mut index = buf.index_of(area.x + max_chars_before, area.y);
-            let chars_before = controller_inner.text[..cursor_position.index_bytes].chars().rev();
+            let chars_before = inner.text[..cursor_position.index_bytes].chars().rev();
             for c in chars_before.take(max_chars_before as usize) {
                 index -= 1;
-                buf.content[index].set_char(c).set_style(controller_inner.text_typing_style);
+                buf.content[index].set_char(c).set_style(inner.text_typing_style);
             }
 
             let mut index = buf.index_of(area.x + max_chars_before, area.y);
-            let chars_after = controller_inner.text[cursor_position.index_bytes..].chars();
+            let chars_after = inner.text[cursor_position.index_bytes..].chars();
             for c in chars_after.take(max_chars_after as usize) {
-                buf.content[index].set_char(c).set_style(controller_inner.text_typing_style);
+                buf.content[index].set_char(c).set_style(inner.text_typing_style);
                 index += 1;
             }
 
@@ -227,20 +237,14 @@ impl<H: TextEntryHandler> UIElement for TextEntry<H> {
         } else {
             frame
                 .buffer_mut()
-                .set_stringn(
-                    area.x,
-                    area.y,
-                    &controller_inner.text,
-                    area.width as usize,
-                    controller_inner.text_idle_style,
-                )
+                .set_stringn(area.x, area.y, &inner.text, area.width as usize, inner.text_idle_style)
                 .0
         };
 
         if max_text_x < area.right() {
             let text_style = match self.cursor.is_some() {
-                true => controller_inner.text_typing_style,
-                false => controller_inner.text_idle_style,
+                true => inner.text_typing_style,
+                false => inner.text_idle_style,
             };
 
             let buf = frame.buffer_mut();
@@ -272,20 +276,22 @@ impl<H: TextEntryHandler> UIElement for TextEntry<H> {
         match key_event.code {
             KeyCode::Char(c) if self.controller.inner.borrow().text_len_chars < self.max_length => {
                 if self.handler.on_char(&self.controller, c, cursor_position) {
-                    let mut controller_inner = self.controller.inner.borrow_mut();
-                    controller_inner.text.insert(cursor_position.index_bytes, c);
-                    controller_inner.text_len_chars += 1;
+                    let mut inner_guard = self.controller.inner.borrow_mut();
+                    let inner = inner_guard.deref_mut();
+                    inner.text.insert(cursor_position.index_bytes, c);
+                    inner.text_len_chars += 1;
                     cursor_position.index_bytes += c.len_utf8();
                     cursor_position.index_chars += 1;
                     text_changed = true;
                 }
             }
             KeyCode::Backspace => {
-                let mut controller_inner = self.controller.inner.borrow_mut();
+                let mut inner_guard = self.controller.inner.borrow_mut();
+                let inner = inner_guard.deref_mut();
                 let (byte_count, char_count) = if key_event.modifiers.contains(KeyModifiers::CONTROL) {
-                    calc_wordskip_left(&controller_inner.text[..cursor_position.index_bytes])
+                    calc_wordskip_left(&inner.text[..cursor_position.index_bytes])
                 } else {
-                    controller_inner.text[..cursor_position.index_bytes]
+                    inner.text[..cursor_position.index_bytes]
                         .chars()
                         .next_back()
                         .map(|c| (c.len_utf8(), 1))
@@ -294,19 +300,20 @@ impl<H: TextEntryHandler> UIElement for TextEntry<H> {
 
                 if byte_count != 0 {
                     let from_byte = cursor_position.index_bytes - byte_count;
-                    controller_inner.text.drain(from_byte..cursor_position.index_bytes);
-                    controller_inner.text_len_chars -= char_count;
+                    inner.text.drain(from_byte..cursor_position.index_bytes);
+                    inner.text_len_chars -= char_count;
                     cursor_position.index_bytes -= byte_count;
                     cursor_position.index_chars -= char_count;
                     text_changed = true;
                 }
             }
             KeyCode::Delete => {
-                let mut controller_inner = self.controller.inner.borrow_mut();
+                let mut inner_guard = self.controller.inner.borrow_mut();
+                let inner = inner_guard.deref_mut();
                 let (byte_count, char_count) = if key_event.modifiers.contains(KeyModifiers::CONTROL) {
-                    calc_wordskip_right(&controller_inner.text[cursor_position.index_bytes..])
+                    calc_wordskip_right(&inner.text[cursor_position.index_bytes..])
                 } else {
-                    controller_inner.text[cursor_position.index_bytes..]
+                    inner.text[cursor_position.index_bytes..]
                         .chars()
                         .next()
                         .map(|c| (c.len_utf8(), 1))
@@ -315,17 +322,18 @@ impl<H: TextEntryHandler> UIElement for TextEntry<H> {
 
                 if byte_count != 0 {
                     let to_byte = cursor_position.index_bytes + byte_count;
-                    controller_inner.text.drain(cursor_position.index_bytes..to_byte);
-                    controller_inner.text_len_chars -= char_count;
+                    inner.text.drain(cursor_position.index_bytes..to_byte);
+                    inner.text_len_chars -= char_count;
                     text_changed = true;
                 }
             }
             KeyCode::Left => {
-                let controller_inner = self.controller.inner.borrow();
+                let inner_guard = self.controller.inner.borrow();
+                let inner = inner_guard.deref();
                 let (byte_count, char_count) = if key_event.modifiers.contains(KeyModifiers::CONTROL) {
-                    calc_wordskip_left(&controller_inner.text[..cursor_position.index_bytes])
+                    calc_wordskip_left(&inner.text[..cursor_position.index_bytes])
                 } else {
-                    controller_inner.text[..cursor_position.index_bytes]
+                    inner.text[..cursor_position.index_bytes]
                         .chars()
                         .next_back()
                         .map(|c| (c.len_utf8(), 1))
@@ -339,11 +347,12 @@ impl<H: TextEntryHandler> UIElement for TextEntry<H> {
                 }
             }
             KeyCode::Right => {
-                let controller_inner = self.controller.inner.borrow();
+                let inner_guard = self.controller.inner.borrow();
+                let inner = inner_guard.deref();
                 let (byte_count, char_count) = if key_event.modifiers.contains(KeyModifiers::CONTROL) {
-                    calc_wordskip_right(&controller_inner.text[cursor_position.index_bytes..])
+                    calc_wordskip_right(&inner.text[cursor_position.index_bytes..])
                 } else {
-                    controller_inner.text[cursor_position.index_bytes..]
+                    inner.text[cursor_position.index_bytes..]
                         .chars()
                         .next()
                         .map(|c| (c.len_utf8(), 1))
@@ -357,10 +366,11 @@ impl<H: TextEntryHandler> UIElement for TextEntry<H> {
                 }
             }
             KeyCode::End => {
-                let controller_inner = self.controller.inner.borrow();
-                if cursor_position.index_bytes != controller_inner.text.len() {
-                    cursor_position.index_bytes = controller_inner.text.len();
-                    cursor_position.index_chars = controller_inner.text_len_chars;
+                let inner_guard = self.controller.inner.borrow();
+                let inner = inner_guard.deref();
+                if cursor_position.index_bytes != inner.text.len() {
+                    cursor_position.index_bytes = inner.text.len();
+                    cursor_position.index_chars = inner.text_len_chars;
                     needs_notify = true;
                 }
             }
@@ -395,10 +405,11 @@ impl<H: TextEntryHandler> UIElement for TextEntry<H> {
     }
 
     fn receive_focus(&mut self, _focus_position: (u16, u16)) -> bool {
-        let controller_inner = self.controller.inner.borrow();
+        let inner_guard = self.controller.inner.borrow();
+        let inner = inner_guard.deref();
         self.cursor = Some(CursorPosition {
-            index_bytes: controller_inner.text.len(),
-            index_chars: controller_inner.text_len_chars,
+            index_bytes: inner.text.len(),
+            index_chars: inner.text_len_chars,
         });
 
         self.controller.redraw_notify.notify_one();
@@ -412,7 +423,7 @@ impl<H: TextEntryHandler> UIElement for TextEntry<H> {
     }
 }
 
-impl<H: TextEntryHandler> PopupContent for TextEntry<H> {
+impl<H: TextEntryHandler> AutosizeUIElement for TextEntry<H> {
     fn begin_resize(&mut self, width: u16, _height: u16) -> (u16, u16) {
         (self.max_length.min(width as usize) as u16, 1)
     }

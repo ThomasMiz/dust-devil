@@ -5,9 +5,8 @@ use ratatui::{layout::Rect, style::Style, Frame};
 use tokio::sync::Notify;
 
 use crate::tui::{
-    popups::PopupContent,
     text_wrapper::StaticString,
-    ui_element::{HandleEventStatus, PassFocusDirection, UIElement},
+    ui_element::{AutosizeUIElement, HandleEventStatus, PassFocusDirection, UIElement},
 };
 
 pub trait DualButtonsHandler {
@@ -246,7 +245,7 @@ impl<H: DualButtonsHandler> UIElement for DualButtons<H> {
     }
 }
 
-impl<H: DualButtonsHandler> PopupContent for DualButtons<H> {
+impl<H: DualButtonsHandler> AutosizeUIElement for DualButtons<H> {
     fn begin_resize(&mut self, width: u16, _height: u16) -> (u16, u16) {
         let optimal_width = self.left_len_chars.saturating_add(self.right_len_chars).saturating_add(3);
         (width.min(optimal_width), 1)

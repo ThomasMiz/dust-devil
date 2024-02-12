@@ -1,10 +1,7 @@
 use crossterm::event;
 use ratatui::{layout::Rect, Frame};
 
-use crate::tui::{
-    popups::PopupContent,
-    ui_element::{HandleEventStatus, UIElement},
-};
+use crate::tui::ui_element::{AutosizeUIElement, HandleEventStatus, UIElement};
 
 pub struct Empty;
 
@@ -24,7 +21,7 @@ impl UIElement for Empty {
     fn focus_lost(&mut self) {}
 }
 
-impl PopupContent for Empty {
+impl AutosizeUIElement for Empty {
     fn begin_resize(&mut self, _width: u16, _height: u16) -> (u16, u16) {
         (0, 0)
     }

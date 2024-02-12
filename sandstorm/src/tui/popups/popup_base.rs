@@ -12,13 +12,13 @@ use tokio::sync::{oneshot, Notify};
 use crate::tui::{
     elements::focus_cell::FocusCell,
     text_wrapper::StaticString,
-    ui_element::{HandleEventStatus, UIElement},
+    ui_element::{AutosizeUIElement, HandleEventStatus, UIElement},
 };
 
 use super::{
     get_popup_block,
     size_constraint::{ConstrainedPopupContent, SizeConstraint},
-    PopupContent, CLOSE_KEY,
+    CLOSE_KEY,
 };
 
 pub trait PopupBaseController {
@@ -28,7 +28,7 @@ pub trait PopupBaseController {
     fn get_closable(&self) -> bool;
 }
 
-pub struct PopupBase<C: PopupBaseController, T: PopupContent> {
+pub struct PopupBase<C: PopupBaseController, T: AutosizeUIElement> {
     current_size: (u16, u16),
     title: StaticString,
     border_color: Color,
@@ -108,7 +108,7 @@ impl PopupBaseController for PopupBaseSimpleController {
     }
 }
 
-impl<C: PopupBaseController, T: PopupContent> PopupBase<C, T> {
+impl<C: PopupBaseController, T: AutosizeUIElement> PopupBase<C, T> {
     pub fn new(
         title: StaticString,
         border_color: Color,
@@ -128,7 +128,7 @@ impl<C: PopupBaseController, T: PopupContent> PopupBase<C, T> {
     }
 }
 
-impl<C: PopupBaseController, T: PopupContent> UIElement for PopupBase<C, T> {
+impl<C: PopupBaseController, T: AutosizeUIElement> UIElement for PopupBase<C, T> {
     fn resize(&mut self, area: Rect) {
         if area.width <= 2 || area.height <= 2 {
             self.current_size = (area.width, area.height);

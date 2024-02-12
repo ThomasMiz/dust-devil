@@ -33,7 +33,7 @@ use tokio::sync::Notify;
 
 use crate::tui::{
     text_wrapper::StaticString,
-    ui_element::{HandleEventStatus, PassFocusDirection, UIElement},
+    ui_element::{AutosizeUIElement, HandleEventStatus, PassFocusDirection, UIElement},
 };
 
 /// The list can be scrolled with the arrow keys, pageup, pagedown, etc. While holding shift, the
@@ -134,6 +134,10 @@ impl LongListController {
             redraw_notify,
             inner: RefCell::new(inner),
         }
+    }
+
+    pub fn item_count(&self) -> usize {
+        self.inner.borrow().item_count
     }
 
     /// Resets the list, forgetting any current items and setting a new item count.
@@ -727,5 +731,12 @@ impl<H: LongListHandler> UIElement for LongList<H> {
             inner.selected_index = None;
             self.redraw_notify.notify_one();
         }
+    }
+}
+
+impl<H: LongListHandler> AutosizeUIElement for LongList<H> {
+    fn begin_resize(&mut self, width: u16, height: u16) -> (u16, u16) {
+        let desired_height = self.controller.item_count().min(u16::MAX as usize) as u16;
+        (width, desired_height.min(height))
     }
 }

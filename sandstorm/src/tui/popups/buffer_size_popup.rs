@@ -31,7 +31,7 @@ use crate::{
             vertical_split::VerticalSplit,
         },
         pretty_print::PrettyByteDisplayer,
-        ui_element::{HandleEventStatus, UIElement},
+        ui_element::{AutosizeUIElement, HandleEventStatus, UIElement},
     },
 };
 
@@ -39,7 +39,7 @@ use super::{
     popup_base::PopupBaseController,
     size_constraint::SizeConstraint,
     yes_no_popup::{YesNoControllerInner, YesNoPopup, YesNoPopupController},
-    PopupContent, CANCEL_TITLE, CONFIRM_TITLE,
+    CANCEL_TITLE, CONFIRM_TITLE,
 };
 
 const BACKGROUND_COLOR: Color = Color::Magenta;
@@ -381,7 +381,7 @@ impl<W: AsyncWrite + Unpin + 'static> UIElement for Content<W> {
     }
 }
 
-impl<W: AsyncWrite + Unpin + 'static> PopupContent for Content<W> {
+impl<W: AsyncWrite + Unpin + 'static> AutosizeUIElement for Content<W> {
     fn begin_resize(&mut self, width: u16, height: u16) -> (u16, u16) {
         self.base.begin_resize(width, height)
     }

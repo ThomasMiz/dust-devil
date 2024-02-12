@@ -60,10 +60,9 @@ pub enum HandleEventStatus {
 
 impl HandleEventStatus {
     pub fn or_else<F: FnOnce() -> Self>(self, f: F) -> Self {
-        if self == HandleEventStatus::Unhandled {
-            f()
-        } else {
-            self
+        match self {
+            HandleEventStatus::Unhandled => f(),
+            other => other,
         }
     }
 }
@@ -88,4 +87,14 @@ pub enum PassFocusDirection {
 
     /// Pass focus rightwards.
     Right,
+}
+
+/// Represents an [`UIElement`] that can request a size during resize operations.
+pub trait AutosizeUIElement: UIElement {
+    /// Called before [`UIElement::resize`] with the maximum available size, and returns this
+    /// element's desired size. After this call, `resize` will be called with the final size.
+    ///
+    /// Elements should only ask for exactly as much space as they need and no more. Asking for
+    /// more space might mean other elements are not given any space at all.
+    fn begin_resize(&mut self, width: u16, height: u16) -> (u16, u16);
 }

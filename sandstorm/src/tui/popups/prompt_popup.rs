@@ -11,20 +11,19 @@ use ratatui::{
 use crate::tui::{
     elements::{centered_text::CenteredText, padded::Padded, vertical_split::VerticalSplit},
     text_wrapper::StaticString,
-    ui_element::{HandleEventStatus, UIElement},
+    ui_element::{AutosizeUIElement, HandleEventStatus, UIElement},
 };
 
 use super::{
     popup_base::{PopupBase, PopupBaseController},
     size_constraint::SizeConstraint,
-    PopupContent,
 };
 
-pub struct PromptPopup<C: PopupBaseController, T: PopupContent> {
+pub struct PromptPopup<C: PopupBaseController, T: AutosizeUIElement> {
     base: PopupBase<C, VerticalSplit<Padded<CenteredText>, T>>,
 }
 
-impl<C: PopupBaseController, T: PopupContent> PromptPopup<C, T> {
+impl<C: PopupBaseController, T: AutosizeUIElement> PromptPopup<C, T> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         title: StaticString,
@@ -55,7 +54,7 @@ impl<C: PopupBaseController, T: PopupContent> PromptPopup<C, T> {
     }
 }
 
-impl<C: PopupBaseController, T: PopupContent> UIElement for PromptPopup<C, T> {
+impl<C: PopupBaseController, T: AutosizeUIElement> UIElement for PromptPopup<C, T> {
     fn resize(&mut self, area: Rect) {
         self.base.resize(area);
     }

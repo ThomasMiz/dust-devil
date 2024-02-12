@@ -7,8 +7,6 @@ use ratatui::{
     },
 };
 
-use super::ui_element::UIElement;
-
 pub mod buffer_size_popup;
 pub mod confirm_close_popup;
 pub mod popup_base;
@@ -46,14 +44,4 @@ fn get_popup_block(title: &str, background_color: Color, border_color: Color, cl
     }
 
     block
-}
-
-/// Represents an [`UIElement`] for a popup.
-pub trait PopupContent: UIElement {
-    /// Called before [`UIElement::resize`] with the maximum available size, and returns this
-    /// element's desired size. After this call, `resize` will be called with the final size.
-    ///
-    /// Elements should only ask for exactly as much space as they need and no more. Asking for
-    /// more space might mean other elements are not given any space at all.
-    fn begin_resize(&mut self, width: u16, height: u16) -> (u16, u16);
 }

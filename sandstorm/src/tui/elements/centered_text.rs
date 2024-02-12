@@ -4,9 +4,8 @@ use crossterm::event;
 use ratatui::{layout::Rect, style::Style, Frame};
 
 use crate::tui::{
-    popups::PopupContent,
     text_wrapper::{StaticString, WrapTextIter},
-    ui_element::{HandleEventStatus, UIElement},
+    ui_element::{AutosizeUIElement, HandleEventStatus, UIElement},
 };
 
 /// A single line of centered text.
@@ -57,7 +56,7 @@ impl UIElement for CenteredTextLine {
     fn focus_lost(&mut self) {}
 }
 
-impl PopupContent for CenteredTextLine {
+impl AutosizeUIElement for CenteredTextLine {
     fn begin_resize(&mut self, width: u16, _height: u16) -> (u16, u16) {
         (width.min(self.text_len), 1)
     }
@@ -146,7 +145,7 @@ impl UIElement for CenteredText {
     fn focus_lost(&mut self) {}
 }
 
-impl PopupContent for CenteredText {
+impl AutosizeUIElement for CenteredText {
     fn begin_resize(&mut self, width: u16, _height: u16) -> (u16, u16) {
         self.resize_with_width(width);
         let text_width = self.lines.iter().map(|line| line.text_draw_width).max();
