@@ -1,10 +1,8 @@
 use ratatui::{
-    layout::Alignment,
-    style::{Color, Style},
-    widgets::{
-        block::{Position, Title},
+    layout::Alignment, style::{Color, Style}, text::Line, widgets::{
+        block::Position,
         Block, BorderType, Borders,
-    },
+    }
 };
 
 pub mod buffer_size_popup;
@@ -30,17 +28,13 @@ pub const CANCEL_NO_KEYS: &[char] = &[NO_KEY, CANCEL_KEY];
 
 const POPUP_BLOCK_BASE: Block = Block::new().borders(Borders::ALL).border_type(BorderType::Plain);
 
-fn get_close_title() -> Title<'static> {
-    Title::from(CLOSE_TITLE).alignment(Alignment::Right).position(Position::Bottom)
-}
-
 fn get_popup_block(title: &str, background_color: Color, border_color: Color, close_title: bool) -> Block {
     let mut block = POPUP_BLOCK_BASE
         .style(Style::new().bg(background_color).fg(border_color))
-        .title(Title::from(title).alignment(Alignment::Left).position(Position::Top));
+        .title_top(Line::raw(title).left_aligned());
 
     if close_title {
-        block = block.title(get_close_title());
+        block = block.title_bottom(Line::raw(CLOSE_TITLE).right_aligned())
     }
 
     block
