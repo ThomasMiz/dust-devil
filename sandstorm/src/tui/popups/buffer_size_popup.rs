@@ -248,6 +248,14 @@ impl<W: AsyncWrite + Unpin + 'static> PopupBaseController for Controller<W> {
         self.inner.borrow_mut().base.base.redraw_notify();
     }
 
+    fn request_resize(&self) {
+        self.inner.borrow_mut().base.base.request_resize();
+    }
+
+    fn get_resize_requested(&self) -> bool {
+        self.inner.borrow_mut().base.base.get_resize_requested()
+    }
+
     fn close_popup(&self) {
         self.inner.borrow_mut().base.base.close_popup();
     }

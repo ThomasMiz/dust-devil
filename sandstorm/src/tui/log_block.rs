@@ -13,7 +13,7 @@ use tokio::sync::Notify;
 
 use super::{
     colored_logs::log_event_to_single_line,
-    elements::long_list::{LongList, LongListHandler},
+    elements::long_list::{LongList, LongListHandler, OnEnterResult},
     text_wrapper::{wrap_lines_by_chars, StaticString},
     ui_element::{HandleEventStatus, UIElement},
 };
@@ -65,6 +65,10 @@ impl LongListHandler for LogListHandler {
             span.style.bg = None;
         }
     }
+
+    fn on_enter(&mut self, index: usize) -> OnEnterResult {
+        OnEnterResult::Unhandled
+    }
 }
 
 impl LogBlock {
@@ -76,7 +80,7 @@ impl LogBlock {
         };
 
         Self {
-            list: LongList::new(redraw_notify, TITLE.into(), 0, false, handler),
+            list: LongList::new(redraw_notify, TITLE.into(), 0, true, false, handler),
         }
     }
 

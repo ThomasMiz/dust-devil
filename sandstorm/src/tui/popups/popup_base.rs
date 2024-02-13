@@ -23,6 +23,8 @@ use super::{
 
 pub trait PopupBaseController {
     fn redraw_notify(&self);
+    fn request_resize(&self);
+    fn get_resize_requested(&self) -> bool;
     fn close_popup(&self);
     fn set_closable(&self, closable: bool);
     fn get_closable(&self) -> bool;
@@ -38,7 +40,8 @@ pub struct PopupBase<C: PopupBaseController, T: AutosizeUIElement> {
 }
 
 pub struct PopupBaseControllerInner {
-    redraw_notify: Rc<Notify>,
+    pub redraw_notify: Rc<Notify>,
+    resize_requested: bool,
     popup_close_sender: Option<oneshot::Sender<()>>,
     has_close_title: bool,
 }
@@ -49,6 +52,7 @@ impl PopupBaseControllerInner {
 
         let value = Self {
             redraw_notify,
+            resize_requested: false,
             popup_close_sender: Some(close_sender),
             has_close_title,
         };
@@ -58,6 +62,17 @@ impl PopupBaseControllerInner {
 
     pub fn redraw_notify(&mut self) {
         self.redraw_notify.notify_one();
+    }
+
+    pub fn request_resize(&mut self) {
+        self.resize_requested = true;
+        self.redraw_notify.notify_one();
+    }
+
+    pub fn get_resize_requested(&mut self) -> bool {
+        let requested = self.resize_requested;
+        self.resize_requested = false;
+        requested
     }
 
     pub fn close_popup(&mut self) {
@@ -83,16 +98,28 @@ pub struct PopupBaseSimpleController {
 }
 
 impl PopupBaseSimpleController {
-    pub fn new(inner: PopupBaseControllerInner) -> Self {
-        Self {
+    pub fn new(redraw_notify: Rc<Notify>, has_close_title: bool) -> (Self, oneshot::Receiver<()>) {
+        let (inner, close_receiver) = PopupBaseControllerInner::new(redraw_notify, has_close_title);
+
+        let value = Self {
             inner: RefCell::new(inner),
-        }
+        };
+
+        (value, close_receiver)
     }
 }
 
 impl PopupBaseController for PopupBaseSimpleController {
     fn redraw_notify(&self) {
         self.inner.borrow_mut().redraw_notify();
+    }
+
+    fn request_resize(&self) {
+        self.inner.borrow_mut().request_resize();
+    }
+
+    fn get_resize_requested(&self) -> bool {
+        self.inner.borrow_mut().get_resize_requested()
     }
 
     fn close_popup(&self) {
@@ -151,6 +178,10 @@ impl<C: PopupBaseController, T: AutosizeUIElement> UIElement for PopupBase<C, T>
     }
 
     fn render(&mut self, area: Rect, frame: &mut Frame) {
+        if self.controller.get_resize_requested() {
+            self.resize(area);
+        }
+
         let popup_area = Rect::new(
             (area.width - self.current_size.0) / 2,
             (area.height - self.current_size.1) / 2,

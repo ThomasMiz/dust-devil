@@ -7,15 +7,16 @@ use ratatui::{
     widgets::Padding,
     Frame,
 };
+use tokio::sync::{oneshot, Notify};
 
 use crate::tui::{
-    elements::{centered_text::CenteredText, padded::Padded, vertical_split::VerticalSplit},
+    elements::{centered_text::CenteredText, empty::Empty, padded::Padded, vertical_split::VerticalSplit},
     text_wrapper::StaticString,
     ui_element::{AutosizeUIElement, HandleEventStatus, UIElement},
 };
 
 use super::{
-    popup_base::{PopupBase, PopupBaseController},
+    popup_base::{PopupBase, PopupBaseController, PopupBaseSimpleController},
     size_constraint::SizeConstraint,
 };
 
@@ -51,6 +52,35 @@ impl<C: PopupBaseController, T: AutosizeUIElement> PromptPopup<C, T> {
         );
 
         PromptPopup { base }
+    }
+}
+
+impl PromptPopup<PopupBaseSimpleController, Empty> {
+    pub fn message_only(
+        redraw_notify: Rc<Notify>,
+        title: StaticString,
+        prompt_str: StaticString,
+        prompt_style: Style,
+        border_color: Color,
+        background_color: Color,
+        size_constraint: SizeConstraint,
+    ) -> (Self, oneshot::Receiver<()>) {
+        let (controller, close_receiver) = PopupBaseSimpleController::new(redraw_notify, true);
+        let controller = Rc::new(controller);
+
+        let value = Self::new(
+            title,
+            prompt_str,
+            prompt_style,
+            0,
+            border_color,
+            background_color,
+            size_constraint,
+            controller,
+            Empty,
+        );
+
+        (value, close_receiver)
     }
 }
 

@@ -96,6 +96,10 @@ impl CenteredText {
         self.resize_no_check(self.current_width);
     }
 
+    pub fn style(&self) -> Style {
+        self.style
+    }
+
     fn resize_no_check(&mut self, width: u16) {
         self.current_width = width;
         self.lines.clear();

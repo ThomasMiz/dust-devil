@@ -7,6 +7,7 @@ use std::{
 };
 
 use crossterm::event::{self, KeyCode, KeyEventKind};
+use dust_devil_core::socks5::AuthMethod;
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
@@ -31,7 +32,7 @@ use crate::{
 };
 
 use super::{
-    popups::{buffer_size_popup::BufferSizePopup, shutdown_popup::ShutdownPopup},
+    popups::{auth_methods_popup::AuthMethodsPopup, buffer_size_popup::BufferSizePopup, shutdown_popup::ShutdownPopup},
     ui_element::{HandleEventStatus, PassFocusDirection, UIElement},
     ui_manager::Popup,
 };
@@ -81,6 +82,7 @@ pub struct MenuBar<W: AsyncWrite + Unpin + 'static> {
     state: Rc<RefCell<MenuBarState>>,
     redraw_notify: Rc<Notify>,
     buffer_size_watch: broadcast::Sender<u32>,
+    auth_methods_watch: broadcast::Sender<(AuthMethod, bool)>,
     popup_sender: mpsc::UnboundedSender<Popup>,
     task_handle: JoinHandle<()>,
 }
@@ -159,6 +161,7 @@ impl<W: AsyncWrite + Unpin + 'static> MenuBar<W> {
         manager: Weak<MutexedSandstormRequestManager<W>>,
         redraw_notify: Rc<Notify>,
         buffer_size_watch: broadcast::Sender<u32>,
+        auth_methods_watch: broadcast::Sender<(AuthMethod, bool)>,
         popup_sender: mpsc::UnboundedSender<Popup>,
     ) -> Self {
         let state = Rc::new(RefCell::new(MenuBarState {
@@ -194,6 +197,7 @@ impl<W: AsyncWrite + Unpin + 'static> MenuBar<W> {
             state,
             redraw_notify,
             buffer_size_watch,
+            auth_methods_watch,
             popup_sender,
             task_handle,
         }
@@ -210,7 +214,16 @@ impl<W: AsyncWrite + Unpin + 'static> MenuBar<W> {
 
     fn users_selected(&self) {}
 
-    fn auth_selected(&self) {}
+    fn auth_selected(&self) {
+        let popup = AuthMethodsPopup::new(
+            Rc::clone(&self.redraw_notify),
+            Weak::clone(&self.manager),
+            self.auth_methods_watch.clone(),
+            self.popup_sender.clone(),
+        );
+
+        let _ = self.popup_sender.send(popup.into());
+    }
 
     fn buffer_selected(&self) {
         let state = self.state.deref().borrow();

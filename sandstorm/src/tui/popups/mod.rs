@@ -1,12 +1,13 @@
 use ratatui::{
-    layout::Alignment, style::{Color, Style}, text::Line, widgets::{
-        block::Position,
-        Block, BorderType, Borders,
-    }
+    style::{Color, Style},
+    text::Line,
+    widgets::{Block, BorderType, Borders},
 };
 
+pub mod auth_methods_popup;
 pub mod buffer_size_popup;
 pub mod confirm_close_popup;
+pub mod loading_popup;
 pub mod popup_base;
 pub mod prompt_popup;
 pub mod shutdown_popup;

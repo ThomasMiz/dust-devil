@@ -50,6 +50,15 @@ pub trait LongListHandler {
 
     /// Modifies a line previously passed to `modify_line_to_selected` back to unselected.
     fn modify_line_to_unselected(&mut self, index: usize, line: &mut Line<'static>, item_line_number: u16);
+
+    /// Called when the ENTER key is pressed while selecting an item.
+    fn on_enter(&mut self, index: usize) -> OnEnterResult;
+}
+
+pub enum OnEnterResult {
+    Handled,
+    Unhandled,
+    PassFocusAway,
 }
 
 /// An efficient display for a list with possibly many items.
@@ -73,6 +82,9 @@ struct LongListControllerInner {
 
     /// The index of the currently selected item, or None if the list is not focused.
     selected_index: Option<usize>,
+
+    /// Whether to select the last (true) or the first (false) item when the list gains focus.
+    select_last_first: bool,
 
     /// Whether to deselect an item when removed. Otherwise, the next item is selected instead.
     deselect_on_remove: bool,
@@ -98,6 +110,17 @@ fn calc_index_of_last(item_count: usize) -> Option<usize> {
     }
 }
 
+/// Implementation of [`LongListControllerInner::selection_start_index`] but the borrow checker
+/// won't complain if you are also borrowing another field from the same struct at the same time.
+#[inline]
+fn calc_index_of_selection_start(select_last_first: bool, item_count: usize) -> Option<usize> {
+    match item_count {
+        0 => None,
+        v if select_last_first => Some(v - 1),
+        _ => Some(0),
+    }
+}
+
 impl LongListControllerInner {
     fn item_count(&self) -> usize {
         self.item_count
@@ -112,6 +135,11 @@ impl LongListControllerInner {
     fn index_of_last(&self) -> Option<usize> {
         calc_index_of_last(self.item_count)
     }
+
+    /// Gets the index of the first item to select according to `self.selection_start_index`.
+    fn selection_start_index(&self) -> Option<usize> {
+        calc_index_of_selection_start(self.select_last_first, self.item_count)
+    }
 }
 
 /// Used for controlling a [`LongList`].
@@ -121,12 +149,13 @@ pub struct LongListController {
 }
 
 impl LongListController {
-    fn new(redraw_notify: Rc<Notify>, title: StaticString, item_count: usize, deselect_on_remove: bool) -> Self {
+    fn new(redraw_notify: Rc<Notify>, title: StaticString, item_count: usize, select_last_first: bool, deselect_on_remove: bool) -> Self {
         let inner = LongListControllerInner {
             title,
             lines: VecDeque::new(),
             item_count,
             selected_index: None,
+            select_last_first,
             deselect_on_remove,
         };
 
@@ -140,14 +169,23 @@ impl LongListController {
         self.inner.borrow().item_count
     }
 
-    /// Resets the list, forgetting any current items and setting a new item count.
-    pub fn reset_items(&self, item_count: usize) {
+    /// Resets the list, forgetting any current items and setting a new item count, but without
+    /// notifying for redraw.
+    pub fn reset_items_no_redraw(&self, item_count: usize, try_keep_selected: bool) {
         let mut inner_guard = self.inner.borrow_mut();
         let inner = inner_guard.deref_mut();
         inner.item_count = item_count;
-        inner.selected_index = None;
         inner.lines.clear();
 
+        inner.selected_index = match inner.selected_index {
+            Some(idx) if try_keep_selected && idx < item_count => Some(idx),
+            _ => None,
+        };
+    }
+
+    /// Resets the list, forgetting any current items and setting a new item count.
+    pub fn reset_items(&self, item_count: usize, try_keep_selected: bool) {
+        self.reset_items_no_redraw(item_count, try_keep_selected);
         self.redraw_notify.notify_one();
     }
 
@@ -155,6 +193,10 @@ impl LongListController {
     pub fn set_item_count(&self, item_count: usize) {
         let mut inner_guard = self.inner.borrow_mut();
         let inner = inner_guard.deref_mut();
+        if inner.item_count == item_count {
+            return;
+        }
+
         inner.item_count = item_count;
 
         // Remove from `lines` all the lines whose index is greater than or equal to item_count.
@@ -212,8 +254,21 @@ impl LongListController {
 }
 
 impl<H: LongListHandler> LongList<H> {
-    pub fn new(redraw_notify: Rc<Notify>, title: StaticString, item_count: usize, deselect_on_remove: bool, handler: H) -> Self {
-        let controller = Rc::new(LongListController::new(redraw_notify, title, item_count, deselect_on_remove));
+    pub fn new(
+        redraw_notify: Rc<Notify>,
+        title: StaticString,
+        item_count: usize,
+        select_last_first: bool,
+        deselect_on_remove: bool,
+        handler: H,
+    ) -> Self {
+        let controller = Rc::new(LongListController::new(
+            redraw_notify,
+            title,
+            item_count,
+            select_last_first,
+            deselect_on_remove,
+        ));
 
         Self {
             current_area: Rect::default(),
@@ -238,11 +293,11 @@ impl<H: LongListHandler> LongList<H> {
             _ => return HandleEventStatus::Unhandled,
         };
 
-        let mut inner = self.inner.borrow_mut();
-        let inner_deref = inner.deref_mut();
-        let previous_selected_index = inner_deref.selected_index;
+        let mut inner_guard = self.inner.borrow_mut();
+        let inner = inner_guard.deref_mut();
+        let previous_selected_index = inner.selected_index;
 
-        if let Some(selected_index) = &mut inner_deref.selected_index {
+        if let Some(selected_index) = &mut inner.selected_index {
             let scroll_amount = match mouse_event.modifiers {
                 m if m.contains(KeyModifiers::SHIFT) => KEY_SHIFT_SCROLL_AMOUNT,
                 _ => 1,
@@ -250,13 +305,13 @@ impl<H: LongListHandler> LongList<H> {
 
             *selected_index = match is_up {
                 true => selected_index.saturating_sub(scroll_amount),
-                false => (*selected_index + scroll_amount).min(inner_deref.item_count.saturating_sub(1)),
+                false => (*selected_index + scroll_amount).min(inner.item_count.saturating_sub(1)),
             };
-        } else if let Some(index_of_max) = inner_deref.index_of_last() {
-            inner_deref.selected_index = Some(index_of_max);
+        } else if let Some(index_to_select) = inner.selection_start_index() {
+            inner.selected_index = Some(index_to_select);
         }
 
-        if inner_deref.selected_index != previous_selected_index {
+        if inner.selected_index != previous_selected_index {
             self.redraw_notify.notify_one();
         }
 
@@ -277,19 +332,19 @@ impl<H: LongListHandler> LongList<H> {
             }
         }
 
-        let mut inner = self.inner.borrow_mut();
-        let inner_deref = inner.deref_mut();
-        let previous_selected_index = inner_deref.selected_index;
+        let mut inner_guard = self.controller.inner.borrow_mut();
+        let inner = inner_guard.deref_mut();
+        let previous_selected_index = inner.selected_index;
 
         let return_value = match key_event.code {
             KeyCode::Up => {
-                let pass_focus = match &mut inner_deref.selected_index {
+                let pass_focus = match &mut inner.selected_index {
                     None => {
-                        inner_deref.selected_index = inner_deref.index_of_last();
-                        inner_deref.selected_index.is_none()
+                        inner.selected_index = inner.selection_start_index();
+                        inner.selected_index.is_none()
                     }
                     Some(selected_index) => {
-                        if let Some(index_of_first) = calc_index_of_first(inner_deref.item_count) {
+                        if let Some(index_of_first) = calc_index_of_first(inner.item_count) {
                             if *selected_index == index_of_first {
                                 true
                             } else {
@@ -313,13 +368,13 @@ impl<H: LongListHandler> LongList<H> {
                 }
             }
             KeyCode::Down => {
-                let pass_focus = match &mut inner_deref.selected_index {
+                let pass_focus = match &mut inner.selected_index {
                     None => {
-                        inner_deref.selected_index = inner_deref.index_of_last();
-                        inner_deref.selected_index.is_none()
+                        inner.selected_index = inner.selection_start_index();
+                        inner.selected_index.is_none()
                     }
                     Some(selected_index) => {
-                        if let Some(index_of_last) = calc_index_of_last(inner_deref.item_count) {
+                        if let Some(index_of_last) = calc_index_of_last(inner.item_count) {
                             if *selected_index == index_of_last {
                                 true
                             } else {
@@ -347,9 +402,9 @@ impl<H: LongListHandler> LongList<H> {
                     return HandleEventStatus::Unhandled;
                 }
 
-                match &mut inner_deref.selected_index {
+                match &mut inner.selected_index {
                     None => {
-                        inner_deref.selected_index = inner_deref.index_of_last();
+                        inner.selected_index = inner.selection_start_index();
                     }
                     Some(selected_index) => {
                         let scroll_amount = match key_event.modifiers {
@@ -368,12 +423,12 @@ impl<H: LongListHandler> LongList<H> {
                     return HandleEventStatus::Unhandled;
                 }
 
-                match &mut inner_deref.selected_index {
+                match &mut inner.selected_index {
                     None => {
-                        inner_deref.selected_index = inner_deref.index_of_last();
+                        inner.selected_index = inner.selection_start_index();
                     }
                     Some(selected_index) => {
-                        if let Some(index_of_last) = calc_index_of_last(inner_deref.item_count) {
+                        if let Some(index_of_last) = calc_index_of_last(inner.item_count) {
                             let scroll_amount = match key_event.modifiers {
                                 m if m.contains(KeyModifiers::SHIFT) => KEY_SHIFT_SCROLL_AMOUNT,
                                 _ => 1,
@@ -391,7 +446,7 @@ impl<H: LongListHandler> LongList<H> {
                     return HandleEventStatus::Unhandled;
                 }
 
-                inner_deref.selected_index = inner_deref.index_of_first();
+                inner.selected_index = inner.index_of_first();
                 HandleEventStatus::Handled
             }
             KeyCode::End => {
@@ -399,17 +454,28 @@ impl<H: LongListHandler> LongList<H> {
                     return HandleEventStatus::Unhandled;
                 }
 
-                inner_deref.selected_index = inner_deref.index_of_last();
+                inner.selected_index = inner.index_of_last();
                 HandleEventStatus::Handled
             }
             KeyCode::Left => HandleEventStatus::PassFocus(self.get_focus_position(), PassFocusDirection::Left),
             KeyCode::Right => HandleEventStatus::PassFocus(self.get_focus_position(), PassFocusDirection::Right),
             KeyCode::Tab => HandleEventStatus::PassFocus(self.get_focus_position(), PassFocusDirection::Forward),
             KeyCode::Esc => HandleEventStatus::PassFocus(self.get_focus_position(), PassFocusDirection::Away),
+            KeyCode::Enter => {
+                if let Some(selected_index) = inner.selected_index {
+                    match self.handler.on_enter(selected_index) {
+                        OnEnterResult::Handled => HandleEventStatus::Handled,
+                        OnEnterResult::Unhandled => HandleEventStatus::Unhandled,
+                        OnEnterResult::PassFocusAway => HandleEventStatus::PassFocus(self.get_focus_position(), PassFocusDirection::Away),
+                    }
+                } else {
+                    HandleEventStatus::Unhandled
+                }
+            }
             _ => HandleEventStatus::Unhandled,
         };
 
-        if inner_deref.selected_index != previous_selected_index {
+        if inner.selected_index != previous_selected_index {
             self.redraw_notify.notify_one();
         }
 
@@ -686,16 +752,22 @@ impl<H: LongListHandler> UIElement for LongList<H> {
         frame.render_widget(block, area);
 
         let selected_index = inner.selected_index;
-        let mut scrollbar_state = ScrollbarState::new(inner.item_count)
+        let scrollbar_content_length = inner.item_count.saturating_sub(list_area.height as usize);
+        let scrollbar_position = match selected_index {
+            Some(idx) => scrollbar_content_length * idx / (inner.item_count - 1),
+            None => scrollbar_content_length,
+        };
+
+        let mut scrollbar_state = ScrollbarState::new(scrollbar_content_length)
             .viewport_content_length(list_area.height as usize)
-            .position(selected_index.unwrap_or(inner.item_count.saturating_sub(1)));
+            .position(scrollbar_position);
 
         let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
             .begin_symbol(Some("↑"))
             .end_symbol(Some("↓"));
         frame.render_stateful_widget(scrollbar, area, &mut scrollbar_state);
 
-        let center_item_index = selected_index.unwrap_or_else(|| inner.item_count.saturating_sub(1));
+        let center_item_index = selected_index.unwrap_or_else(|| inner.selection_start_index().unwrap_or(0));
         drop(inner_guard);
 
         let buf = frame.buffer_mut();
@@ -716,8 +788,8 @@ impl<H: LongListHandler> UIElement for LongList<H> {
 
     fn receive_focus(&mut self, _focus_position: (u16, u16)) -> bool {
         let mut inner = self.inner.borrow_mut();
-        if let Some(index_of_max) = inner.index_of_last() {
-            inner.selected_index = Some(index_of_max);
+        if let Some(index_to_select) = inner.selection_start_index() {
+            inner.selected_index = Some(index_to_select);
             self.redraw_notify.notify_one();
             true
         } else {
@@ -736,7 +808,7 @@ impl<H: LongListHandler> UIElement for LongList<H> {
 
 impl<H: LongListHandler> AutosizeUIElement for LongList<H> {
     fn begin_resize(&mut self, width: u16, height: u16) -> (u16, u16) {
-        let desired_height = self.controller.item_count().min(u16::MAX as usize) as u16;
+        let desired_height = self.controller.item_count().saturating_add(2).min(u16::MAX as usize) as u16;
         (width, desired_height.min(height))
     }
 }

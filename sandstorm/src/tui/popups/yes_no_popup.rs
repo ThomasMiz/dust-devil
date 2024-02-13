@@ -131,6 +131,14 @@ impl PopupBaseController for YesNoSimpleController {
         self.inner.borrow_mut().base.redraw_notify();
     }
 
+    fn request_resize(&self) {
+        self.inner.borrow_mut().base.request_resize();
+    }
+
+    fn get_resize_requested(&self) -> bool {
+        self.inner.borrow_mut().base.get_resize_requested()
+    }
+
     fn close_popup(&self) {
         self.inner.borrow_mut().base.close_popup();
     }

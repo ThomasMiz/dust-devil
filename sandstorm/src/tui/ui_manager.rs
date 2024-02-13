@@ -4,6 +4,7 @@ use crossterm::event::{self, KeyCode, KeyEventKind};
 use dust_devil_core::{
     logging::{self, EventData},
     sandstorm::Metrics,
+    socks5::AuthMethod,
 };
 use ratatui::{layout::Rect, Frame};
 use tokio::{
@@ -27,6 +28,7 @@ pub struct UIManager<W: AsyncWrite + Unpin + 'static> {
     current_area: Rect,
     shutdown_notify: Rc<Notify>,
     buffer_size_watch: broadcast::Sender<u32>,
+    auth_methods_watch: broadcast::Sender<(AuthMethod, bool)>,
     metrics_watch: watch::Sender<Metrics>,
     root: FocusCell<VerticalSplit<MenuBar<W>, BottomArea>>,
     popup_receiver: mpsc::UnboundedReceiver<Popup>,
@@ -60,6 +62,7 @@ impl<W: AsyncWrite + Unpin + 'static> UIManager<W> {
         shutdown_notify: Rc<Notify>,
     ) -> Self {
         let (buffer_size_watch, _) = broadcast::channel(1);
+        let (auth_methods_watch, _) = broadcast::channel(32);
         let (metrics_watch, _metrics_watch_receiver) = watch::channel(metrics);
         let (popup_sender, popup_receiver) = mpsc::unbounded_channel();
 
@@ -67,6 +70,7 @@ impl<W: AsyncWrite + Unpin + 'static> UIManager<W> {
             Weak::clone(&manager),
             Rc::clone(&redraw_notify),
             buffer_size_watch.clone(),
+            auth_methods_watch.clone(),
             popup_sender,
         );
         let bottom_area = BottomArea::new(Rc::clone(&redraw_notify));
@@ -76,6 +80,7 @@ impl<W: AsyncWrite + Unpin + 'static> UIManager<W> {
             current_area: Rect::default(),
             shutdown_notify,
             buffer_size_watch,
+            auth_methods_watch,
             metrics_watch,
             root: FocusCell::new(VerticalSplit::new(menu_bar, bottom_area, 2, 0)),
             popup_receiver,
@@ -176,6 +181,9 @@ impl<W: AsyncWrite + Unpin + 'static> UIManager<W> {
             }
             EventData::BufferSizeChangedByManager(_, buffer_size) => {
                 let _ = self.buffer_size_watch.send(buffer_size);
+            }
+            EventData::AuthMethodToggledByManager(_, auth_method, state) => {
+                let _ = self.auth_methods_watch.send((auth_method, state));
             }
             _ => {}
         }

@@ -736,22 +736,22 @@ impl<W: AsyncWrite + Unpin> MutexedSandstormRequestManager<W> {
     //     guard.flush_writer().await
     // }
 
-    // pub async fn list_auth_methods_fn<F: FnOnce(ListAuthMethodsResponse) + 'static>(&self, f: F) -> Result<(), Error> {
-    //     let mut guard = self.inner.lock().await;
-    //     guard.list_auth_methods_fn(f).await?;
-    //     guard.flush_writer().await
-    // }
+    pub async fn list_auth_methods_fn<F: FnOnce(ListAuthMethodsResponse) + 'static>(&self, f: F) -> Result<(), Error> {
+        let mut guard = self.inner.lock().await;
+        guard.list_auth_methods_fn(f).await?;
+        guard.flush_writer().await
+    }
 
-    // pub async fn toggle_auth_method_fn<F: FnOnce(ToggleAuthMethodResponse) + 'static>(
-    //     &self,
-    //     auth_method: AuthMethod,
-    //     status: bool,
-    //     f: F,
-    // ) -> Result<(), Error> {
-    //     let mut guard = self.inner.lock().await;
-    //     guard.toggle_auth_method_fn(auth_method, status, f).await?;
-    //     guard.flush_writer().await
-    // }
+    pub async fn toggle_auth_method_fn<F: FnOnce(ToggleAuthMethodResponse) + 'static>(
+        &self,
+        auth_method: AuthMethod,
+        status: bool,
+        f: F,
+    ) -> Result<(), Error> {
+        let mut guard = self.inner.lock().await;
+        guard.toggle_auth_method_fn(auth_method, status, f).await?;
+        guard.flush_writer().await
+    }
 
     // pub async fn get_metrics_fn<F: FnOnce(CurrentMetricsResponse) + 'static>(&self, f: F) -> Result<(), Error> {
     //     let mut guard = self.inner.lock().await;

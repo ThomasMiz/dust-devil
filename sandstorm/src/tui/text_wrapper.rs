@@ -162,6 +162,12 @@ pub struct WrapTextIterItem {
     pub len_chars: usize,
 }
 
+impl WrapTextIterItem {
+    pub fn get_substr<'a>(&self, s: &'a str) -> &'a str {
+        &s[self.index_start..(self.index_start + self.len_bytes)]
+    }
+}
+
 impl<'a> Iterator for WrapTextIter<'a> {
     type Item = WrapTextIterItem;
 
