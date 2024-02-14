@@ -14,6 +14,8 @@ use tokio::sync::Notify;
 
 use crate::tui::ui_element::{AutosizeUIElement, HandleEventStatus, PassFocusDirection, UIElement};
 
+use super::OnEnterResult;
+
 // An interface for handling events from inside a text entry.
 pub trait TextEntryHandler {
     /// Called when ENTER is pressed while typing on the text entry. Returns whether the key event
@@ -27,12 +29,6 @@ pub trait TextEntryHandler {
     // Called after a character is entered or removed from the text in the entry. Returns true if
     // the entry should be kept in focus, or false to request focus be taken away.
     fn on_text_changed(&mut self, controller: &Rc<TextEntryController>) -> bool;
-}
-
-pub enum OnEnterResult {
-    Handled,
-    Unhandled,
-    PassFocusAway,
 }
 
 pub struct TextEntry<H: TextEntryHandler> {

@@ -24,8 +24,9 @@ use crate::{
     tui::{
         elements::{
             centered_text::CenteredText,
-            long_list::{LongList, LongListHandler, OnEnterResult},
+            long_list::{LongList, LongListHandler},
             vertical_split::VerticalSplit,
+            OnEnterResult,
         },
         text_wrapper::{StaticString, WrapTextIter},
         ui_element::{AutosizeUIElement, HandleEventStatus, UIElement},
@@ -35,8 +36,8 @@ use crate::{
 
 use super::{
     loading_popup::{LoadingPopup, LoadingPopupController, LoadingPopupControllerInner},
+    message_popup::{MessagePopup, ERROR_POPUP_TITLE, REQUEST_SEND_ERROR_MESSAGE},
     popup_base::PopupBaseController,
-    prompt_popup::PromptPopup,
     size_constraint::SizeConstraint,
 };
 
@@ -52,21 +53,16 @@ const LOCKED_DISABLED_STATUS_COLOR: Color = Color::LightRed;
 
 const TITLE: &str = "─Authentication Methods";
 const LOADING_MESSAGE: &str = "Getting authentication methods from the server...";
-const SEND_ERROR_MESSAGE: &str = "Couldn't send request to server. Is the server still running?";
 const LOADING_STYLE: Style = Style::new();
 const TOP_MESSAGE: &str = "The server supports the following authentication methods:";
 const TOP_MESSAGE_STYLE: Style = Style::new();
 const HELP_MESSAGE: &str = "Scroll the list with the arrow keys, press (ENTER) on an auth method to toggle it.";
 const HELP_MESSAGE_STYLE: Style = Style::new();
 const POPUP_WIDTH: u16 = 34;
-
-const SERVER_ERROR_MESSAGE: &str = "The server refused to change toggle this authentication method.";
-const ERROR_POPUP_TITLE: &str = "─Error";
-const ERROR_STYLE: Style = Style::new();
-const ERROR_POPUP_BORDER_COLOR: Color = Color::Reset;
-const ERROR_POPUP_BACKGROUND_COLOR: Color = Color::Red;
-const ERROR_POPUP_WIDTH: u16 = 40;
 const MAX_POPUP_HEIGHT: u16 = 24;
+
+const SERVER_ERROR_MESSAGE: &str = "The server refused to toggle this authentication method.";
+const ERROR_POPUP_WIDTH: u16 = 40;
 
 struct ControllerInner {
     base: LoadingPopupControllerInner,
@@ -255,18 +251,15 @@ async fn set_auth_method_task<W: AsyncWrite + Unpin + 'static>(
         }
         Some(false) | None => {
             let error_str = match maybe_result {
-                None => SEND_ERROR_MESSAGE,
+                None => REQUEST_SEND_ERROR_MESSAGE,
                 _ => SERVER_ERROR_MESSAGE,
             };
 
-            let popup = PromptPopup::message_only(
+            let popup = MessagePopup::empty_error_message(
                 Rc::clone(&rc.inner.borrow().base.base.redraw_notify),
                 ERROR_POPUP_TITLE.into(),
                 error_str.into(),
-                ERROR_STYLE,
-                ERROR_POPUP_BORDER_COLOR,
-                ERROR_POPUP_BACKGROUND_COLOR,
-                SizeConstraint::new().max(ERROR_POPUP_WIDTH, u16::MAX),
+                ERROR_POPUP_WIDTH,
             );
 
             let _ = rc.popup_sender.send(popup.into());
@@ -324,7 +317,7 @@ async fn load_methods_task<W: AsyncWrite + Unpin + 'static>(controller_weak: Wea
             rc.auth_methods_watch.clone().subscribe()
         }
         None => {
-            rc.set_new_loading_text(SEND_ERROR_MESSAGE.into());
+            rc.set_new_loading_text(REQUEST_SEND_ERROR_MESSAGE.into());
             return;
         }
     };

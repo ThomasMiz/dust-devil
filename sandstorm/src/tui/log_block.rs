@@ -13,7 +13,10 @@ use tokio::sync::Notify;
 
 use super::{
     colored_logs::log_event_to_single_line,
-    elements::long_list::{LongList, LongListHandler, OnEnterResult},
+    elements::{
+        long_list::{LongList, LongListHandler},
+        OnEnterResult,
+    },
     text_wrapper::{wrap_lines_by_chars, StaticString},
     ui_element::{HandleEventStatus, UIElement},
 };

@@ -36,6 +36,8 @@ use crate::tui::{
     ui_element::{AutosizeUIElement, HandleEventStatus, PassFocusDirection, UIElement},
 };
 
+use super::OnEnterResult;
+
 /// The list can be scrolled with the arrow keys, pageup, pagedown, etc. While holding shift, the
 /// scroll speed is multiplied by this amount.
 const KEY_SHIFT_SCROLL_AMOUNT: usize = 5;
@@ -53,12 +55,6 @@ pub trait LongListHandler {
 
     /// Called when the ENTER key is pressed while selecting an item.
     fn on_enter(&mut self, index: usize) -> OnEnterResult;
-}
-
-pub enum OnEnterResult {
-    Handled,
-    Unhandled,
-    PassFocusAway,
 }
 
 /// An efficient display for a list with possibly many items.

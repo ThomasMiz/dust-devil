@@ -1,4 +1,7 @@
-use std::rc::{Rc, Weak};
+use std::{
+    net::SocketAddr,
+    rc::{Rc, Weak},
+};
 
 use crossterm::event::{self, KeyCode, KeyEventKind};
 use dust_devil_core::{
@@ -27,6 +30,8 @@ pub struct UIManager<W: AsyncWrite + Unpin + 'static> {
     redraw_notify: Rc<Notify>,
     current_area: Rect,
     shutdown_notify: Rc<Notify>,
+    socks5_sockets_watch: broadcast::Sender<(SocketAddr, bool)>,
+    sandstorm_sockets_watch: broadcast::Sender<(SocketAddr, bool)>,
     buffer_size_watch: broadcast::Sender<u32>,
     auth_methods_watch: broadcast::Sender<(AuthMethod, bool)>,
     metrics_watch: watch::Sender<Metrics>,
@@ -63,12 +68,16 @@ impl<W: AsyncWrite + Unpin + 'static> UIManager<W> {
     ) -> Self {
         let (buffer_size_watch, _) = broadcast::channel(1);
         let (auth_methods_watch, _) = broadcast::channel(32);
+        let (socks5_sockets_watch, _) = broadcast::channel(32);
+        let (sandstorm_sockets_watch, _) = broadcast::channel(32);
         let (metrics_watch, _metrics_watch_receiver) = watch::channel(metrics);
         let (popup_sender, popup_receiver) = mpsc::unbounded_channel();
 
         let menu_bar = MenuBar::new(
             Weak::clone(&manager),
             Rc::clone(&redraw_notify),
+            socks5_sockets_watch.clone(),
+            sandstorm_sockets_watch.clone(),
             buffer_size_watch.clone(),
             auth_methods_watch.clone(),
             popup_sender,
@@ -81,6 +90,8 @@ impl<W: AsyncWrite + Unpin + 'static> UIManager<W> {
             shutdown_notify,
             buffer_size_watch,
             auth_methods_watch,
+            socks5_sockets_watch,
+            sandstorm_sockets_watch,
             metrics_watch,
             root: FocusCell::new(VerticalSplit::new(menu_bar, bottom_area, 2, 0)),
             popup_receiver,
@@ -178,6 +189,18 @@ impl<W: AsyncWrite + Unpin + 'static> UIManager<W> {
                 self.metrics_watch.send_modify(|metrics| {
                     metrics.current_sandstorm_connections -= 1;
                 });
+            }
+            EventData::NewSocks5Socket(socket_address) => {
+                let _ = self.socks5_sockets_watch.send((socket_address, true));
+            }
+            EventData::RemovedSocks5Socket(socket_address) => {
+                let _ = self.socks5_sockets_watch.send((socket_address, false));
+            }
+            EventData::NewSandstormSocket(socket_address) => {
+                let _ = self.sandstorm_sockets_watch.send((socket_address, true));
+            }
+            EventData::RemovedSandstormSocket(socket_address) => {
+                let _ = self.sandstorm_sockets_watch.send((socket_address, false));
             }
             EventData::BufferSizeChangedByManager(_, buffer_size) => {
                 let _ = self.buffer_size_watch.send(buffer_size);

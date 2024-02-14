@@ -15,7 +15,7 @@ use ratatui::{
 };
 use tokio::{
     io::AsyncWrite,
-    sync::{broadcast, oneshot, Notify},
+    sync::{broadcast, mpsc, oneshot, Notify},
     task::JoinHandle,
 };
 
@@ -27,15 +27,18 @@ use crate::{
             dual_buttons::DualButtonsHandler,
             horizontal_split::HorizontalSplit,
             padded::Padded,
-            text_entry::{CursorPosition, OnEnterResult, TextEntry, TextEntryController, TextEntryHandler},
+            text_entry::{CursorPosition, TextEntry, TextEntryController, TextEntryHandler},
             vertical_split::VerticalSplit,
+            OnEnterResult,
         },
         pretty_print::PrettyByteDisplayer,
         ui_element::{AutosizeUIElement, HandleEventStatus, UIElement},
+        ui_manager::Popup,
     },
 };
 
 use super::{
+    message_popup::{MessagePopup, ERROR_POPUP_TITLE, REQUEST_SEND_ERROR_MESSAGE},
     popup_base::PopupBaseController,
     size_constraint::SizeConstraint,
     yes_no_popup::{YesNoControllerInner, YesNoPopup, YesNoPopupController},
@@ -53,9 +56,9 @@ const PROMPT_STYLE: Style = Style::new();
 
 const OFFER_MESSAGE: &str = "Do you want to set a new buffer size?";
 const INVALID_MESSAGE: &str = "Please enter a valid buffer size";
-const SEND_ERROR_MESSAGE: &str = "Error: Couldn't send request";
-const SERVER_ERROR_MESSAGE: &str = "Error: Server refused request";
+const SERVER_ERROR_MESSAGE: &str = "The server refused to update the buffer size.";
 const NEW_BUFFER_SIZE_LABEL: &str = "New buffer size:";
+const ERROR_POPUP_WIDTH: u16 = 40;
 
 pub struct BufferSizePopup<W: AsyncWrite + Unpin + 'static> {
     base: YesNoPopup<Controller<W>, Padded<Content<W>>, ButtonHandler<W>>,
@@ -81,8 +84,6 @@ impl Drop for ControllerInner {
 enum TopMessage {
     Offer,
     Invalid,
-    SendError,
-    ServerError,
 }
 
 impl TopMessage {
@@ -90,8 +91,6 @@ impl TopMessage {
         match self {
             Self::Offer => OFFER_MESSAGE,
             Self::Invalid => INVALID_MESSAGE,
-            Self::SendError => SEND_ERROR_MESSAGE,
-            Self::ServerError => SERVER_ERROR_MESSAGE,
         }
     }
 }
@@ -100,6 +99,7 @@ struct Controller<W: AsyncWrite + Unpin + 'static> {
     inner: RefCell<ControllerInner>,
     manager: Weak<MutexedSandstormRequestManager<W>>,
     buffer_size_watch: broadcast::Sender<u32>,
+    popup_sender: mpsc::UnboundedSender<Popup>,
 }
 
 impl<W: AsyncWrite + Unpin + 'static> Controller<W> {
@@ -108,6 +108,7 @@ impl<W: AsyncWrite + Unpin + 'static> Controller<W> {
         has_close_title: bool,
         manager: Weak<MutexedSandstormRequestManager<W>>,
         buffer_size_watch: broadcast::Sender<u32>,
+        popup_sender: mpsc::UnboundedSender<Popup>,
     ) -> (Self, oneshot::Receiver<()>) {
         let (base, close_receiver) = YesNoControllerInner::new(redraw_notify, has_close_title);
 
@@ -123,6 +124,7 @@ impl<W: AsyncWrite + Unpin + 'static> Controller<W> {
             inner,
             manager,
             buffer_size_watch,
+            popup_sender,
         };
 
         (value, close_receiver)
@@ -150,23 +152,22 @@ impl<W: AsyncWrite + Unpin + 'static> Controller<W> {
         drop(inner);
 
         let original_idle_bg = text_controller.get_idle_style().bg;
+        let original_typing_bg = text_controller.get_typing_style().bg;
 
         let self_rc = Rc::clone(self);
         let text_rc = Rc::clone(text_controller);
         let handle = tokio::task::spawn_local(async move {
-            let mut i = 2;
-            loop {
+            for _ in 0..2 {
                 text_rc.modify_idle_style(|style| style.bg = Some(Color::Red));
+                text_rc.modify_typing_style(|style| style.bg = Some(Color::Red));
                 tokio::time::sleep(Duration::from_millis(BEEP_DELAY_MILLIS)).await;
-                text_rc.modify_idle_style(|style| style.bg = original_idle_bg);
-
-                i -= 1;
-                if i == 0 {
-                    break;
-                }
-
+                text_rc.modify_idle_style(|style| style.bg = Some(Color::Reset));
+                text_rc.modify_typing_style(|style| style.bg = Some(Color::Reset));
                 tokio::time::sleep(Duration::from_millis(BEEP_DELAY_MILLIS)).await;
             }
+
+            text_rc.modify_idle_style(|style| style.bg = original_idle_bg);
+            text_rc.modify_typing_style(|style| style.bg = original_typing_bg);
 
             self_rc.inner.borrow_mut().is_beeping_red = false;
         });
@@ -197,14 +198,12 @@ impl<W: AsyncWrite + Unpin + 'static> Controller<W> {
                 .await;
             drop(manager_rc);
 
-            let result = if send_status.is_err() {
-                TopMessage::SendError
-            } else {
-                match response_receiver.await {
-                    Ok(true) => TopMessage::Offer,
-                    Ok(false) => TopMessage::ServerError,
-                    Err(_) => TopMessage::SendError,
-                }
+            let result = match send_status {
+                Err(_) => Err(false),
+                Ok(_) => match response_receiver.await {
+                    Ok(status) => Ok(status),
+                    Err(_) => Err(true),
+                },
             };
 
             let rc = match self_weak.upgrade() {
@@ -212,26 +211,41 @@ impl<W: AsyncWrite + Unpin + 'static> Controller<W> {
                 None => return,
             };
 
-            let mut inner = rc.inner.borrow_mut();
-            inner.top_message = result;
-            if result == TopMessage::Offer {
-                drop(inner);
-                let _ = rc.buffer_size_watch.send(buffer_size);
-                rc.close_popup();
-            } else {
-                inner.is_doing_request = false;
-                inner.base.set_showing_buttons(true);
-                inner.base.base.set_closable(true);
+            match result {
+                Ok(true) => {
+                    let _ = rc.buffer_size_watch.send(buffer_size);
+                    rc.close_popup();
+                }
+                _ => {
+                    let message_str = match result.is_err() {
+                        true => REQUEST_SEND_ERROR_MESSAGE,
+                        false => SERVER_ERROR_MESSAGE,
+                    };
+
+                    let popup = MessagePopup::empty_error_message(
+                        Rc::clone(&rc.inner.borrow().base.base.redraw_notify),
+                        ERROR_POPUP_TITLE.into(),
+                        message_str.into(),
+                        ERROR_POPUP_WIDTH,
+                    );
+
+                    let _ = rc.popup_sender.send(popup.into());
+
+                    let mut inner = rc.inner.borrow_mut();
+                    inner.is_doing_request = false;
+                    inner.base.set_showing_buttons(true);
+                    inner.base.base.set_closable(true);
+                }
             }
         });
 
         self.inner.borrow_mut().current_task = Some(handle);
     }
 
-    fn on_yes_selected(self: &Rc<Self>, text_controller: &Rc<TextEntryController>) {
+    fn on_yes_selected(self: &Rc<Self>, text_controller: &Rc<TextEntryController>) -> bool {
         let inner = self.inner.borrow();
         if inner.is_beeping_red || inner.is_doing_request {
-            return;
+            return false;
         }
         drop(inner);
 
@@ -240,6 +254,8 @@ impl<W: AsyncWrite + Unpin + 'static> Controller<W> {
             Ok(buffer_size) => self.perform_request(buffer_size),
             Err(_) => self.text_entry_beep_red(text_controller),
         }
+
+        parse_result.is_ok()
     }
 }
 
@@ -338,8 +354,10 @@ struct ContentTextHandler<W: AsyncWrite + Unpin + 'static> {
 
 impl<W: AsyncWrite + Unpin + 'static> TextEntryHandler for ContentTextHandler<W> {
     fn on_enter(&mut self, controller: &Rc<TextEntryController>) -> OnEnterResult {
-        self.controller.on_yes_selected(controller);
-        OnEnterResult::PassFocusAway
+        match self.controller.on_yes_selected(controller) {
+            true => OnEnterResult::PassFocusAway,
+            false => OnEnterResult::Handled,
+        }
     }
 
     fn on_char(&mut self, _controller: &Rc<TextEntryController>, c: char, _cursor: &CursorPosition) -> bool {
@@ -401,8 +419,9 @@ impl<W: AsyncWrite + Unpin + 'static> BufferSizePopup<W> {
         manager: Weak<MutexedSandstormRequestManager<W>>,
         buffer_size: u32,
         buffer_size_watch: broadcast::Sender<u32>,
+        popup_sender: mpsc::UnboundedSender<Popup>,
     ) -> (Self, oneshot::Receiver<()>) {
-        let (controller, close_receiver) = Controller::new(Rc::clone(&redraw_notify), true, manager, buffer_size_watch);
+        let (controller, close_receiver) = Controller::new(Rc::clone(&redraw_notify), true, manager, buffer_size_watch, popup_sender);
         let controller = Rc::new(controller);
 
         let prompt_str = format!("{PROMPT_MESSAGE} {buffer_size} ({}).", PrettyByteDisplayer(buffer_size as usize));

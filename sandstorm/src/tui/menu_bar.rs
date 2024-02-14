@@ -1,6 +1,7 @@
 use std::{
     cell::RefCell,
     fmt::Write,
+    net::SocketAddr,
     ops::Deref,
     rc::{Rc, Weak},
     time::{Duration, Instant},
@@ -81,6 +82,8 @@ pub struct MenuBar<W: AsyncWrite + Unpin + 'static> {
     manager: Weak<MutexedSandstormRequestManager<W>>,
     state: Rc<RefCell<MenuBarState>>,
     redraw_notify: Rc<Notify>,
+    socks5_sockets_watch: broadcast::Sender<(SocketAddr, bool)>,
+    sandstorm_sockets_watch: broadcast::Sender<(SocketAddr, bool)>,
     buffer_size_watch: broadcast::Sender<u32>,
     auth_methods_watch: broadcast::Sender<(AuthMethod, bool)>,
     popup_sender: mpsc::UnboundedSender<Popup>,
@@ -160,6 +163,8 @@ impl<W: AsyncWrite + Unpin + 'static> MenuBar<W> {
     pub fn new(
         manager: Weak<MutexedSandstormRequestManager<W>>,
         redraw_notify: Rc<Notify>,
+        socks5_sockets_watch: broadcast::Sender<(SocketAddr, bool)>,
+        sandstorm_sockets_watch: broadcast::Sender<(SocketAddr, bool)>,
         buffer_size_watch: broadcast::Sender<u32>,
         auth_methods_watch: broadcast::Sender<(AuthMethod, bool)>,
         popup_sender: mpsc::UnboundedSender<Popup>,
@@ -196,6 +201,8 @@ impl<W: AsyncWrite + Unpin + 'static> MenuBar<W> {
             manager,
             state,
             redraw_notify,
+            socks5_sockets_watch,
+            sandstorm_sockets_watch,
             buffer_size_watch,
             auth_methods_watch,
             popup_sender,
@@ -236,6 +243,7 @@ impl<W: AsyncWrite + Unpin + 'static> MenuBar<W> {
             Weak::clone(&self.manager),
             state.buffer_size,
             self.buffer_size_watch.clone(),
+            self.popup_sender.clone(),
         );
 
         let _ = self.popup_sender.send(popup.into());
