@@ -29,7 +29,7 @@ use crate::{
             text_entry::{CursorPosition, TextEntry, TextEntryController, TextEntryHandler},
             OnEnterResult,
         },
-        ui_element::{HandleEventStatus, UIElement},
+        ui_element::{AutosizeUIElement, HandleEventStatus, UIElement},
         ui_manager::Popup,
     },
 };
@@ -253,7 +253,44 @@ impl<W: AsyncWrite + Unpin + 'static> YesNoPopupController for Controller<W> {
 }
 
 pub struct AddSocketPopup<W: AsyncWrite + Unpin + 'static> {
-    base: YesNoPopup<Controller<W>, Padded<TextEntry<TextHandler<W>>>, ButtonHandler<W>>,
+    base: YesNoPopup<Controller<W>, Content<W>, ButtonHandler<W>>,
+}
+
+struct Content<W: AsyncWrite + Unpin + 'static> {
+    inner: Padded<TextEntry<TextHandler<W>>>,
+}
+
+impl<W: AsyncWrite + Unpin + 'static> UIElement for Content<W> {
+    fn resize(&mut self, area: Rect) {
+        self.inner.resize(area);
+    }
+
+    fn render(&mut self, area: Rect, frame: &mut Frame) {
+        self.inner.render(area, frame);
+    }
+
+    fn handle_event(&mut self, event: &event::Event, is_focused: bool) -> HandleEventStatus {
+        let controller = &self.inner.inner.handler.controller;
+        if controller.inner.borrow().is_doing_request {
+            return HandleEventStatus::Handled;
+        }
+
+        self.inner.handle_event(event, is_focused)
+    }
+
+    fn receive_focus(&mut self, focus_position: (u16, u16)) -> bool {
+        self.inner.receive_focus(focus_position)
+    }
+
+    fn focus_lost(&mut self) {
+        self.inner.focus_lost();
+    }
+}
+
+impl<W: AsyncWrite + Unpin + 'static> AutosizeUIElement for Content<W> {
+    fn begin_resize(&mut self, width: u16, height: u16) -> (u16, u16) {
+        self.inner.begin_resize(width, height)
+    }
 }
 
 struct TextHandler<W: AsyncWrite + Unpin + 'static> {
@@ -328,7 +365,9 @@ impl<W: AsyncWrite + Unpin + 'static> AddSocketPopup<W> {
             text_controller: text_entry.controller(),
         };
 
-        let content = Padded::new(Padding::horizontal(1), text_entry);
+        let content = Content {
+            inner: Padded::new(Padding::horizontal(1), text_entry),
+        };
 
         let title = match socket_type {
             SocketPopupType::Socks5 => SOCKS5_TITLE,
