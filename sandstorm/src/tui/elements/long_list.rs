@@ -750,7 +750,7 @@ impl<H: LongListHandler> UIElement for LongList<H> {
         let selected_index = inner.selected_index;
         let scrollbar_content_length = inner.item_count.saturating_sub(list_area.height as usize);
         let scrollbar_position = match selected_index {
-            Some(idx) => scrollbar_content_length * idx / (inner.item_count - 1),
+            Some(idx) => scrollbar_content_length * idx / inner.item_count,
             None => scrollbar_content_length,
         };
 

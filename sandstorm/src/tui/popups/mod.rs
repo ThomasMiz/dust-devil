@@ -13,6 +13,7 @@ pub mod popup_base;
 pub mod prompt_popup;
 pub mod shutdown_popup;
 pub mod size_constraint;
+pub mod sockets_popup;
 pub mod yes_no_popup;
 
 pub const CLOSE_KEY: char = 'q';

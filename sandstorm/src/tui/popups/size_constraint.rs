@@ -72,8 +72,14 @@ impl<T: AutosizeUIElement> UIElement for ConstrainedPopupContent<T> {
 
 impl<T: AutosizeUIElement> AutosizeUIElement for ConstrainedPopupContent<T> {
     fn begin_resize(&mut self, mut width: u16, mut height: u16) -> (u16, u16) {
+        width = width.min(self.size_constraint.max.0);
+        height = height.min(self.size_constraint.max.1);
+
+        let (mut width, mut height) = self.inner.begin_resize(width, height);
+
         width = width.clamp(self.size_constraint.min.0, self.size_constraint.max.0);
         height = height.clamp(self.size_constraint.min.1, self.size_constraint.max.1);
-        self.inner.begin_resize(width, height)
+
+        (width, height)
     }
 }

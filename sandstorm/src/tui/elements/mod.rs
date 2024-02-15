@@ -1,3 +1,4 @@
+pub mod arrow_selector;
 pub mod centered_button;
 pub mod centered_text;
 pub mod dual_buttons;

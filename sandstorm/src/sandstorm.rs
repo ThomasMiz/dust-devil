@@ -652,53 +652,53 @@ impl<W: AsyncWrite + Unpin> MutexedSandstormRequestManager<W> {
         guard.flush_writer().await
     }
 
-    // pub async fn list_socks5_sockets_fn<F: FnOnce(ListSocks5SocketsResponse) + 'static>(&self, f: F) -> Result<(), Error> {
-    //     let mut guard = self.inner.lock().await;
-    //     guard.list_socks5_sockets_fn(f).await?;
-    //     guard.flush_writer().await
-    // }
+    pub async fn list_socks5_sockets_fn<F: FnOnce(ListSocks5SocketsResponse) + 'static>(&self, f: F) -> Result<(), Error> {
+        let mut guard = self.inner.lock().await;
+        guard.list_socks5_sockets_fn(f).await?;
+        guard.flush_writer().await
+    }
 
-    // pub async fn add_socks5_socket_fn<F: FnOnce(AddSocks5SocketResponse) + 'static>(&self, address: SocketAddr, f: F) -> Result<(), Error> {
-    //     let mut guard = self.inner.lock().await;
-    //     guard.add_socks5_socket_fn(address, f).await?;
-    //     guard.flush_writer().await
-    // }
+    pub async fn add_socks5_socket_fn<F: FnOnce(AddSocks5SocketResponse) + 'static>(&self, address: SocketAddr, f: F) -> Result<(), Error> {
+        let mut guard = self.inner.lock().await;
+        guard.add_socks5_socket_fn(address, f).await?;
+        guard.flush_writer().await
+    }
 
-    // pub async fn remove_socks5_socket_fn<F: FnOnce(RemoveSocks5SocketResponse) + 'static>(
-    //     &self,
-    //     address: SocketAddr,
-    //     f: F,
-    // ) -> Result<(), Error> {
-    //     let mut guard = self.inner.lock().await;
-    //     guard.remove_socks5_socket_fn(address, f).await?;
-    //     guard.flush_writer().await
-    // }
+    pub async fn remove_socks5_socket_fn<F: FnOnce(RemoveSocks5SocketResponse) + 'static>(
+        &self,
+        address: SocketAddr,
+        f: F,
+    ) -> Result<(), Error> {
+        let mut guard = self.inner.lock().await;
+        guard.remove_socks5_socket_fn(address, f).await?;
+        guard.flush_writer().await
+    }
 
-    // pub async fn list_sandstorm_sockets_fn<F: FnOnce(ListSandstormSocketsResponse) + 'static>(&self, f: F) -> Result<(), Error> {
-    //     let mut guard = self.inner.lock().await;
-    //     guard.list_sandstorm_sockets_fn(f).await?;
-    //     guard.flush_writer().await
-    // }
+    pub async fn list_sandstorm_sockets_fn<F: FnOnce(ListSandstormSocketsResponse) + 'static>(&self, f: F) -> Result<(), Error> {
+        let mut guard = self.inner.lock().await;
+        guard.list_sandstorm_sockets_fn(f).await?;
+        guard.flush_writer().await
+    }
 
-    // pub async fn add_sandstorm_socket_fn<F: FnOnce(AddSandstormSocketResponse) + 'static>(
-    //     &self,
-    //     address: SocketAddr,
-    //     f: F,
-    // ) -> Result<(), Error> {
-    //     let mut guard = self.inner.lock().await;
-    //     guard.add_sandstorm_socket_fn(address, f).await?;
-    //     guard.flush_writer().await
-    // }
+    pub async fn add_sandstorm_socket_fn<F: FnOnce(AddSandstormSocketResponse) + 'static>(
+        &self,
+        address: SocketAddr,
+        f: F,
+    ) -> Result<(), Error> {
+        let mut guard = self.inner.lock().await;
+        guard.add_sandstorm_socket_fn(address, f).await?;
+        guard.flush_writer().await
+    }
 
-    // pub async fn remove_sandstorm_socket_fn<F: FnOnce(RemoveSandstormSocketResponse) + 'static>(
-    //     &self,
-    //     address: SocketAddr,
-    //     f: F,
-    // ) -> Result<(), Error> {
-    //     let mut guard = self.inner.lock().await;
-    //     guard.remove_sandstorm_socket_fn(address, f).await?;
-    //     guard.flush_writer().await
-    // }
+    pub async fn remove_sandstorm_socket_fn<F: FnOnce(RemoveSandstormSocketResponse) + 'static>(
+        &self,
+        address: SocketAddr,
+        f: F,
+    ) -> Result<(), Error> {
+        let mut guard = self.inner.lock().await;
+        guard.remove_sandstorm_socket_fn(address, f).await?;
+        guard.flush_writer().await
+    }
 
     // pub async fn list_users_fn<F: FnOnce(ListUsersResponse) + 'static>(&self, f: F) -> Result<(), Error> {
     //     let mut guard = self.inner.lock().await;

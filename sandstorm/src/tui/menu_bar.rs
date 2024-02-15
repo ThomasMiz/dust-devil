@@ -33,7 +33,12 @@ use crate::{
 };
 
 use super::{
-    popups::{auth_methods_popup::AuthMethodsPopup, buffer_size_popup::BufferSizePopup, shutdown_popup::ShutdownPopup},
+    popups::{
+        auth_methods_popup::AuthMethodsPopup,
+        buffer_size_popup::BufferSizePopup,
+        shutdown_popup::ShutdownPopup,
+        sockets_popup::{SocketPopupType, SocketsPopup},
+    },
     ui_element::{HandleEventStatus, PassFocusDirection, UIElement},
     ui_manager::Popup,
 };
@@ -215,9 +220,29 @@ impl<W: AsyncWrite + Unpin + 'static> MenuBar<W> {
         let _ = self.popup_sender.send(popup.into());
     }
 
-    fn socsk5_selected(&self) {}
+    fn socsk5_selected(&self) {
+        let popup = SocketsPopup::new(
+            Rc::clone(&self.redraw_notify),
+            Weak::clone(&self.manager),
+            SocketPopupType::Socks5,
+            self.socks5_sockets_watch.clone(),
+            self.popup_sender.clone(),
+        );
 
-    fn sandstorm_selected(&self) {}
+        let _ = self.popup_sender.send(popup.into());
+    }
+
+    fn sandstorm_selected(&self) {
+        let popup = SocketsPopup::new(
+            Rc::clone(&self.redraw_notify),
+            Weak::clone(&self.manager),
+            SocketPopupType::Sandstorm,
+            self.sandstorm_sockets_watch.clone(),
+            self.popup_sender.clone(),
+        );
+
+        let _ = self.popup_sender.send(popup.into());
+    }
 
     fn users_selected(&self) {}
 
