@@ -185,58 +185,7 @@ impl<W: AsyncWrite + Unpin + 'static> Controller<W> {
 
         let self_weak = Rc::downgrade(self);
         let handle = tokio::task::spawn_local(async move {
-            let manager_rc = match self_weak.upgrade().map(|rc| rc.manager.upgrade()) {
-                Some(Some(rc)) => rc,
-                _ => return,
-            };
-
-            let (response_sender, response_receiver) = oneshot::channel();
-            let send_status = manager_rc
-                .set_buffer_size_fn(buffer_size, |result| {
-                    let _ = response_sender.send(result.0);
-                })
-                .await;
-            drop(manager_rc);
-
-            let result = match send_status {
-                Err(_) => Err(false),
-                Ok(_) => match response_receiver.await {
-                    Ok(status) => Ok(status),
-                    Err(_) => Err(true),
-                },
-            };
-
-            let rc = match self_weak.upgrade() {
-                Some(rc) => rc,
-                None => return,
-            };
-
-            match result {
-                Ok(true) => {
-                    let _ = rc.buffer_size_watch.send(buffer_size);
-                    rc.close_popup();
-                }
-                _ => {
-                    let message_str = match result.is_err() {
-                        true => REQUEST_SEND_ERROR_MESSAGE,
-                        false => SERVER_ERROR_MESSAGE,
-                    };
-
-                    let popup = MessagePopup::empty_error_message(
-                        Rc::clone(&rc.inner.borrow().base.base.redraw_notify),
-                        ERROR_POPUP_TITLE.into(),
-                        message_str.into(),
-                        ERROR_POPUP_WIDTH,
-                    );
-
-                    let _ = rc.popup_sender.send(popup.into());
-
-                    let mut inner = rc.inner.borrow_mut();
-                    inner.is_doing_request = false;
-                    inner.base.set_showing_buttons(true);
-                    inner.base.base.set_closable(true);
-                }
-            }
+            set_buffer_size_task(self_weak, buffer_size).await;
         });
 
         self.inner.borrow_mut().current_task = Some(handle);
@@ -256,6 +205,61 @@ impl<W: AsyncWrite + Unpin + 'static> Controller<W> {
         }
 
         parse_result.is_ok()
+    }
+}
+
+async fn set_buffer_size_task<W: AsyncWrite + Unpin + 'static>(controller: Weak<Controller<W>>, buffer_size: u32) {
+    let manager_rc = match controller.upgrade().map(|rc| rc.manager.upgrade()) {
+        Some(Some(rc)) => rc,
+        _ => return,
+    };
+
+    let (response_sender, response_receiver) = oneshot::channel();
+    let send_status = manager_rc
+        .set_buffer_size_fn(buffer_size, |result| {
+            let _ = response_sender.send(result.0);
+        })
+        .await;
+    drop(manager_rc);
+
+    let result = match send_status {
+        Err(_) => Err(false),
+        Ok(_) => match response_receiver.await {
+            Ok(status) => Ok(status),
+            Err(_) => Err(true),
+        },
+    };
+
+    let rc = match controller.upgrade() {
+        Some(rc) => rc,
+        None => return,
+    };
+
+    match result {
+        Ok(true) => {
+            let _ = rc.buffer_size_watch.send(buffer_size);
+            rc.close_popup();
+        }
+        _ => {
+            let message_str = match result.is_err() {
+                true => REQUEST_SEND_ERROR_MESSAGE,
+                false => SERVER_ERROR_MESSAGE,
+            };
+
+            let popup = MessagePopup::empty_error_message(
+                Rc::clone(&rc.inner.borrow().base.base.redraw_notify),
+                ERROR_POPUP_TITLE.into(),
+                message_str.into(),
+                ERROR_POPUP_WIDTH,
+            );
+
+            let _ = rc.popup_sender.send(popup.into());
+
+            let mut inner = rc.inner.borrow_mut();
+            inner.is_doing_request = false;
+            inner.base.set_showing_buttons(true);
+            inner.base.base.set_closable(true);
+        }
     }
 }
 
@@ -395,6 +399,11 @@ impl<W: AsyncWrite + Unpin + 'static> UIElement for Content<W> {
     }
 
     fn handle_event(&mut self, event: &event::Event, is_focused: bool) -> HandleEventStatus {
+        let controller = &self.base.lower.right.handler.controller;
+        if controller.inner.borrow().is_doing_request {
+            return HandleEventStatus::Handled;
+        }
+
         self.base.handle_event(event, is_focused)
     }
 

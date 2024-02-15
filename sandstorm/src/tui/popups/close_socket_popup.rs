@@ -143,20 +143,20 @@ async fn close_socket_task<W: AsyncWrite + Unpin + 'static>(controller_weak: Wea
         _ => return,
     };
 
-    let maybe_result = socket_type.remove_socket(manager_rc, socket_address).await;
+    let result = socket_type.remove_socket(manager_rc, socket_address).await;
 
     let rc = match controller_weak.upgrade() {
         Some(rc) => rc,
         None => return,
     };
 
-    match maybe_result {
+    match result {
         Ok(RemoveSocketResponse::Ok) => {
             let _ = rc.sockets_watch.send((socket_address, false));
             rc.close_popup();
         }
         Ok(RemoveSocketResponse::SocketNotFound) | Err(_) => {
-            let prompt_str = match maybe_result.is_err() {
+            let prompt_str = match result.is_err() {
                 true => REQUEST_SEND_ERROR_MESSAGE,
                 false => SERVER_REMOVE_ERROR_MESSAGE,
             };

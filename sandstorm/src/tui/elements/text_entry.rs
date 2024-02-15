@@ -117,10 +117,6 @@ impl<H: TextEntryHandler> TextEntry<H> {
         Rc::clone(&self.controller)
     }
 
-    pub fn is_typing(&self) -> bool {
-        self.cursor.is_some()
-    }
-
     fn get_focus_position(&self) -> (u16, u16) {
         self.current_position
     }

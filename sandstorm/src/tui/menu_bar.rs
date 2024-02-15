@@ -684,6 +684,7 @@ impl<W: AsyncWrite + Unpin + 'static> UIElement for MenuBar<W> {
         };
 
         if let KeyCode::Char(c) = key_event.code {
+            let c = c.to_ascii_lowercase();
             let mut handled = true;
 
             match c {
