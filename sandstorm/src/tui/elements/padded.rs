@@ -29,7 +29,10 @@ impl<T: UIElement> UIElement for Padded<T> {
     }
 
     fn render(&mut self, area: Rect, frame: &mut Frame) {
-        self.inner.render(self.inner_area(area), frame);
+        let inner_area = self.inner_area(area);
+        if !inner_area.is_empty() {
+            self.inner.render(inner_area, frame);
+        }
     }
 
     fn handle_event(&mut self, event: &event::Event, is_focused: bool) -> HandleEventStatus {

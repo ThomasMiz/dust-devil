@@ -69,7 +69,7 @@ impl LongListHandler for LogListHandler {
         }
     }
 
-    fn on_enter(&mut self, index: usize) -> OnEnterResult {
+    fn on_enter(&mut self, _index: usize) -> OnEnterResult {
         OnEnterResult::Unhandled
     }
 }

@@ -51,14 +51,18 @@ impl<L: UIElement, R: UIElement> UIElement for HorizontalSplit<R, L> {
 
         let mut left_area = area;
         left_area.width = left_area.width.min(self.left_width);
-        self.left.render(left_area, frame);
+        if !left_area.is_empty() {
+            self.left.render(left_area, frame);
+        }
 
         let left_width_plus_space = self.left_width + self.space_between;
 
         let mut right_area = area;
         right_area.x += left_width_plus_space;
         right_area.width = right_area.width.saturating_sub(left_width_plus_space);
-        self.right.render(right_area, frame);
+        if !right_area.is_empty() {
+            self.right.render(right_area, frame);
+        }
     }
 
     fn handle_event(&mut self, event: &event::Event, is_focused: bool) -> HandleEventStatus {

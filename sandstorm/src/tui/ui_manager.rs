@@ -135,23 +135,15 @@ impl<W: AsyncWrite + Unpin + 'static> UIManager<W> {
     }
 
     pub fn handle_terminal_event(&mut self, event: &event::Event) {
-        if self.popups.is_empty() {
-            if self.root.handle_event(event, true) == HandleEventStatus::Unhandled {
-                if let event::Event::Key(key_event) = event {
-                    if key_event.code == KeyCode::Esc && key_event.kind != KeyEventKind::Release {
-                        let redraw_notify = Rc::clone(&self.redraw_notify);
-                        let shutdown_notify = Rc::clone(&self.shutdown_notify);
-                        self.push_popup(ConfirmClosePopup::new(redraw_notify, shutdown_notify).into());
-                    }
+        if let Some(popup) = self.popups.last_mut() {
+            popup.element.handle_event(event, true);
+        } else if self.root.handle_event(event, true) == HandleEventStatus::Unhandled {
+            if let event::Event::Key(key_event) = event {
+                if key_event.code == KeyCode::Esc && key_event.kind != KeyEventKind::Release {
+                    let redraw_notify = Rc::clone(&self.redraw_notify);
+                    let shutdown_notify = Rc::clone(&self.shutdown_notify);
+                    self.push_popup(ConfirmClosePopup::new(redraw_notify, shutdown_notify).into());
                 }
-            }
-        } else {
-            let mut is_focused = true;
-            for popup in self.popups.iter_mut().rev() {
-                if popup.element.handle_event(event, is_focused) != HandleEventStatus::Unhandled {
-                    break;
-                }
-                is_focused = false;
             }
         }
     }

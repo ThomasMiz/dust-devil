@@ -19,7 +19,6 @@ pub struct ArrowSelector<H: ArrowSelectorHandler> {
     selected_index: usize,
     options_idle_style: Style,
     options_focused_style: Style,
-    arrows_focused_style: Style,
     options_selecting_style: Style,
     arrows_selecting_style: Style,
     options_max_width: u16,
@@ -31,13 +30,13 @@ pub struct ArrowSelector<H: ArrowSelectorHandler> {
 }
 
 impl<H: ArrowSelectorHandler> ArrowSelector<H> {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         redraw_notify: Rc<Notify>,
         mut options: Vec<(StaticString, Option<char>)>,
         selected_index: usize,
         options_idle_style: Style,
         options_focused_style: Style,
-        arrows_focused_style: Style,
         options_selecting_style: Style,
         arrows_selecting_style: Style,
         autoselect: bool,
@@ -51,13 +50,16 @@ impl<H: ArrowSelectorHandler> ArrowSelector<H> {
         let options_max_width = options_max_width.unwrap_or(0).max(u16::MAX as usize) as u16;
         let selected_index = selected_index.min(options.len());
 
+        for (_, ch) in options.iter_mut() {
+            *ch = ch.map(|c| c.to_ascii_lowercase());
+        }
+
         Self {
             redraw_notify,
             options,
             selected_index,
             options_idle_style,
             options_focused_style,
-            arrows_focused_style,
             options_selecting_style,
             arrows_selecting_style,
             options_max_width,
@@ -111,6 +113,7 @@ impl<H: ArrowSelectorHandler> UIElement for ArrowSelector<H> {
         };
 
         if let KeyCode::Char(c) = key_event.code {
+            let c = c.to_ascii_lowercase();
             let mut iter = self.options.iter().map(|(_, ch)| *ch).enumerate();
             let index = iter.find_map(|(idx, ch)| ch.filter(|ch| *ch == c).map(|_| idx));
 

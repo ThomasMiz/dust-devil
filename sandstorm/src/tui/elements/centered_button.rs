@@ -38,6 +38,7 @@ impl<H: ButtonHandler> CenteredButton<H> {
         handler: H,
     ) -> Self {
         let text_len_chars = text.deref().chars().count().min(u16::MAX as usize) as u16;
+        let shortcut_key = shortcut_key.map(|c| c.to_ascii_lowercase());
 
         Self {
             redraw_notify,
@@ -83,7 +84,7 @@ impl<H: ButtonHandler> UIElement for CenteredButton<H> {
         };
 
         if let KeyCode::Char(c) = key_event.code {
-            if self.shortcut_key.is_some_and(|sk| sk == c) {
+            if self.shortcut_key.is_some_and(|sk| sk == c.to_ascii_lowercase()) {
                 self.handler.on_pressed();
                 return HandleEventStatus::Handled;
             }

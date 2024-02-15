@@ -49,14 +49,18 @@ impl<U: UIElement, L: UIElement> UIElement for VerticalSplit<U, L> {
     fn render(&mut self, area: Rect, frame: &mut Frame) {
         let mut upper_area = area;
         upper_area.height = upper_area.height.min(self.upper_height);
-        self.upper.render(upper_area, frame);
+        if !upper_area.is_empty() {
+            self.upper.render(upper_area, frame);
+        }
 
         let upper_height_plus_space = self.upper_height + self.space_between;
 
         let mut lower_area = area;
         lower_area.y += upper_height_plus_space;
         lower_area.height = lower_area.height.saturating_sub(upper_height_plus_space);
-        self.lower.render(lower_area, frame);
+        if !lower_area.is_empty() {
+            self.lower.render(lower_area, frame);
+        }
     }
 
     fn handle_event(&mut self, event: &event::Event, is_focused: bool) -> HandleEventStatus {

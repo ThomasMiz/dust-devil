@@ -28,19 +28,21 @@ use crate::{
         elements::{
             arrow_selector::{ArrowSelector, ArrowSelectorHandler},
             centered_button::{ButtonHandler, CenteredButton},
-            centered_text::CenteredText,
+            centered_text::{CenteredText, CenteredTextLine},
+            horizontal_split::HorizontalSplit,
             long_list::{LongList, LongListHandler},
             padded::Padded,
             vertical_split::VerticalSplit,
             OnEnterResult,
         },
-        text_wrapper::StaticString,
+        text_wrapper::{wrap_lines_by_chars, StaticString},
         ui_element::{AutosizeUIElement, HandleEventStatus, UIElement},
         ui_manager::Popup,
     },
 };
 
 use super::{
+    close_socket_popup::CloseSocketPopup,
     loading_popup::{LoadingPopup, LoadingPopupController, LoadingPopupControllerInner},
     message_popup::REQUEST_SEND_ERROR_MESSAGE,
     popup_base::PopupBaseController,
@@ -49,28 +51,32 @@ use super::{
 
 const BACKGROUND_COLOR: Color = Color::Yellow;
 const SELECTED_BACKGROUND_COLOR: Color = Color::LightYellow;
+const TEXT_COLOR: Color = Color::Black;
 
 const SOCKS5_TITLE: &str = "─Socks5 Sockets";
 const SANDSTORM_TITLE: &str = "─Sandstorm Sockets";
 const LOADING_MESSAGE: &str = "Getting socket list from the server...";
-const LOADING_STYLE: Style = Style::new();
+const LOADING_STYLE: Style = Style::new().fg(TEXT_COLOR);
 const SOCKS5_TOP_MESSAGE: &str = "Listening socks5 sockets:";
 const SANDSTORM_TOP_MESSAGE: &str = "Listening Sandstorm sockets:";
-const TOP_MESSAGE_STYLE: Style = Style::new();
+const TOP_MESSAGE_STYLE: Style = Style::new().fg(TEXT_COLOR);
 const HELP_MESSAGE: &str = "Scroll the list with the arrow keys, press (ENTER) on a socket to close it.";
-const HELP_MESSAGE_STYLE: Style = Style::new();
+const HELP_MESSAGE_STYLE: Style = Style::new().fg(TEXT_COLOR);
 const ADD_SOCKET_BUTTON_TEXT: &str = "[add new socket (a)]";
 const ADD_SOCKET_SHORTCUT_KEY: char = 'a';
 const POPUP_WIDTH: u16 = 40;
 const MAX_POPUP_HEIGHT: u16 = 24;
 
 const SERVER_ADD_ERROR_MESSAGE: &str = "The server encountered an error while opening the socket:";
-const SERVER_REMOVE_ERROR_MESSAGE: &str = "The server could not find the socket you requested to remove.";
 const ERROR_POPUP_WIDTH: u16 = 40;
 
+const IP_FILTER_LABEL: &str = "Filter:";
 const FILTER_ALL_STR: &str = "[ALL]";
+const FILTER_ALL_SHORTCUT: Option<char> = None;
 const FILTER_IPV4_STR: &str = "[IPv4]";
+const FILTER_IPV4_SHORTCUT: Option<char> = Some('4');
 const FILTER_IPV6_STR: &str = "[IPv6]";
+const FILTER_IPV6_SHORTCUT: Option<char> = Some('6');
 
 #[derive(Clone, Copy)]
 pub enum SocketPopupType {
@@ -79,7 +85,7 @@ pub enum SocketPopupType {
 }
 
 impl SocketPopupType {
-    async fn list_sockets<W: AsyncWrite + Unpin + 'static>(
+    pub async fn list_sockets<W: AsyncWrite + Unpin + 'static>(
         self,
         manager: Rc<MutexedSandstormRequestManager<W>>,
     ) -> Result<Vec<SocketAddr>, bool> {
@@ -106,7 +112,7 @@ impl SocketPopupType {
         response_receiver.await.map_err(|_| true)
     }
 
-    async fn add_socket<W: AsyncWrite + Unpin + 'static>(
+    pub async fn add_socket<W: AsyncWrite + Unpin + 'static>(
         self,
         manager: Rc<MutexedSandstormRequestManager<W>>,
         socket_address: SocketAddr,
@@ -134,7 +140,7 @@ impl SocketPopupType {
         response_receiver.await.map_err(|_| true)
     }
 
-    async fn remove_socket<W: AsyncWrite + Unpin + 'static>(
+    pub async fn remove_socket<W: AsyncWrite + Unpin + 'static>(
         self,
         manager: Rc<MutexedSandstormRequestManager<W>>,
         socket_address: SocketAddr,
@@ -344,7 +350,8 @@ impl<W: AsyncWrite + Unpin + 'static> Drop for SocketsPopup<W> {
 
 type SocketPopupContent<W> = VerticalSplit<CenteredText, VerticalSplit<UpperContent<W>, BottomContent<W>>>;
 
-type UpperContent<W> = VerticalSplit<Padded<ArrowSelector<FilterArrowHandler<W>>>, SocketList<W>>;
+type IpFilterLine<W> = HorizontalSplit<CenteredTextLine, ArrowSelector<FilterArrowHandler<W>>>;
+type UpperContent<W> = VerticalSplit<Padded<IpFilterLine<W>>, SocketList<W>>;
 
 struct FilterArrowHandler<W: AsyncWrite + Unpin + 'static> {
     controller: Rc<Controller<W>>,
@@ -432,24 +439,40 @@ impl<W: AsyncWrite + Unpin + 'static> SocketListHandler<W> {
 }
 
 impl<W: AsyncWrite + Unpin + 'static> LongListHandler for SocketListHandler<W> {
-    fn get_item_lines<F: FnMut(Line<'static>)>(&mut self, index: usize, wrap_width: u16, mut f: F) {
+    fn get_item_lines<F: FnMut(Line<'static>)>(&mut self, index: usize, wrap_width: u16, f: F) {
         let socket_address = self.sockets_filtered[index];
-        f(Line::from(socket_address.to_string()))
+        let text = socket_address.to_string();
+        let iter = [(StaticString::Owned(text), Style::new().fg(TEXT_COLOR))].into_iter();
+        wrap_lines_by_chars(wrap_width as usize, iter, f);
     }
 
-    fn modify_line_to_selected(&mut self, index: usize, line: &mut Line<'static>, item_line_number: u16) {
+    fn modify_line_to_selected(&mut self, _index: usize, line: &mut Line<'static>, _item_line_number: u16) {
         for span in line.spans.iter_mut() {
             span.style.bg = Some(SELECTED_BACKGROUND_COLOR);
         }
     }
 
-    fn modify_line_to_unselected(&mut self, index: usize, line: &mut Line<'static>, item_line_number: u16) {
+    fn modify_line_to_unselected(&mut self, _index: usize, line: &mut Line<'static>, _item_line_number: u16) {
         for span in line.spans.iter_mut() {
             span.style.bg = None;
         }
     }
 
     fn on_enter(&mut self, index: usize) -> OnEnterResult {
+        let inner_guard = self.controller.inner.borrow();
+        let inner = inner_guard.deref();
+
+        let popup = CloseSocketPopup::new(
+            Rc::clone(&inner.base.base.redraw_notify),
+            Weak::clone(&self.controller.manager),
+            self.sockets_filtered[index],
+            self.controller.socket_type,
+            self.controller.sockets_watch.clone(),
+            self.controller.popup_sender.clone(),
+        );
+
+        let _ = self.controller.popup_sender.send(popup.into());
+
         OnEnterResult::Handled
     }
 }
@@ -468,7 +491,7 @@ impl<W: AsyncWrite + Unpin + 'static> AddButtonHandler<W> {
 
 impl<W: AsyncWrite + Unpin + 'static> ButtonHandler for AddButtonHandler<W> {
     fn on_pressed(&mut self) -> OnEnterResult {
-        OnEnterResult::PassFocusAway
+        OnEnterResult::Handled
     }
 }
 
@@ -523,22 +546,26 @@ impl<W: AsyncWrite + Unpin + 'static> SocketsPopup<W> {
         let (controller, close_receiver) = Controller::new(Rc::clone(&redraw_notify), manager, socket_type, sockets_watch, popup_sender);
         let controller = Rc::new(controller);
 
-        let ip_filter = ArrowSelector::new(
+        let text_style = Style::new().fg(TEXT_COLOR);
+
+        let ip_filter_selector = ArrowSelector::new(
             Rc::clone(&redraw_notify),
             vec![
-                (FILTER_ALL_STR.into(), Some('0')),
-                (FILTER_IPV4_STR.into(), Some('4')),
-                (FILTER_IPV6_STR.into(), Some('6')),
+                (FILTER_ALL_STR.into(), FILTER_ALL_SHORTCUT),
+                (FILTER_IPV4_STR.into(), FILTER_IPV4_SHORTCUT),
+                (FILTER_IPV6_STR.into(), FILTER_IPV6_SHORTCUT),
             ],
             0,
-            Style::new(),
-            Style::new().bg(SELECTED_BACKGROUND_COLOR),
-            Style::new().bg(SELECTED_BACKGROUND_COLOR),
-            Style::new().bg(SELECTED_BACKGROUND_COLOR),
-            Style::new().bg(SELECTED_BACKGROUND_COLOR),
+            text_style,
+            text_style.bg(SELECTED_BACKGROUND_COLOR),
+            text_style.bg(SELECTED_BACKGROUND_COLOR),
+            text_style.bg(SELECTED_BACKGROUND_COLOR),
             false,
             FilterArrowHandler::new(Rc::clone(&controller)),
         );
+
+        let ip_filter_label = CenteredTextLine::new(IP_FILTER_LABEL.into(), text_style);
+        let ip_filter = HorizontalSplit::new(ip_filter_label, ip_filter_selector, 0, 1);
         let ip_filter = Padded::new(Padding::horizontal(1), ip_filter);
         let socket_list = SocketList::new(Rc::clone(&redraw_notify), Rc::clone(&controller));
 
@@ -548,8 +575,8 @@ impl<W: AsyncWrite + Unpin + 'static> SocketsPopup<W> {
         let add_button = CenteredButton::new(
             Rc::clone(&redraw_notify),
             ADD_SOCKET_BUTTON_TEXT.into(),
-            Style::new(),
-            Style::new().bg(SELECTED_BACKGROUND_COLOR),
+            text_style,
+            text_style.bg(SELECTED_BACKGROUND_COLOR),
             Some(ADD_SOCKET_SHORTCUT_KEY),
             AddButtonHandler::new(Rc::clone(&controller)),
         );
@@ -576,7 +603,7 @@ impl<W: AsyncWrite + Unpin + 'static> SocketsPopup<W> {
             title.into(),
             LOADING_MESSAGE.into(),
             LOADING_STYLE,
-            Color::Reset,
+            TEXT_COLOR,
             BACKGROUND_COLOR,
             SizeConstraint::new().max(POPUP_WIDTH, MAX_POPUP_HEIGHT),
             controller,

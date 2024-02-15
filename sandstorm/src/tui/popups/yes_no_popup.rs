@@ -1,7 +1,4 @@
-use std::{
-    cell::RefCell,
-    rc::{Rc, Weak},
-};
+use std::{cell::RefCell, rc::Rc};
 
 use crossterm::event;
 use ratatui::{
@@ -243,35 +240,5 @@ impl<C: YesNoPopupController, T: AutosizeUIElement, H: DualButtonsHandler> UIEle
 
     fn focus_lost(&mut self) {
         self.base.focus_lost();
-    }
-}
-
-pub struct YesNoClosureHandler<C: YesNoPopupController, YF: FnMut(Rc<C>), NF: FnMut(Rc<C>)> {
-    controller: Weak<C>,
-    on_yes: YF,
-    on_no: NF,
-}
-
-impl<C: YesNoPopupController, YF: FnMut(Rc<C>), NF: FnMut(Rc<C>)> YesNoClosureHandler<C, YF, NF> {
-    pub fn new(controller: &Rc<C>, on_yes: YF, on_no: NF) -> Self {
-        Self {
-            controller: Rc::downgrade(controller),
-            on_yes,
-            on_no,
-        }
-    }
-}
-
-impl<C: YesNoPopupController, YF: FnMut(Rc<C>), NF: FnMut(Rc<C>)> DualButtonsHandler for YesNoClosureHandler<C, YF, NF> {
-    fn on_left(&mut self) {
-        if let Some(rc) = self.controller.upgrade() {
-            (self.on_yes)(rc);
-        }
-    }
-
-    fn on_right(&mut self) {
-        if let Some(rc) = self.controller.upgrade() {
-            (self.on_no)(rc);
-        }
     }
 }

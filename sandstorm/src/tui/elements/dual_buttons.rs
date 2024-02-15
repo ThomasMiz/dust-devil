@@ -164,6 +164,7 @@ impl<H: DualButtonsHandler> UIElement for DualButtons<H> {
         };
 
         if let KeyCode::Char(c) = key_event.code {
+            let c = c.to_ascii_lowercase();
             if self.left_keys.contains(&c) {
                 self.handlers.on_left();
                 return HandleEventStatus::Handled;
