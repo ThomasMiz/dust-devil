@@ -1,4 +1,9 @@
-use std::{collections::HashMap, io::Error, net::SocketAddr, sync::Arc};
+use std::{
+    collections::HashMap,
+    io::{Error, ErrorKind},
+    net::SocketAddr,
+    sync::Arc,
+};
 
 use dust_devil_core::{
     logging::EventData,
@@ -134,16 +139,22 @@ async fn run_server_inner(startup_args: StartupArguments, logger: Option<&LogMan
                     MessageType::ListSocks5Sockets(result_notifier) => {
                         let _ = result_notifier.send(socks_listeners.iter().filter_map(|l| l.local_addr().ok()).collect());
                     }
-                    MessageType::AddSocks5Socket(socket_address, result_notifier) => match TcpListener::bind(socket_address).await {
-                        Ok(result) => {
-                            socks_listeners.push(result);
-                            sendif!(log_sender, EventData::NewSocks5Socket(socket_address));
-                            let _ = result_notifier.send(Ok(()));
-                        }
-                        Err(err) => {
-                            let err2 = Error::new(err.kind(), err.to_string());
-                            sendif!(log_sender, EventData::FailedBindSocks5Socket(socket_address, err));
-                            let _ = result_notifier.send(Err(err2));
+                    MessageType::AddSocks5Socket(socket_address, result_notifier) => {
+                        if socket_address.port() == 0 {
+                            let _ = result_notifier.send(Err(Error::new(ErrorKind::InvalidData, "The port may not be zero")));
+                        } else {
+                            match TcpListener::bind(socket_address).await {
+                                Ok(result) => {
+                                    socks_listeners.push(result);
+                                    sendif!(log_sender, EventData::NewSocks5Socket(socket_address));
+                                    let _ = result_notifier.send(Ok(()));
+                                }
+                                Err(err) => {
+                                    let err2 = Error::new(err.kind(), err.to_string());
+                                    sendif!(log_sender, EventData::FailedBindSocks5Socket(socket_address, err));
+                                    let _ = result_notifier.send(Err(err2));
+                                }
+                            }
                         }
                     },
                     MessageType::RemoveSocks5Socket(socket_address, result_notifier) => {
@@ -166,16 +177,22 @@ async fn run_server_inner(startup_args: StartupArguments, logger: Option<&LogMan
                     MessageType::ListSandstormSockets(result_notifier) => {
                         let _ = result_notifier.send(sandstorm_listeners.iter().filter_map(|l| l.local_addr().ok()).collect());
                     }
-                    MessageType::AddSandstormSocket(socket_address, result_notifier) => match TcpListener::bind(socket_address).await {
-                        Ok(result) => {
-                            sandstorm_listeners.push(result);
-                            sendif!(log_sender, EventData::NewSandstormSocket(socket_address));
-                            let _ = result_notifier.send(Ok(()));
-                        }
-                        Err(err) => {
-                            let err2 = Error::new(err.kind(), err.to_string());
-                            sendif!(log_sender, EventData::FailedBindSandstormSocket(socket_address, err));
-                            let _ = result_notifier.send(Err(err2));
+                    MessageType::AddSandstormSocket(socket_address, result_notifier) => {
+                        if socket_address.port() == 0 {
+                            let _ = result_notifier.send(Err(Error::new(ErrorKind::InvalidData, "The port may not be zero")));
+                        } else {
+                            match TcpListener::bind(socket_address).await {
+                                Ok(result) => {
+                                    sandstorm_listeners.push(result);
+                                    sendif!(log_sender, EventData::NewSandstormSocket(socket_address));
+                                    let _ = result_notifier.send(Ok(()));
+                                }
+                                Err(err) => {
+                                    let err2 = Error::new(err.kind(), err.to_string());
+                                    sendif!(log_sender, EventData::FailedBindSandstormSocket(socket_address, err));
+                                    let _ = result_notifier.send(Err(err2));
+                                }
+                            }
                         }
                     },
                     MessageType::RemoveSandstormSocket(socket_address, result_notifier) => {
