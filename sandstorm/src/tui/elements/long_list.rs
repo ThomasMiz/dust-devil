@@ -179,12 +179,6 @@ impl LongListController {
         };
     }
 
-    /// Resets the list, forgetting any current items and setting a new item count.
-    pub fn reset_items(&self, item_count: usize, try_keep_selected: bool) {
-        self.reset_items_no_redraw(item_count, try_keep_selected);
-        self.redraw_notify.notify_one();
-    }
-
     /// Sets the amount of items to display. This equals the highest exclusive index.
     pub fn set_item_count(&self, item_count: usize) {
         let mut inner_guard = self.inner.borrow_mut();

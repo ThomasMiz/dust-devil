@@ -32,11 +32,10 @@ use crate::{
             horizontal_split::HorizontalSplit,
             long_list::{LongList, LongListHandler},
             padded::Padded,
-            vertical_split::VerticalSplit,
             OnEnterResult,
         },
         text_wrapper::{wrap_lines_by_chars, StaticString},
-        ui_element::{AutosizeUIElement, HandleEventStatus, UIElement},
+        ui_element::{AutosizeUIElement, HandleEventStatus, PassFocusDirection, UIElement},
         ui_manager::Popup,
     },
 };
@@ -47,7 +46,7 @@ use super::{
     loading_popup::{LoadingPopup, LoadingPopupController, LoadingPopupControllerInner},
     message_popup::REQUEST_SEND_ERROR_MESSAGE,
     popup_base::PopupBaseController,
-    size_constraint::{ConstrainedPopupContent, SizeConstraint},
+    size_constraint::SizeConstraint,
 };
 
 const BACKGROUND_COLOR: Color = Color::Yellow;
@@ -75,6 +74,8 @@ const FILTER_IPV4_STR: &str = "[IPv4]";
 const FILTER_IPV4_SHORTCUT: Option<char> = Some('4');
 const FILTER_IPV6_STR: &str = "[IPv6]";
 const FILTER_IPV6_SHORTCUT: Option<char> = Some('6');
+
+const MIN_SOCKET_LIST_HEIGHT: usize = 4;
 
 #[derive(Clone, Copy)]
 pub enum SocketPopupType {
@@ -346,10 +347,50 @@ impl<W: AsyncWrite + Unpin + 'static> Drop for SocketsPopup<W> {
     }
 }
 
-type SocketPopupContent<W> = VerticalSplit<CenteredText, VerticalSplit<UpperContent<W>, BottomContent<W>>>;
+struct SocketPopupContent<W: AsyncWrite + Unpin + 'static> {
+    top_text: CenteredText,
+    ip_filter: Padded<HorizontalSplit<CenteredTextLine, ArrowSelector<FilterArrowHandler<W>>>>,
+    socket_list: LongList<SocketListHandler<W>>,
+    help_text: Padded<CenteredText>,
+    add_button: Padded<CenteredButton<AddButtonHandler<W>>>,
+    top_text_height: u16,
+    socket_list_height: u16,
+    help_text_height: u16,
+    focused_element: FocusedElement,
+}
 
-type IpFilterLine<W> = HorizontalSplit<CenteredTextLine, ArrowSelector<FilterArrowHandler<W>>>;
-type UpperContent<W> = VerticalSplit<Padded<IpFilterLine<W>>, SocketList<W>>;
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum FocusedElement {
+    IpFilter,
+    SocketList,
+    AddButton,
+}
+
+impl FocusedElement {
+    fn down(self) -> Self {
+        match self {
+            Self::IpFilter => Self::SocketList,
+            Self::SocketList => Self::AddButton,
+            Self::AddButton => Self::AddButton,
+        }
+    }
+
+    fn up(self) -> Self {
+        match self {
+            Self::IpFilter => Self::IpFilter,
+            Self::SocketList => Self::IpFilter,
+            Self::AddButton => Self::SocketList,
+        }
+    }
+
+    fn next(self) -> Self {
+        match self {
+            Self::IpFilter => Self::SocketList,
+            Self::SocketList => Self::AddButton,
+            Self::AddButton => Self::IpFilter,
+        }
+    }
+}
 
 struct FilterArrowHandler<W: AsyncWrite + Unpin + 'static> {
     controller: Rc<Controller<W>>,
@@ -373,52 +414,262 @@ impl<W: AsyncWrite + Unpin + 'static> ArrowSelectorHandler for FilterArrowHandle
     }
 }
 
-struct SocketList<W: AsyncWrite + Unpin + 'static> {
-    list: ConstrainedPopupContent<LongList<SocketListHandler<W>>>,
-}
+impl<W: AsyncWrite + Unpin + 'static> SocketPopupContent<W> {
+    fn new(redraw_notify: Rc<Notify>, controller: Rc<Controller<W>>, socket_type: SocketPopupType) -> Self {
+        let text_style = Style::new().fg(TEXT_COLOR);
+        let selected_text_style = text_style.bg(SELECTED_BACKGROUND_COLOR);
 
-impl<W: AsyncWrite + Unpin + 'static> SocketList<W> {
-    fn new(redraw_notify: Rc<Notify>, controller: Rc<Controller<W>>) -> Self {
-        let list = LongList::new(redraw_notify, "".into(), 0, false, true, SocketListHandler::new(controller));
-        let list = ConstrainedPopupContent::new(SizeConstraint::new().min(40, 8), list);
-        Self { list }
+        let ip_filter_selector = ArrowSelector::new(
+            Rc::clone(&redraw_notify),
+            vec![
+                (FILTER_ALL_STR.into(), FILTER_ALL_SHORTCUT),
+                (FILTER_IPV4_STR.into(), FILTER_IPV4_SHORTCUT),
+                (FILTER_IPV6_STR.into(), FILTER_IPV6_SHORTCUT),
+            ],
+            0,
+            text_style,
+            selected_text_style,
+            selected_text_style,
+            selected_text_style,
+            false,
+            FilterArrowHandler::new(Rc::clone(&controller)),
+        );
+
+        let ip_filter_label = CenteredTextLine::new(IP_FILTER_LABEL.into(), text_style);
+        let ip_filter_inner = HorizontalSplit::new(ip_filter_label, ip_filter_selector, 0, 1);
+        let ip_filter = Padded::new(Padding::horizontal(1), ip_filter_inner);
+
+        let socket_list = LongList::new(
+            Rc::clone(&redraw_notify),
+            "".into(),
+            0,
+            false,
+            true,
+            SocketListHandler::new(Rc::clone(&controller)),
+        );
+
+        let help_text_inner = CenteredText::new(HELP_MESSAGE.into(), HELP_MESSAGE_STYLE);
+        let help_text = Padded::new(Padding::horizontal(1), help_text_inner);
+
+        let add_button_inner = CenteredButton::new(
+            redraw_notify,
+            ADD_SOCKET_BUTTON_TEXT.into(),
+            text_style,
+            selected_text_style,
+            Some(ADD_SOCKET_SHORTCUT_KEY),
+            AddButtonHandler::new(Rc::clone(&controller)),
+        );
+        let add_button = Padded::new(Padding::uniform(1), add_button_inner);
+
+        let top_message = match socket_type {
+            SocketPopupType::Socks5 => SOCKS5_TOP_MESSAGE,
+            SocketPopupType::Sandstorm => SANDSTORM_TOP_MESSAGE,
+        };
+
+        let top_text = CenteredText::new(top_message.into(), TOP_MESSAGE_STYLE);
+
+        Self {
+            top_text,
+            ip_filter,
+            socket_list,
+            help_text,
+            add_button,
+            top_text_height: 1,
+            socket_list_height: 1,
+            help_text_height: 1,
+            focused_element: FocusedElement::IpFilter,
+        }
     }
 }
 
-impl<W: AsyncWrite + Unpin + 'static> UIElement for SocketList<W> {
+impl<W: AsyncWrite + Unpin + 'static> UIElement for SocketPopupContent<W> {
     fn resize(&mut self, area: Rect) {
-        self.list.resize(area);
+        if area.is_empty() {
+            return;
+        }
+
+        let mut remaining_area = area;
+
+        let top_text_size = self.top_text.begin_resize(remaining_area.width, remaining_area.height);
+        let mut top_text_area = remaining_area;
+        top_text_area.height = top_text_area.height.min(top_text_size.1);
+        self.top_text.resize(top_text_area);
+        self.top_text_height = top_text_area.height;
+
+        remaining_area.height -= top_text_area.height;
+        remaining_area.y = top_text_area.bottom();
+        if remaining_area.height == 0 {
+            return;
+        }
+
+        let mut ip_filter_area = remaining_area;
+        ip_filter_area.height = 1;
+        self.ip_filter.resize(ip_filter_area);
+
+        remaining_area.height -= 1;
+        remaining_area.y += 1;
+        if remaining_area.height < 3 {
+            return;
+        }
+
+        let mut add_button_area = remaining_area;
+        add_button_area.y = add_button_area.bottom() - 3;
+        add_button_area.height = 3;
+        self.add_button.resize(add_button_area);
+
+        remaining_area.height -= 3;
+        if remaining_area.height == 0 {
+            return;
+        }
+
+        let help_text_size = self.help_text.begin_resize(remaining_area.width, remaining_area.height);
+        let mut help_text_area = remaining_area;
+        help_text_area.height = help_text_area.height.min(help_text_size.1);
+        help_text_area.y += remaining_area.height - help_text_area.height;
+        self.help_text.resize(help_text_area);
+        self.help_text_height = help_text_area.height;
+
+        remaining_area.height -= help_text_area.height;
+        if remaining_area.height < 2 {
+            return;
+        }
+
+        self.socket_list.resize(remaining_area);
+        self.socket_list_height = remaining_area.height;
     }
 
-    fn render(&mut self, area: Rect, frame: &mut Frame) {
-        let controller = &self.list.inner.handler.controller;
+    fn render(&mut self, mut area: Rect, frame: &mut Frame) {
+        if area.height < self.top_text_height {
+            return;
+        }
+
+        let controller = &self.socket_list.handler.controller;
         if controller.did_list_change() {
-            let list = &mut self.list.inner.handler.sockets_filtered;
+            let list = &mut self.socket_list.handler.sockets_filtered;
             list.clear();
             controller.filter_list_into(list);
             let list_len = list.len();
-            self.list.inner.reset_items_no_redraw(list_len, true);
+            self.socket_list.reset_items_no_redraw(list_len, true);
         }
 
-        self.list.render(area, frame);
+        let mut top_text_area = area;
+        top_text_area.height = self.top_text_height;
+        self.top_text.render(top_text_area, frame);
+        area.y += self.top_text_height;
+        area.height -= self.top_text_height;
+        if area.height == 0 {
+            return;
+        }
+
+        let ip_filter_area = Rect::new(area.x, area.y, area.width, 1);
+        self.ip_filter.render(ip_filter_area, frame);
+        area.y += 1;
+        area.height -= 1;
+        if area.height < self.socket_list_height {
+            return;
+        }
+
+        let socket_list_area = Rect::new(area.x, area.y, area.width, self.socket_list_height);
+        self.socket_list.render(socket_list_area, frame);
+        area.y += self.socket_list_height;
+        area.height -= self.socket_list_height;
+        if area.height < self.help_text_height {
+            return;
+        }
+
+        let help_text_area = Rect::new(area.x, area.y, area.width, self.help_text_height);
+        self.help_text.render(help_text_area, frame);
+        area.y += self.help_text_height;
+        area.height -= self.help_text_height;
+        if area.height == 0 {
+            return;
+        }
+
+        self.add_button.render(area, frame);
     }
 
     fn handle_event(&mut self, event: &event::Event, is_focused: bool) -> HandleEventStatus {
-        self.list.handle_event(event, is_focused)
+        if is_focused {
+            let status = match self.focused_element {
+                FocusedElement::IpFilter => self.ip_filter.handle_event(event, true),
+                FocusedElement::SocketList => self.socket_list.handle_event(event, true),
+                FocusedElement::AddButton => self.add_button.handle_event(event, true),
+            };
+
+            match status {
+                HandleEventStatus::Handled => return HandleEventStatus::Handled,
+                HandleEventStatus::PassFocus(focus_position, direction) => {
+                    let next_focused_element = match direction {
+                        PassFocusDirection::Up => self.focused_element.up(),
+                        PassFocusDirection::Down => self.focused_element.down(),
+                        PassFocusDirection::Forward => self.focused_element.next(),
+                        _ => return status,
+                    };
+
+                    if next_focused_element == self.focused_element {
+                        return status;
+                    }
+
+                    let focus_passed = match next_focused_element {
+                        FocusedElement::IpFilter => self.ip_filter.receive_focus(focus_position),
+                        FocusedElement::SocketList => self.socket_list.receive_focus(focus_position),
+                        FocusedElement::AddButton => self.add_button.receive_focus(focus_position),
+                    };
+
+                    if !focus_passed {
+                        return status;
+                    }
+
+                    match self.focused_element {
+                        FocusedElement::IpFilter => self.ip_filter.focus_lost(),
+                        FocusedElement::SocketList => self.socket_list.focus_lost(),
+                        FocusedElement::AddButton => self.add_button.focus_lost(),
+                    }
+
+                    self.focused_element = next_focused_element;
+                    return HandleEventStatus::Handled;
+                }
+                HandleEventStatus::Unhandled => {}
+            }
+        }
+
+        self.ip_filter
+            .handle_event(event, false)
+            .or_else(|| self.socket_list.handle_event(event, false))
+            .or_else(|| self.add_button.handle_event(event, false))
     }
 
     fn receive_focus(&mut self, focus_position: (u16, u16)) -> bool {
-        self.list.receive_focus(focus_position)
+        self.focused_element = FocusedElement::IpFilter;
+        self.ip_filter.receive_focus(focus_position)
     }
 
     fn focus_lost(&mut self) {
-        self.list.focus_lost();
+        match self.focused_element {
+            FocusedElement::IpFilter => self.ip_filter.focus_lost(),
+            FocusedElement::SocketList => self.socket_list.focus_lost(),
+            FocusedElement::AddButton => self.add_button.focus_lost(),
+        }
     }
 }
 
-impl<W: AsyncWrite + Unpin + 'static> AutosizeUIElement for SocketList<W> {
+impl<W: AsyncWrite + Unpin + 'static> AutosizeUIElement for SocketPopupContent<W> {
     fn begin_resize(&mut self, width: u16, height: u16) -> (u16, u16) {
-        self.list.begin_resize(width, height)
+        let (_, top_text_height) = self.top_text.begin_resize(width, height);
+        let (_, help_text_height) = self.help_text.begin_resize(width, height);
+        let mut request_height = top_text_height.saturating_add(help_text_height);
+
+        let list_len = self.socket_list.handler.controller.inner.borrow().sockets.len();
+        let socket_list_height = list_len.max(MIN_SOCKET_LIST_HEIGHT).saturating_add(2).min(u16::MAX as usize) as u16;
+        request_height = request_height.saturating_add(socket_list_height);
+
+        self.ip_filter.begin_resize(width, 1);
+        let ip_filter_height = 1;
+        let add_button_height = 3;
+        let additional_height = ip_filter_height + add_button_height;
+        request_height = request_height.saturating_add(additional_height);
+
+        (width, request_height.min(height))
     }
 }
 
@@ -474,8 +725,6 @@ impl<W: AsyncWrite + Unpin + 'static> LongListHandler for SocketListHandler<W> {
         OnEnterResult::Handled
     }
 }
-
-type BottomContent<W> = Padded<VerticalSplit<CenteredText, CenteredButton<AddButtonHandler<W>>>>;
 
 struct AddButtonHandler<W: AsyncWrite + Unpin + 'static> {
     controller: Rc<Controller<W>>,
@@ -557,58 +806,14 @@ impl<W: AsyncWrite + Unpin + 'static> SocketsPopup<W> {
         let (controller, close_receiver) = Controller::new(Rc::clone(&redraw_notify), manager, socket_type, sockets_watch, popup_sender);
         let controller = Rc::new(controller);
 
-        let text_style = Style::new().fg(TEXT_COLOR);
-
-        let ip_filter_selector = ArrowSelector::new(
-            Rc::clone(&redraw_notify),
-            vec![
-                (FILTER_ALL_STR.into(), FILTER_ALL_SHORTCUT),
-                (FILTER_IPV4_STR.into(), FILTER_IPV4_SHORTCUT),
-                (FILTER_IPV6_STR.into(), FILTER_IPV6_SHORTCUT),
-            ],
-            0,
-            text_style,
-            text_style.bg(SELECTED_BACKGROUND_COLOR),
-            text_style.bg(SELECTED_BACKGROUND_COLOR),
-            text_style.bg(SELECTED_BACKGROUND_COLOR),
-            false,
-            FilterArrowHandler::new(Rc::clone(&controller)),
-        );
-
-        let ip_filter_label = CenteredTextLine::new(IP_FILTER_LABEL.into(), text_style);
-        let ip_filter = HorizontalSplit::new(ip_filter_label, ip_filter_selector, 0, 1);
-        let ip_filter = Padded::new(Padding::horizontal(1), ip_filter);
-        let socket_list = SocketList::new(Rc::clone(&redraw_notify), Rc::clone(&controller));
-
-        let upper_content = VerticalSplit::new(ip_filter, socket_list, 0, 0);
-
-        let help_text = CenteredText::new(HELP_MESSAGE.into(), HELP_MESSAGE_STYLE);
-        let add_button = CenteredButton::new(
-            Rc::clone(&redraw_notify),
-            ADD_SOCKET_BUTTON_TEXT.into(),
-            text_style,
-            text_style.bg(SELECTED_BACKGROUND_COLOR),
-            Some(ADD_SOCKET_SHORTCUT_KEY),
-            AddButtonHandler::new(Rc::clone(&controller)),
-        );
-
-        let bottom_content = Padded::new(Padding::new(1, 1, 0, 1), VerticalSplit::new(help_text, add_button, 0, 1));
-
-        let top_message = match socket_type {
-            SocketPopupType::Socks5 => SOCKS5_TOP_MESSAGE,
-            SocketPopupType::Sandstorm => SANDSTORM_TOP_MESSAGE,
-        };
-
-        let prompt_text = CenteredText::new(top_message.into(), TOP_MESSAGE_STYLE);
-        let content = VerticalSplit::new(upper_content, bottom_content, 0, 0);
-        let content = VerticalSplit::new(prompt_text, content, 0, 0);
-
         let controller_weak = Rc::downgrade(&controller);
 
         let title = match socket_type {
             SocketPopupType::Socks5 => SOCKS5_TITLE,
             SocketPopupType::Sandstorm => SANDSTORM_TITLE,
         };
+
+        let content = SocketPopupContent::new(redraw_notify, Rc::clone(&controller), socket_type);
 
         let base = LoadingPopup::new(
             title.into(),
