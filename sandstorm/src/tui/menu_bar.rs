@@ -8,7 +8,7 @@ use std::{
 };
 
 use crossterm::event::{self, KeyCode, KeyEventKind};
-use dust_devil_core::socks5::AuthMethod;
+use dust_devil_core::{socks5::AuthMethod, users::UserRole};
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
@@ -38,9 +38,10 @@ use super::{
         buffer_size_popup::BufferSizePopup,
         shutdown_popup::ShutdownPopup,
         sockets_popup::{SocketPopupType, SocketsPopup},
+        users_popup::UsersPopup,
     },
     ui_element::{HandleEventStatus, PassFocusDirection, UIElement},
-    ui_manager::Popup,
+    ui_manager::{Popup, UserNotificationType},
 };
 
 const SHUTDOWN_KEY: char = 'x';
@@ -89,8 +90,9 @@ pub struct MenuBar<W: AsyncWrite + Unpin + 'static> {
     redraw_notify: Rc<Notify>,
     socks5_sockets_watch: broadcast::Sender<(SocketAddr, bool)>,
     sandstorm_sockets_watch: broadcast::Sender<(SocketAddr, bool)>,
-    buffer_size_watch: broadcast::Sender<u32>,
+    users_watch: broadcast::Sender<(UserNotificationType, String, UserRole)>,
     auth_methods_watch: broadcast::Sender<(AuthMethod, bool)>,
+    buffer_size_watch: broadcast::Sender<u32>,
     popup_sender: mpsc::UnboundedSender<Popup>,
     task_handle: JoinHandle<()>,
 }
@@ -165,13 +167,15 @@ impl FocusedElement {
 }
 
 impl<W: AsyncWrite + Unpin + 'static> MenuBar<W> {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         manager: Weak<MutexedSandstormRequestManager<W>>,
         redraw_notify: Rc<Notify>,
         socks5_sockets_watch: broadcast::Sender<(SocketAddr, bool)>,
         sandstorm_sockets_watch: broadcast::Sender<(SocketAddr, bool)>,
-        buffer_size_watch: broadcast::Sender<u32>,
+        users_watch: broadcast::Sender<(UserNotificationType, String, UserRole)>,
         auth_methods_watch: broadcast::Sender<(AuthMethod, bool)>,
+        buffer_size_watch: broadcast::Sender<u32>,
         popup_sender: mpsc::UnboundedSender<Popup>,
     ) -> Self {
         let state = Rc::new(RefCell::new(MenuBarState {
@@ -208,8 +212,9 @@ impl<W: AsyncWrite + Unpin + 'static> MenuBar<W> {
             redraw_notify,
             socks5_sockets_watch,
             sandstorm_sockets_watch,
-            buffer_size_watch,
+            users_watch,
             auth_methods_watch,
+            buffer_size_watch,
             popup_sender,
             task_handle,
         }
@@ -244,7 +249,16 @@ impl<W: AsyncWrite + Unpin + 'static> MenuBar<W> {
         let _ = self.popup_sender.send(popup.into());
     }
 
-    fn users_selected(&self) {}
+    fn users_selected(&self) {
+        let popup = UsersPopup::new(
+            Rc::clone(&self.redraw_notify),
+            Weak::clone(&self.manager),
+            self.users_watch.clone(),
+            self.popup_sender.clone(),
+        );
+
+        let _ = self.popup_sender.send(popup.into());
+    }
 
     fn auth_selected(&self) {
         let popup = AuthMethodsPopup::new(

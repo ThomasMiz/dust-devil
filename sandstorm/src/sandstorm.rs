@@ -536,7 +536,10 @@ where
     }
 
     pub async fn list_users_fn<F: FnOnce(ListUsersResponse) + 'static>(&mut self, f: F) -> Result<(), Error> {
-        self.handlers.deref().borrow_mut().list_users_handlers.push_back(Box::new(f));
+        let mut handlers = self.handlers.deref().borrow_mut();
+        handlers.list_users_handlers.push_back(Box::new(f));
+        handlers.remaining += 1;
+        drop(handlers);
         ListUsersRequest.write(&mut self.writer).await
     }
 
@@ -700,41 +703,41 @@ impl<W: AsyncWrite + Unpin> MutexedSandstormRequestManager<W> {
         guard.flush_writer().await
     }
 
-    // pub async fn list_users_fn<F: FnOnce(ListUsersResponse) + 'static>(&self, f: F) -> Result<(), Error> {
-    //     let mut guard = self.inner.lock().await;
-    //     guard.list_users_fn(f).await?;
-    //     guard.flush_writer().await
-    // }
+    pub async fn list_users_fn<F: FnOnce(ListUsersResponse) + 'static>(&self, f: F) -> Result<(), Error> {
+        let mut guard = self.inner.lock().await;
+        guard.list_users_fn(f).await?;
+        guard.flush_writer().await
+    }
 
-    // pub async fn add_user_fn<F: FnOnce(AddUserResponse) + 'static>(
-    //     &self,
-    //     username: &str,
-    //     password: &str,
-    //     role: UserRole,
-    //     f: F,
-    // ) -> Result<(), Error> {
-    //     let mut guard = self.inner.lock().await;
-    //     guard.add_user_fn(username, password, role, f).await?;
-    //     guard.flush_writer().await
-    // }
+    pub async fn add_user_fn<F: FnOnce(AddUserResponse) + 'static>(
+        &self,
+        username: &str,
+        password: &str,
+        role: UserRole,
+        f: F,
+    ) -> Result<(), Error> {
+        let mut guard = self.inner.lock().await;
+        guard.add_user_fn(username, password, role, f).await?;
+        guard.flush_writer().await
+    }
 
-    // pub async fn update_user_fn<F: FnOnce(UpdateUserResponse) + 'static>(
-    //     &self,
-    //     username: &str,
-    //     password: Option<&str>,
-    //     role: Option<UserRole>,
-    //     f: F,
-    // ) -> Result<(), Error> {
-    //     let mut guard = self.inner.lock().await;
-    //     guard.update_user_fn(username, password, role, f).await?;
-    //     guard.flush_writer().await
-    // }
+    pub async fn update_user_fn<F: FnOnce(UpdateUserResponse) + 'static>(
+        &self,
+        username: &str,
+        password: Option<&str>,
+        role: Option<UserRole>,
+        f: F,
+    ) -> Result<(), Error> {
+        let mut guard = self.inner.lock().await;
+        guard.update_user_fn(username, password, role, f).await?;
+        guard.flush_writer().await
+    }
 
-    // pub async fn delete_user_fn<F: FnOnce(DeleteUserResponse) + 'static>(&self, username: &str, f: F) -> Result<(), Error> {
-    //     let mut guard = self.inner.lock().await;
-    //     guard.delete_user_fn(username, f).await?;
-    //     guard.flush_writer().await
-    // }
+    pub async fn delete_user_fn<F: FnOnce(DeleteUserResponse) + 'static>(&self, username: &str, f: F) -> Result<(), Error> {
+        let mut guard = self.inner.lock().await;
+        guard.delete_user_fn(username, f).await?;
+        guard.flush_writer().await
+    }
 
     pub async fn list_auth_methods_fn<F: FnOnce(ListAuthMethodsResponse) + 'static>(&self, f: F) -> Result<(), Error> {
         let mut guard = self.inner.lock().await;

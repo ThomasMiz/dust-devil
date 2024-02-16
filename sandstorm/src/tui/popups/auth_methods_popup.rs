@@ -314,7 +314,7 @@ async fn load_methods_task<W: AsyncWrite + Unpin + 'static>(controller_weak: Wea
     let mut update_watch = match maybe_list {
         Some(list) => {
             rc.auth_methods_loaded(list);
-            rc.auth_methods_watch.clone().subscribe()
+            rc.auth_methods_watch.subscribe()
         }
         None => {
             rc.set_new_loading_text(REQUEST_SEND_ERROR_MESSAGE.into());

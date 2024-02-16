@@ -8,6 +8,7 @@ use dust_devil_core::{
     logging::{self, EventData},
     sandstorm::Metrics,
     socks5::AuthMethod,
+    users::UserRole,
 };
 use ratatui::{layout::Rect, Frame};
 use tokio::{
@@ -33,11 +34,19 @@ pub struct UIManager<W: AsyncWrite + Unpin + 'static> {
     socks5_sockets_watch: broadcast::Sender<(SocketAddr, bool)>,
     sandstorm_sockets_watch: broadcast::Sender<(SocketAddr, bool)>,
     buffer_size_watch: broadcast::Sender<u32>,
+    users_watch: broadcast::Sender<(UserNotificationType, String, UserRole)>,
     auth_methods_watch: broadcast::Sender<(AuthMethod, bool)>,
     metrics_watch: watch::Sender<Metrics>,
     root: FocusCell<VerticalSplit<MenuBar<W>, BottomArea>>,
     popup_receiver: mpsc::UnboundedReceiver<Popup>,
     popups: Vec<Popup>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum UserNotificationType {
+    Registered,
+    Updated,
+    Deleted,
 }
 
 pub struct Popup {
@@ -66,10 +75,11 @@ impl<W: AsyncWrite + Unpin + 'static> UIManager<W> {
         redraw_notify: Rc<Notify>,
         shutdown_notify: Rc<Notify>,
     ) -> Self {
-        let (buffer_size_watch, _) = broadcast::channel(1);
-        let (auth_methods_watch, _) = broadcast::channel(32);
         let (socks5_sockets_watch, _) = broadcast::channel(32);
         let (sandstorm_sockets_watch, _) = broadcast::channel(32);
+        let (users_watch, _) = broadcast::channel(32);
+        let (auth_methods_watch, _) = broadcast::channel(32);
+        let (buffer_size_watch, _) = broadcast::channel(1);
         let (metrics_watch, _metrics_watch_receiver) = watch::channel(metrics);
         let (popup_sender, popup_receiver) = mpsc::unbounded_channel();
 
@@ -78,8 +88,9 @@ impl<W: AsyncWrite + Unpin + 'static> UIManager<W> {
             Rc::clone(&redraw_notify),
             socks5_sockets_watch.clone(),
             sandstorm_sockets_watch.clone(),
-            buffer_size_watch.clone(),
+            users_watch.clone(),
             auth_methods_watch.clone(),
+            buffer_size_watch.clone(),
             popup_sender,
         );
         let bottom_area = BottomArea::new(Rc::clone(&redraw_notify));
@@ -88,10 +99,11 @@ impl<W: AsyncWrite + Unpin + 'static> UIManager<W> {
             redraw_notify,
             current_area: Rect::default(),
             shutdown_notify,
-            buffer_size_watch,
-            auth_methods_watch,
             socks5_sockets_watch,
             sandstorm_sockets_watch,
+            users_watch,
+            auth_methods_watch,
+            buffer_size_watch,
             metrics_watch,
             root: FocusCell::new(VerticalSplit::new(menu_bar, bottom_area, 2, 0)),
             popup_receiver,
@@ -149,7 +161,7 @@ impl<W: AsyncWrite + Unpin + 'static> UIManager<W> {
     }
 
     pub fn handle_stream_event(&mut self, event: logging::Event) {
-        match event.data {
+        match &event.data {
             EventData::NewClientConnectionAccepted(_, _) => {
                 self.metrics_watch.send_modify(|metrics| {
                     metrics.current_client_connections += 1;
@@ -183,22 +195,31 @@ impl<W: AsyncWrite + Unpin + 'static> UIManager<W> {
                 });
             }
             EventData::NewSocks5Socket(socket_address) => {
-                let _ = self.socks5_sockets_watch.send((socket_address, true));
+                let _ = self.socks5_sockets_watch.send((*socket_address, true));
             }
             EventData::RemovedSocks5Socket(socket_address) => {
-                let _ = self.socks5_sockets_watch.send((socket_address, false));
+                let _ = self.socks5_sockets_watch.send((*socket_address, false));
             }
             EventData::NewSandstormSocket(socket_address) => {
-                let _ = self.sandstorm_sockets_watch.send((socket_address, true));
+                let _ = self.sandstorm_sockets_watch.send((*socket_address, true));
             }
             EventData::RemovedSandstormSocket(socket_address) => {
-                let _ = self.sandstorm_sockets_watch.send((socket_address, false));
+                let _ = self.sandstorm_sockets_watch.send((*socket_address, false));
             }
             EventData::BufferSizeChangedByManager(_, buffer_size) => {
-                let _ = self.buffer_size_watch.send(buffer_size);
+                let _ = self.buffer_size_watch.send(*buffer_size);
             }
             EventData::AuthMethodToggledByManager(_, auth_method, state) => {
-                let _ = self.auth_methods_watch.send((auth_method, state));
+                let _ = self.auth_methods_watch.send((*auth_method, *state));
+            }
+            EventData::UserRegisteredByManager(_, username, role) if self.users_watch.receiver_count() != 0 => {
+                let _ = self.users_watch.send((UserNotificationType::Registered, username.clone(), *role));
+            }
+            EventData::UserUpdatedByManager(_, username, role, _) if self.users_watch.receiver_count() != 0 => {
+                let _ = self.users_watch.send((UserNotificationType::Updated, username.clone(), *role));
+            }
+            EventData::UserDeletedByManager(_, username, role) if self.users_watch.receiver_count() != 0 => {
+                let _ = self.users_watch.send((UserNotificationType::Deleted, username.clone(), *role));
             }
             _ => {}
         }

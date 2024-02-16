@@ -69,7 +69,7 @@ const MAX_POPUP_HEIGHT: u16 = 24;
 
 const IP_FILTER_LABEL: &str = "Filter:";
 const FILTER_ALL_STR: &str = "[ALL]";
-const FILTER_ALL_SHORTCUT: Option<char> = None;
+const FILTER_ALL_SHORTCUT: Option<char> = Some('1');
 const FILTER_IPV4_STR: &str = "[IPv4]";
 const FILTER_IPV4_SHORTCUT: Option<char> = Some('4');
 const FILTER_IPV6_STR: &str = "[IPv6]";
@@ -296,13 +296,15 @@ impl<W: AsyncWrite + Unpin + 'static> Controller<W> {
         let mut inner_guard = self.inner.borrow_mut();
         let inner = inner_guard.deref_mut();
 
+        let search_result = inner.sockets.binary_search_by(|x| socket_sort_cmp(x, &socket_address));
+
         if state {
-            match inner.sockets.binary_search_by(|x| socket_sort_cmp(x, &socket_address)) {
+            match search_result {
                 Ok(_) => return,
                 Err(index) => inner.sockets.insert(index, socket_address),
             }
         } else {
-            match inner.sockets.binary_search_by(|x| socket_sort_cmp(x, &socket_address)) {
+            match search_result {
                 Ok(index) => inner.sockets.remove(index),
                 Err(_) => return,
             };
@@ -771,7 +773,7 @@ async fn load_sockets_task<W: AsyncWrite + Unpin + 'static>(controller_weak: Wea
     let mut update_watch = match maybe_list {
         Ok(list) => {
             rc.sockets_loaded(list);
-            rc.sockets_watch.clone().subscribe()
+            rc.sockets_watch.subscribe()
         }
         Err(_) => {
             rc.set_new_loading_text(REQUEST_SEND_ERROR_MESSAGE.into());
