@@ -41,9 +41,10 @@ use super::{
     size_constraint::SizeConstraint,
 };
 
+const TEXT_COLOR: Color = Color::Black;
 const BACKGROUND_COLOR: Color = Color::Cyan;
-const SELECTED_BACKGROUND_COLOR: Color = Color::LightBlue;
-const LOCKED_BACKGROUND_COLOR: Color = Color::LightCyan;
+const SELECTED_BACKGROUND_COLOR: Color = Color::LightCyan;
+const LOCKED_BACKGROUND_COLOR: Color = Color::LightBlue;
 
 const ENABLED_STATUS_COLOR: Color = Color::Green;
 const LOCKED_ENABLED_STATUS_COLOR: Color = Color::LightGreen;
@@ -53,11 +54,8 @@ const LOCKED_DISABLED_STATUS_COLOR: Color = Color::LightRed;
 
 const TITLE: &str = "─Authentication Methods";
 const LOADING_MESSAGE: &str = "Getting authentication methods from the server...";
-const LOADING_STYLE: Style = Style::new();
 const TOP_MESSAGE: &str = "The server supports the following authentication methods:";
-const TOP_MESSAGE_STYLE: Style = Style::new();
 const HELP_MESSAGE: &str = "Scroll the list with the arrow keys, press (ENTER) on an auth method to toggle it.";
-const HELP_MESSAGE_STYLE: Style = Style::new();
 const POPUP_WIDTH: u16 = 34;
 const MAX_POPUP_HEIGHT: u16 = 24;
 
@@ -354,8 +352,8 @@ impl<W: AsyncWrite + Unpin + 'static> AuthMethodsPopup<W> {
         let base = LoadingPopup::new(
             TITLE.into(),
             LOADING_MESSAGE.into(),
-            LOADING_STYLE,
-            Color::Reset,
+            Style::new().fg(TEXT_COLOR),
+            TEXT_COLOR,
             BACKGROUND_COLOR,
             SizeConstraint::new().max(POPUP_WIDTH, MAX_POPUP_HEIGHT),
             controller,
@@ -399,8 +397,9 @@ struct AuthMethodsContent<W: AsyncWrite + Unpin + 'static> {
 
 impl<W: AsyncWrite + Unpin + 'static> AuthMethodsContent<W> {
     fn new(redraw_notify: Rc<Notify>, controller: Rc<Controller<W>>) -> Self {
-        let top_text = CenteredText::new(TOP_MESSAGE.into(), TOP_MESSAGE_STYLE);
-        let bottom_text = CenteredText::new(HELP_MESSAGE.into(), HELP_MESSAGE_STYLE);
+        let text_color = Style::new().fg(TEXT_COLOR);
+        let top_text = CenteredText::new(TOP_MESSAGE.into(), text_color);
+        let bottom_text = CenteredText::new(HELP_MESSAGE.into(), text_color);
 
         let list = LongList::new(redraw_notify, "".into(), 0, false, true, AuthListHandler { controller });
 
@@ -444,19 +443,21 @@ impl<W: AsyncWrite + Unpin + 'static> LongListHandler for AuthListHandler<W> {
             (status_color, status_str, BACKGROUND_COLOR)
         };
 
+        let text_style = Style::new().fg(TEXT_COLOR).bg(background_color);
+
         let mut iter = WrapTextIter::new(auth_method_str, wrap_width - 5);
 
         let auth_line_range = iter.next().unwrap();
         let spans = vec![
-            Span::styled(status_str, Style::new().bg(status_color)),
-            Span::styled(auth_line_range.get_substr(auth_method_str), Style::new().bg(background_color)),
+            Span::styled(status_str, text_style.bg(status_color)),
+            Span::styled(auth_line_range.get_substr(auth_method_str), text_style),
         ];
         f(Line::from(spans));
 
         for auth_line_range in iter {
             let spans = vec![
-                Span::styled("     ", Style::new().bg(status_color)),
-                Span::styled(auth_line_range.get_substr(auth_method_str), Style::new().bg(background_color)),
+                Span::styled("     ", text_style.bg(status_color)),
+                Span::styled(auth_line_range.get_substr(auth_method_str), text_style),
             ];
             f(Line::from(spans));
         }
