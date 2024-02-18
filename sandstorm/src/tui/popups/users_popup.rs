@@ -72,19 +72,11 @@ const USERNAME_FILTER_MAX_LENGTH: usize = 256;
 
 const MIN_USER_LIST_HEIGHT: usize = 8;
 
-#[repr(u8)]
-#[derive(Clone, Copy)]
-pub enum UserTypeFilter {
-    All = 0,
-    Regular = 1,
-    Admin = 2,
-}
-
 struct ControllerInner {
     base: LoadingPopupControllerInner,
     users: Vec<(String, UserRole)>,
     did_list_change: bool,
-    type_filter: UserTypeFilter,
+    type_filter: Option<UserRole>,
     username_filter: String,
 }
 struct Controller<W: AsyncWrite + Unpin + 'static> {
@@ -107,7 +99,7 @@ impl<W: AsyncWrite + Unpin + 'static> Controller<W> {
             base,
             users: Vec::new(),
             did_list_change: false,
-            type_filter: UserTypeFilter::All,
+            type_filter: None,
             username_filter: String::new(),
         };
 
@@ -237,7 +229,7 @@ impl<W: AsyncWrite + Unpin + 'static> Controller<W> {
                     if user.1 == role {
                         changed = false;
                     } else {
-                        let (username, role) = inner.users.remove(index);
+                        let (username, _old_role) = inner.users.remove(index);
 
                         let index = match inner.users.binary_search_by(|x| users_sort_cmp((&x.0, x.1), (&username, role))) {
                             Ok(idx) => idx,
@@ -269,7 +261,7 @@ impl<W: AsyncWrite + Unpin + 'static> Controller<W> {
         }
     }
 
-    fn on_type_filter_changed(&self, type_filter: UserTypeFilter) {
+    fn on_type_filter_changed(&self, type_filter: Option<UserRole>) {
         let mut inner_guard = self.inner.borrow_mut();
         let inner = inner_guard.deref_mut();
         inner.type_filter = type_filter;
@@ -290,30 +282,24 @@ impl<W: AsyncWrite + Unpin + 'static> Controller<W> {
         let inner_guard = self.inner.borrow();
         let inner = inner_guard.deref();
 
-        let iter = inner.users.iter().filter(|(_, role)| match inner.type_filter {
-            UserTypeFilter::All => true,
-            UserTypeFilter::Regular => *role == UserRole::Regular,
-            UserTypeFilter::Admin => *role == UserRole::Admin,
-        });
-
-        if inner.username_filter.is_empty() {
-            for (username, role) in iter {
-                destination.push((username.clone(), *role));
+        let iter = inner.users.iter().filter(|(username, role)| {
+            if inner.type_filter.is_some_and(|filter_role| filter_role != *role) {
+                return false;
             }
 
-            return;
-        }
-
-        let iter = iter.filter(|(username, _)| {
-            for filter_word in inner.username_filter.split_whitespace() {
-                let filter_word = filter_word.to_lowercase();
-                let mut split = username.split_whitespace();
-                if split.any(|username_word| username_word.to_lowercase().contains(&filter_word)) {
-                    return true;
+            if !inner.username_filter.is_empty() {
+                for filter_word in inner.username_filter.split_whitespace() {
+                    let filter_word = filter_word.to_lowercase();
+                    let mut split = username.split_whitespace();
+                    if split.any(|username_word| username_word.to_lowercase().contains(&filter_word)) {
+                        return true;
+                    }
                 }
-            }
 
-            false
+                false
+            } else {
+                true
+            }
         });
 
         for (username, role) in iter {
@@ -394,9 +380,9 @@ impl<W: AsyncWrite + Unpin + 'static> FilterArrowHandler<W> {
 impl<W: AsyncWrite + Unpin + 'static> ArrowSelectorHandler for FilterArrowHandler<W> {
     fn selection_changed(&mut self, selected_index: usize) {
         let type_filter = match selected_index {
-            1 => UserTypeFilter::Regular,
-            2 => UserTypeFilter::Admin,
-            _ => UserTypeFilter::All,
+            1 => Some(UserRole::Regular),
+            2 => Some(UserRole::Admin),
+            _ => None,
         };
 
         self.controller.on_type_filter_changed(type_filter);
