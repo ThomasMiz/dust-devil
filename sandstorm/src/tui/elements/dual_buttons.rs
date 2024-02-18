@@ -43,15 +43,6 @@ enum FocusedElement {
     Right,
 }
 
-impl FocusedElement {
-    pub fn other(self) -> Self {
-        match self {
-            Self::Left => Self::Right,
-            _ => Self::Left,
-        }
-    }
-}
-
 impl<H: DualButtonsHandler> DualButtons<H> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
@@ -184,8 +175,12 @@ impl<H: DualButtonsHandler> UIElement for DualButtons<H> {
 
         let result = match key_event.code {
             KeyCode::Tab => {
-                self.focused_element = self.focused_element.other();
-                HandleEventStatus::Handled
+                if self.focused_element == FocusedElement::Right {
+                    HandleEventStatus::PassFocus(self.get_focus_position(), PassFocusDirection::Forward)
+                } else {
+                    self.focused_element = FocusedElement::Right;
+                    HandleEventStatus::Handled
+                }
             }
             KeyCode::Left => {
                 if self.focused_element == FocusedElement::Left {

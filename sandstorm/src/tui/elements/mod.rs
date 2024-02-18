@@ -1,3 +1,5 @@
+use super::ui_element::PassFocusDirection;
+
 pub mod arrow_selector;
 pub mod centered_button;
 pub mod centered_text;
@@ -13,5 +15,5 @@ pub mod vertical_split;
 pub enum OnEnterResult {
     Handled,
     Unhandled,
-    PassFocusAway,
+    PassFocus(PassFocusDirection),
 }

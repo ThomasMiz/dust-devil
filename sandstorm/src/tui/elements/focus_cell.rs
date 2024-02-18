@@ -61,7 +61,16 @@ impl<I: UIElement> UIElement for FocusCell<I> {
                 self.inner.focus_lost();
                 return HandleEventStatus::Handled;
             }
+            HandleEventStatus::PassFocus(_focus_position, PassFocusDirection::Forward) => {
+                self.inner.focus_lost();
+                self.inner.receive_focus((0, 0));
+                return HandleEventStatus::Handled;
+            }
             other => return other,
+        }
+
+        if self.is_inner_focused {
+            return HandleEventStatus::Unhandled;
         }
 
         let key_event = match event {

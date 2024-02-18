@@ -32,7 +32,7 @@ use crate::{
             OnEnterResult,
         },
         pretty_print::PrettyByteDisplayer,
-        ui_element::{AutosizeUIElement, HandleEventStatus, UIElement},
+        ui_element::{AutosizeUIElement, HandleEventStatus, PassFocusDirection, UIElement},
         ui_manager::Popup,
     },
 };
@@ -359,7 +359,7 @@ struct ContentTextHandler<W: AsyncWrite + Unpin + 'static> {
 impl<W: AsyncWrite + Unpin + 'static> TextEntryHandler for ContentTextHandler<W> {
     fn on_enter(&mut self, controller: &Rc<TextEntryController>) -> OnEnterResult {
         match self.controller.on_yes_selected(controller) {
-            true => OnEnterResult::PassFocusAway,
+            true => OnEnterResult::PassFocus(PassFocusDirection::Away),
             false => OnEnterResult::Handled,
         }
     }

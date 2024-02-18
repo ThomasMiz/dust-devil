@@ -100,7 +100,7 @@ impl<H: ButtonHandler> UIElement for CenteredButton<H> {
             KeyCode::Enter => match self.handler.on_pressed() {
                 OnEnterResult::Handled => HandleEventStatus::Handled,
                 OnEnterResult::Unhandled => HandleEventStatus::Unhandled,
-                OnEnterResult::PassFocusAway => HandleEventStatus::PassFocus(self.get_focus_position(), PassFocusDirection::Away),
+                OnEnterResult::PassFocus(direction) => HandleEventStatus::PassFocus(self.get_focus_position(), direction),
             },
             KeyCode::Left => HandleEventStatus::PassFocus(self.get_focus_position(), PassFocusDirection::Left),
             KeyCode::Right => HandleEventStatus::PassFocus(self.get_focus_position(), PassFocusDirection::Right),

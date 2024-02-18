@@ -81,7 +81,7 @@ impl<L: UIElement, R: UIElement> UIElement for HorizontalSplit<R, L> {
                     HandleEventStatus::Unhandled => {
                         status = self.right.handle_event(event, false);
                     }
-                    HandleEventStatus::PassFocus(focus_position, PassFocusDirection::Down | PassFocusDirection::Forward) => {
+                    HandleEventStatus::PassFocus(focus_position, PassFocusDirection::Right | PassFocusDirection::Forward) => {
                         if self.right.receive_focus(focus_position) {
                             self.left.focus_lost();
                             self.focused_element = FocusedElement::Right;
@@ -100,7 +100,7 @@ impl<L: UIElement, R: UIElement> UIElement for HorizontalSplit<R, L> {
                     HandleEventStatus::Unhandled => {
                         status = self.left.handle_event(event, false);
                     }
-                    HandleEventStatus::PassFocus(focus_position, PassFocusDirection::Up | PassFocusDirection::Forward) => {
+                    HandleEventStatus::PassFocus(focus_position, PassFocusDirection::Left) => {
                         if self.left.receive_focus(focus_position) {
                             self.right.focus_lost();
                             self.focused_element = FocusedElement::Left;

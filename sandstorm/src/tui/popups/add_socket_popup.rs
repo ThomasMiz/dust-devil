@@ -29,7 +29,7 @@ use crate::{
             text_entry::{CursorPosition, TextEntry, TextEntryController, TextEntryHandler},
             OnEnterResult,
         },
-        ui_element::{AutosizeUIElement, HandleEventStatus, UIElement},
+        ui_element::{AutosizeUIElement, HandleEventStatus, PassFocusDirection, UIElement},
         ui_manager::Popup,
     },
 };
@@ -300,7 +300,7 @@ struct TextHandler<W: AsyncWrite + Unpin + 'static> {
 impl<W: AsyncWrite + Unpin + 'static> TextEntryHandler for TextHandler<W> {
     fn on_enter(&mut self, controller: &Rc<TextEntryController>) -> OnEnterResult {
         match self.controller.on_yes_selected(controller) {
-            true => OnEnterResult::PassFocusAway,
+            true => OnEnterResult::PassFocus(PassFocusDirection::Away),
             false => OnEnterResult::Handled,
         }
     }

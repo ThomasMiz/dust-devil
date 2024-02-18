@@ -98,7 +98,7 @@ impl<U: UIElement, L: UIElement> UIElement for VerticalSplit<U, L> {
                     HandleEventStatus::Unhandled => {
                         status = self.upper.handle_event(event, false);
                     }
-                    HandleEventStatus::PassFocus(focus_position, PassFocusDirection::Up | PassFocusDirection::Forward) => {
+                    HandleEventStatus::PassFocus(focus_position, PassFocusDirection::Up) => {
                         if self.upper.receive_focus(focus_position) {
                             self.lower.focus_lost();
                             self.focused_element = FocusedElement::Upper;

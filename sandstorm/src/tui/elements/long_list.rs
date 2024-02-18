@@ -456,7 +456,7 @@ impl<H: LongListHandler> LongList<H> {
                     match self.handler.on_enter(selected_index) {
                         OnEnterResult::Handled => HandleEventStatus::Handled,
                         OnEnterResult::Unhandled => HandleEventStatus::Unhandled,
-                        OnEnterResult::PassFocusAway => HandleEventStatus::PassFocus(self.get_focus_position(), PassFocusDirection::Away),
+                        OnEnterResult::PassFocus(direction) => HandleEventStatus::PassFocus(self.get_focus_position(), direction),
                     }
                 } else {
                     HandleEventStatus::Unhandled

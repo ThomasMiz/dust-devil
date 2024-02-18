@@ -40,6 +40,7 @@ use crate::{
 };
 
 use super::{
+    add_user_popup::AddUserPopup,
     loading_popup::{LoadingPopup, LoadingPopupController, LoadingPopupControllerInner},
     message_popup::REQUEST_SEND_ERROR_MESSAGE,
     popup_base::PopupBaseController,
@@ -60,7 +61,7 @@ const ADD_USER_SHORTCUT_KEY: char = 'a';
 const POPUP_WIDTH: u16 = 48;
 const MAX_POPUP_HEIGHT: u16 = 24;
 
-const TYPE_FILTER_LABEL: &str = "Type:";
+const ROLE_FILTER_LABEL: &str = "Role:";
 const FILTER_ALL_STR: &str = "[ALL]";
 const FILTER_ALL_SHORTCUT: Option<char> = Some('1');
 const FILTER_REGULAR_STR: &str = "[REGULAR]";
@@ -76,7 +77,7 @@ struct ControllerInner {
     base: LoadingPopupControllerInner,
     users: Vec<(String, UserRole)>,
     did_list_change: bool,
-    type_filter: Option<UserRole>,
+    role_filter: Option<UserRole>,
     username_filter: String,
 }
 struct Controller<W: AsyncWrite + Unpin + 'static> {
@@ -99,7 +100,7 @@ impl<W: AsyncWrite + Unpin + 'static> Controller<W> {
             base,
             users: Vec::new(),
             did_list_change: false,
-            type_filter: None,
+            role_filter: None,
             username_filter: String::new(),
         };
 
@@ -261,10 +262,10 @@ impl<W: AsyncWrite + Unpin + 'static> Controller<W> {
         }
     }
 
-    fn on_type_filter_changed(&self, type_filter: Option<UserRole>) {
+    fn on_role_filter_changed(&self, role_filter: Option<UserRole>) {
         let mut inner_guard = self.inner.borrow_mut();
         let inner = inner_guard.deref_mut();
-        inner.type_filter = type_filter;
+        inner.role_filter = role_filter;
         inner.did_list_change = true;
         inner.base.base.redraw_notify();
     }
@@ -283,7 +284,7 @@ impl<W: AsyncWrite + Unpin + 'static> Controller<W> {
         let inner = inner_guard.deref();
 
         let iter = inner.users.iter().filter(|(username, role)| {
-            if inner.type_filter.is_some_and(|filter_role| filter_role != *role) {
+            if inner.role_filter.is_some_and(|filter_role| filter_role != *role) {
                 return false;
             }
 
@@ -320,7 +321,7 @@ impl<W: AsyncWrite + Unpin + 'static> Drop for UsersPopup<W> {
 }
 
 struct UsersPopupContent<W: AsyncWrite + Unpin + 'static> {
-    type_filter: Padded<HorizontalSplit<CenteredTextLine, ArrowSelector<FilterArrowHandler<W>>>>,
+    role_filter: Padded<HorizontalSplit<CenteredTextLine, ArrowSelector<FilterArrowHandler<W>>>>,
     username_filter: Padded<HorizontalSplit<CenteredTextLine, TextEntry<UsernameEntryHandler<W>>>>,
     user_list: LongList<UserListHandler<W>>,
     help_text: Padded<CenteredText>,
@@ -332,7 +333,7 @@ struct UsersPopupContent<W: AsyncWrite + Unpin + 'static> {
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum FocusedElement {
-    TypeFilter,
+    RoleFilter,
     UsernameFilter,
     UserList,
     AddButton,
@@ -341,7 +342,7 @@ enum FocusedElement {
 impl FocusedElement {
     fn down(self) -> Self {
         match self {
-            Self::TypeFilter => Self::UsernameFilter,
+            Self::RoleFilter => Self::UsernameFilter,
             Self::UsernameFilter => Self::UserList,
             Self::UserList => Self::AddButton,
             Self::AddButton => Self::AddButton,
@@ -350,8 +351,8 @@ impl FocusedElement {
 
     fn up(self) -> Self {
         match self {
-            Self::TypeFilter => Self::TypeFilter,
-            Self::UsernameFilter => Self::TypeFilter,
+            Self::RoleFilter => Self::RoleFilter,
+            Self::UsernameFilter => Self::RoleFilter,
             Self::UserList => Self::UsernameFilter,
             Self::AddButton => Self::UserList,
         }
@@ -359,10 +360,10 @@ impl FocusedElement {
 
     fn next(self) -> Self {
         match self {
-            Self::TypeFilter => Self::UsernameFilter,
+            Self::RoleFilter => Self::UsernameFilter,
             Self::UsernameFilter => Self::UserList,
             Self::UserList => Self::AddButton,
-            Self::AddButton => Self::TypeFilter,
+            Self::AddButton => Self::RoleFilter,
         }
     }
 }
@@ -379,13 +380,13 @@ impl<W: AsyncWrite + Unpin + 'static> FilterArrowHandler<W> {
 
 impl<W: AsyncWrite + Unpin + 'static> ArrowSelectorHandler for FilterArrowHandler<W> {
     fn selection_changed(&mut self, selected_index: usize) {
-        let type_filter = match selected_index {
+        let role_filter = match selected_index {
             1 => Some(UserRole::Regular),
             2 => Some(UserRole::Admin),
             _ => None,
         };
 
-        self.controller.on_type_filter_changed(type_filter);
+        self.controller.on_role_filter_changed(role_filter);
     }
 }
 
@@ -419,7 +420,7 @@ impl<W: AsyncWrite + Unpin + 'static> UsersPopupContent<W> {
         let text_style = Style::new().fg(TEXT_COLOR);
         let selected_text_style = text_style.bg(SELECTED_BACKGROUND_COLOR);
 
-        let type_filter_selector = ArrowSelector::new(
+        let role_filter_selector = ArrowSelector::new(
             Rc::clone(&redraw_notify),
             vec![
                 (FILTER_ALL_STR.into(), FILTER_ALL_SHORTCUT),
@@ -435,9 +436,9 @@ impl<W: AsyncWrite + Unpin + 'static> UsersPopupContent<W> {
             FilterArrowHandler::new(Rc::clone(&controller)),
         );
 
-        let type_filter_label = CenteredTextLine::new(TYPE_FILTER_LABEL.into(), text_style);
-        let type_filter_inner = HorizontalSplit::new(type_filter_label, type_filter_selector, 0, 1);
-        let type_filter = Padded::new(Padding::horizontal(1), type_filter_inner);
+        let role_filter_label = CenteredTextLine::new(ROLE_FILTER_LABEL.into(), text_style);
+        let role_filter_inner = HorizontalSplit::new(role_filter_label, role_filter_selector, 0, 1);
+        let role_filter = Padded::new(Padding::horizontal(1), role_filter_inner);
 
         let username_filter_entry = TextEntry::new(
             Rc::clone(&redraw_notify),
@@ -475,14 +476,14 @@ impl<W: AsyncWrite + Unpin + 'static> UsersPopupContent<W> {
         let add_button = Padded::new(Padding::uniform(1), add_button_inner);
 
         Self {
-            type_filter,
+            role_filter,
             username_filter,
             user_list,
             help_text,
             add_button,
             user_list_height: 1,
             help_text_height: 1,
-            focused_element: FocusedElement::TypeFilter,
+            focused_element: FocusedElement::RoleFilter,
         }
     }
 }
@@ -495,9 +496,9 @@ impl<W: AsyncWrite + Unpin + 'static> UIElement for UsersPopupContent<W> {
 
         let mut remaining_area = area;
 
-        let mut type_filter_area = remaining_area;
-        type_filter_area.height = 1;
-        self.type_filter.resize(type_filter_area);
+        let mut role_filter_area = remaining_area;
+        role_filter_area.height = 1;
+        self.role_filter.resize(role_filter_area);
 
         remaining_area.height -= 1;
         remaining_area.y += 1;
@@ -555,8 +556,8 @@ impl<W: AsyncWrite + Unpin + 'static> UIElement for UsersPopupContent<W> {
             self.user_list.reset_items_no_redraw(list_len, true);
         }
 
-        let type_filter_area = Rect::new(area.x, area.y, area.width, 1);
-        self.type_filter.render(type_filter_area, frame);
+        let role_filter_area = Rect::new(area.x, area.y, area.width, 1);
+        self.role_filter.render(role_filter_area, frame);
         area.y += 1;
         area.height -= 1;
         if area.height == 0 {
@@ -593,7 +594,7 @@ impl<W: AsyncWrite + Unpin + 'static> UIElement for UsersPopupContent<W> {
     fn handle_event(&mut self, event: &event::Event, is_focused: bool) -> HandleEventStatus {
         if is_focused {
             let status = match self.focused_element {
-                FocusedElement::TypeFilter => self.type_filter.handle_event(event, true),
+                FocusedElement::RoleFilter => self.role_filter.handle_event(event, true),
                 FocusedElement::UsernameFilter => self.username_filter.handle_event(event, true),
                 FocusedElement::UserList => self.user_list.handle_event(event, true),
                 FocusedElement::AddButton => self.add_button.handle_event(event, true),
@@ -614,7 +615,7 @@ impl<W: AsyncWrite + Unpin + 'static> UIElement for UsersPopupContent<W> {
                     }
 
                     let focus_passed = match next_focused_element {
-                        FocusedElement::TypeFilter => self.type_filter.receive_focus(focus_position),
+                        FocusedElement::RoleFilter => self.role_filter.receive_focus(focus_position),
                         FocusedElement::UsernameFilter => self.username_filter.receive_focus(focus_position),
                         FocusedElement::UserList => self.user_list.receive_focus(focus_position),
                         FocusedElement::AddButton => self.add_button.receive_focus(focus_position),
@@ -625,7 +626,7 @@ impl<W: AsyncWrite + Unpin + 'static> UIElement for UsersPopupContent<W> {
                     }
 
                     match self.focused_element {
-                        FocusedElement::TypeFilter => self.type_filter.focus_lost(),
+                        FocusedElement::RoleFilter => self.role_filter.focus_lost(),
                         FocusedElement::UsernameFilter => self.username_filter.focus_lost(),
                         FocusedElement::UserList => self.user_list.focus_lost(),
                         FocusedElement::AddButton => self.add_button.focus_lost(),
@@ -638,7 +639,7 @@ impl<W: AsyncWrite + Unpin + 'static> UIElement for UsersPopupContent<W> {
             }
         }
 
-        self.type_filter
+        self.role_filter
             .handle_event(event, false)
             .or_else(|| self.username_filter.handle_event(event, false))
             .or_else(|| self.user_list.handle_event(event, false))
@@ -646,13 +647,13 @@ impl<W: AsyncWrite + Unpin + 'static> UIElement for UsersPopupContent<W> {
     }
 
     fn receive_focus(&mut self, focus_position: (u16, u16)) -> bool {
-        self.focused_element = FocusedElement::TypeFilter;
-        self.type_filter.receive_focus(focus_position)
+        self.focused_element = FocusedElement::RoleFilter;
+        self.role_filter.receive_focus(focus_position)
     }
 
     fn focus_lost(&mut self) {
         match self.focused_element {
-            FocusedElement::TypeFilter => self.type_filter.focus_lost(),
+            FocusedElement::RoleFilter => self.role_filter.focus_lost(),
             FocusedElement::UsernameFilter => self.username_filter.focus_lost(),
             FocusedElement::UserList => self.user_list.focus_lost(),
             FocusedElement::AddButton => self.add_button.focus_lost(),
@@ -669,12 +670,12 @@ impl<W: AsyncWrite + Unpin + 'static> AutosizeUIElement for UsersPopupContent<W>
         let user_list_height = list_len.max(MIN_USER_LIST_HEIGHT).saturating_add(2).min(u16::MAX as usize) as u16;
         request_height = request_height.saturating_add(user_list_height);
 
-        self.type_filter.begin_resize(width, 1);
+        self.role_filter.begin_resize(width, 1);
         self.username_filter.begin_resize(width, 1);
-        let type_filter_height = 1;
+        let role_filter_height = 1;
         let username_filter_height = 1;
         let add_button_height = 3;
-        let additional_height = type_filter_height + username_filter_height + add_button_height;
+        let additional_height = role_filter_height + username_filter_height + add_button_height;
         request_height = request_height.saturating_add(additional_height);
 
         (width, request_height.min(height))

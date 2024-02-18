@@ -376,11 +376,12 @@ impl<H: TextEntryHandler> UIElement for TextEntry<H> {
             KeyCode::Up => return HandleEventStatus::PassFocus(self.get_focus_position(), PassFocusDirection::Up),
             KeyCode::Down => return HandleEventStatus::PassFocus(self.get_focus_position(), PassFocusDirection::Down),
             KeyCode::Esc => return HandleEventStatus::PassFocus(self.get_focus_position(), PassFocusDirection::Away),
+            KeyCode::Tab => return HandleEventStatus::PassFocus(self.get_focus_position(), PassFocusDirection::Forward),
             KeyCode::Enter => {
                 return match self.handler.on_enter(&self.controller) {
                     OnEnterResult::Handled => HandleEventStatus::Handled,
                     OnEnterResult::Unhandled => HandleEventStatus::Unhandled,
-                    OnEnterResult::PassFocusAway => HandleEventStatus::PassFocus(self.get_focus_position(), PassFocusDirection::Away),
+                    OnEnterResult::PassFocus(direction) => HandleEventStatus::PassFocus(self.get_focus_position(), direction),
                 }
             }
             _ => return HandleEventStatus::Unhandled,
