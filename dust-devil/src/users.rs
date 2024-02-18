@@ -202,8 +202,17 @@ impl UserManager {
         T: AsyncWrite + Unpin + ?Sized,
     {
         let mut is_first = true;
-        let mut count = 0;
-        for ele in self.users.iter() {
+
+        let mut users: Vec<_> = self.users.iter().collect();
+        let count = users.len() as u64;
+
+        users.sort_by(|x, y| match (x.role, y.role) {
+            (UserRole::Admin, UserRole::Regular) => std::cmp::Ordering::Less,
+            (UserRole::Regular, UserRole::Admin) => std::cmp::Ordering::Greater,
+            _ => x.key().cmp(y.key()),
+        });
+
+        for ele in users {
             if !is_first {
                 writer.write_u8(b'\n').await?;
             } else {
@@ -221,7 +230,6 @@ impl UserManager {
 
             writer.write_u8(b':').await?;
             writer.write_all(ele.password.as_bytes()).await?;
-            count += 1;
         }
 
         Ok(count)
