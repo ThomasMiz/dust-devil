@@ -226,7 +226,7 @@ impl ByteRead for EventData {
             )),
             0x17 => Ok(Self::ClientAuthenticatedWithUserpass(
                 u64::read(reader).await?,
-                String::read(reader).await?,
+                SmallReadString::read(reader).await?.0,
                 bool::read(reader).await?,
             )),
             0x18 => Ok(Self::ClientSocksRequest(
