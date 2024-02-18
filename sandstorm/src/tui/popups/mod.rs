@@ -5,6 +5,7 @@ use ratatui::{
 };
 
 pub mod add_socket_popup;
+pub mod add_user_popup;
 pub mod auth_methods_popup;
 pub mod buffer_size_popup;
 pub mod close_socket_popup;

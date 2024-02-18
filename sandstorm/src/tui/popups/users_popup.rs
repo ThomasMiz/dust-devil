@@ -749,19 +749,17 @@ impl<W: AsyncWrite + Unpin + 'static> AddButtonHandler<W> {
 
 impl<W: AsyncWrite + Unpin + 'static> ButtonHandler for AddButtonHandler<W> {
     fn on_pressed(&mut self) -> OnEnterResult {
-        // TODO: Open the new user popup
-        /*let inner_guard = self.controller.inner.borrow();
+        let inner_guard = self.controller.inner.borrow();
         let inner = inner_guard.deref();
 
-        let popup = AddSocketPopup::new(
+        let popup = AddUserPopup::new(
             Rc::clone(&inner.base.base.redraw_notify),
             Weak::clone(&self.controller.manager),
-            self.controller.socket_type,
-            self.controller.sockets_watch.clone(),
+            self.controller.users_watch.clone(),
             self.controller.popup_sender.clone(),
         );
 
-        let _ = self.controller.popup_sender.send(popup.into());*/
+        let _ = self.controller.popup_sender.send(popup.into());
 
         OnEnterResult::Handled
     }
