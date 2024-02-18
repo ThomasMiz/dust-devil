@@ -120,7 +120,7 @@ where
 
                 f(Line::from(line_vec));
                 line_vec = Vec::new();
-                current_line_length -= wrap_width;
+                current_line_length = 0;
 
                 continue 'outer;
             }

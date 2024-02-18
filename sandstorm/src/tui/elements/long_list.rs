@@ -16,6 +16,7 @@
 //! whenever a change to the list happens, the long list needs to be informed.
 
 use std::{
+    borrow::BorrowMut,
     cell::RefCell,
     collections::VecDeque,
     ops::{Deref, DerefMut},
@@ -163,6 +164,20 @@ impl LongListController {
 
     pub fn item_count(&self) -> usize {
         self.inner.borrow().item_count
+    }
+
+    pub fn get_selected_index(&self) -> Option<usize> {
+        self.inner.borrow().selected_index
+    }
+
+    pub fn set_selected_index(&self, selected_index: Option<usize>) {
+        let mut inner_guard = self.inner.borrow_mut();
+        let inner = inner_guard.borrow_mut();
+        if selected_index.is_some_and(|idx| idx >= inner.item_count()) {
+            panic!("Attempted to set a long list's selected index to higher than the list's item count");
+        }
+
+        inner.selected_index = selected_index;
     }
 
     /// Resets the list, forgetting any current items and setting a new item count, but without

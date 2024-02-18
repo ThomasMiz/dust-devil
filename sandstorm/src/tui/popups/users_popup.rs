@@ -10,7 +10,7 @@ use dust_devil_core::users::UserRole;
 use ratatui::{
     layout::Rect,
     style::{Color, Style},
-    text::Line,
+    text::{Line, Span},
     widgets::Padding,
     Frame,
 };
@@ -58,8 +58,13 @@ const HELP_MESSAGE: &str = "Scroll the list with the arrow keys, press (ENTER) o
 const HELP_MESSAGE_STYLE: Style = Style::new().fg(TEXT_COLOR);
 const ADD_USER_BUTTON_TEXT: &str = "[add new user (a)]";
 const ADD_USER_SHORTCUT_KEY: char = 'a';
-const POPUP_WIDTH: u16 = 48;
+const POPUP_WIDTH: u16 = 60;
 const MAX_POPUP_HEIGHT: u16 = 24;
+
+const REGULAR_USER_COLOR: Color = Color::Blue;
+const SELECTED_REGULAR_USER_COLOR: Color = Color::LightBlue;
+const ADMIN_USER_COLOR: Color = Color::Magenta;
+const SELECTED_ADMIN_USER_COLOR: Color = Color::LightMagenta;
 
 const ROLE_FILTER_LABEL: &str = "Role:";
 const FILTER_ALL_STR: &str = "[ALL]";
@@ -549,11 +554,21 @@ impl<W: AsyncWrite + Unpin + 'static> UIElement for UsersPopupContent<W> {
 
         let controller = &self.user_list.handler.controller;
         if controller.did_list_change() {
+            let user_list_selected_index = self.user_list.get_selected_index();
             let list = &mut self.user_list.handler.users_filtered;
+            let user_list_selected_username = user_list_selected_index.map(|idx| list.swap_remove(idx).0);
             list.clear();
+
             controller.filter_list_into(list);
             let list_len = list.len();
-            self.user_list.reset_items_no_redraw(list_len, true);
+
+            let new_selected_index = match user_list_selected_username {
+                Some(username) => list.iter().enumerate().find(|(_, (usr, _))| username.eq(usr)).map(|(i, _)| i),
+                None => None,
+            };
+
+            self.user_list.reset_items_no_redraw(list_len, false);
+            self.user_list.set_selected_index(new_selected_index);
         }
 
         let role_filter_area = Rect::new(area.x, area.y, area.width, 1);
@@ -697,23 +712,48 @@ impl<W: AsyncWrite + Unpin + 'static> UserListHandler<W> {
 }
 
 impl<W: AsyncWrite + Unpin + 'static> LongListHandler for UserListHandler<W> {
-    fn get_item_lines<F: FnMut(Line<'static>)>(&mut self, index: usize, wrap_width: u16, f: F) {
+    fn get_item_lines<F: FnMut(Line<'static>)>(&mut self, index: usize, wrap_width: u16, mut f: F) {
+        let wrap_width = wrap_width.max(20) as usize;
         let user = &self.users_filtered[index];
-        // TODO: Display prettier
-        let text = format!(" [{}] {}", user.1.into_role_char(), &user.0);
-        let iter = [(StaticString::Owned(text), Style::new().fg(TEXT_COLOR))].into_iter();
-        wrap_lines_by_chars(wrap_width as usize, iter, f);
+
+        let text_style = Style::new().fg(TEXT_COLOR).bg(BACKGROUND_COLOR);
+        let iter = [(user.0.clone().into(), text_style)].into_iter();
+
+        let (mut first_span_str, first_span_style) = match user.1 {
+            UserRole::Regular => (" [#] ", text_style.bg(REGULAR_USER_COLOR)),
+            UserRole::Admin => (" [@] ", text_style.bg(ADMIN_USER_COLOR)),
+        };
+
+        wrap_lines_by_chars(wrap_width - 5, iter, move |mut line| {
+            line.spans.insert(0, Span::styled(first_span_str, first_span_style));
+            first_span_str = "     ";
+            f(line);
+        });
     }
 
     fn modify_line_to_selected(&mut self, _index: usize, line: &mut Line<'static>, _item_line_number: u16) {
         for span in line.spans.iter_mut() {
-            span.style.bg = Some(SELECTED_BACKGROUND_COLOR);
+            if let Some(bg) = &mut span.style.bg {
+                *bg = match *bg {
+                    BACKGROUND_COLOR => SELECTED_BACKGROUND_COLOR,
+                    REGULAR_USER_COLOR => SELECTED_REGULAR_USER_COLOR,
+                    ADMIN_USER_COLOR => SELECTED_ADMIN_USER_COLOR,
+                    other => other,
+                };
+            }
         }
     }
 
     fn modify_line_to_unselected(&mut self, _index: usize, line: &mut Line<'static>, _item_line_number: u16) {
         for span in line.spans.iter_mut() {
-            span.style.bg = None;
+            if let Some(bg) = &mut span.style.bg {
+                *bg = match *bg {
+                    SELECTED_BACKGROUND_COLOR => BACKGROUND_COLOR,
+                    SELECTED_REGULAR_USER_COLOR => REGULAR_USER_COLOR,
+                    SELECTED_ADMIN_USER_COLOR => ADMIN_USER_COLOR,
+                    other => other,
+                };
+            }
         }
     }
 

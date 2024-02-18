@@ -47,10 +47,10 @@ const SELECTED_BACKGROUND_COLOR: Color = Color::LightCyan;
 const LOCKED_BACKGROUND_COLOR: Color = Color::LightBlue;
 
 const ENABLED_STATUS_COLOR: Color = Color::Green;
-const LOCKED_ENABLED_STATUS_COLOR: Color = Color::LightGreen;
+const SELECTED_ENABLED_STATUS_COLOR: Color = Color::LightGreen;
 
 const DISABLED_STATUS_COLOR: Color = Color::Red;
-const LOCKED_DISABLED_STATUS_COLOR: Color = Color::LightRed;
+const SELECTED_DISABLED_STATUS_COLOR: Color = Color::LightRed;
 
 const TITLE: &str = "─Authentication Methods";
 const LOADING_MESSAGE: &str = "Getting authentication methods from the server...";
@@ -429,8 +429,8 @@ impl<W: AsyncWrite + Unpin + 'static> LongListHandler for AuthListHandler<W> {
 
         let (status_color, status_str, background_color) = if inner.is_setting_auth_method {
             let (status_color, status_str) = match enabled {
-                true => (LOCKED_ENABLED_STATUS_COLOR, " [Y] "),
-                false => (LOCKED_DISABLED_STATUS_COLOR, " [N] "),
+                true => (SELECTED_ENABLED_STATUS_COLOR, " [Y] "),
+                false => (SELECTED_DISABLED_STATUS_COLOR, " [N] "),
             };
 
             (status_color, status_str, LOCKED_BACKGROUND_COLOR)
@@ -467,6 +467,8 @@ impl<W: AsyncWrite + Unpin + 'static> LongListHandler for AuthListHandler<W> {
         for span in line.spans.iter_mut() {
             span.style.bg = span.style.bg.map(|color| match color {
                 BACKGROUND_COLOR => SELECTED_BACKGROUND_COLOR,
+                ENABLED_STATUS_COLOR => SELECTED_ENABLED_STATUS_COLOR,
+                DISABLED_STATUS_COLOR => SELECTED_DISABLED_STATUS_COLOR,
                 other => other,
             });
         }
@@ -476,6 +478,8 @@ impl<W: AsyncWrite + Unpin + 'static> LongListHandler for AuthListHandler<W> {
         for span in line.spans.iter_mut() {
             span.style.bg = span.style.bg.map(|color| match color {
                 SELECTED_BACKGROUND_COLOR => BACKGROUND_COLOR,
+                SELECTED_ENABLED_STATUS_COLOR => ENABLED_STATUS_COLOR,
+                SELECTED_DISABLED_STATUS_COLOR => DISABLED_STATUS_COLOR,
                 other => other,
             });
         }
