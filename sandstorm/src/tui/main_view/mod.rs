@@ -5,19 +5,19 @@ use dust_devil_core::logging;
 use ratatui::{layout::Rect, Frame};
 use tokio::sync::Notify;
 
-use super::{
-    log_block::LogBlock,
-    ui_element::{HandleEventStatus, UIElement},
-};
+use self::log_block::LogBlock;
 
-// Note: right now this UIElement is just a wrapper around a log block, but soon enough more
-// things will be added to it.
+use super::ui_element::{HandleEventStatus, UIElement};
 
-pub struct BottomArea {
+mod colored_logs;
+mod log_block;
+mod usage_graph;
+
+pub struct MainView {
     log_block: LogBlock,
 }
 
-impl BottomArea {
+impl MainView {
     pub fn new(redraw_notify: Rc<Notify>) -> Self {
         let log_block = LogBlock::new(redraw_notify);
 
@@ -29,7 +29,7 @@ impl BottomArea {
     }
 }
 
-impl UIElement for BottomArea {
+impl UIElement for MainView {
     fn resize(&mut self, area: Rect) {
         self.log_block.resize(area);
     }

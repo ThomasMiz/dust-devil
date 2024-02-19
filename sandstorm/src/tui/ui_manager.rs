@@ -20,8 +20,8 @@ use tokio::{
 use crate::{sandstorm::MutexedSandstormRequestManager, utils::futures::recv_many_with_index};
 
 use super::{
-    bottom_area::BottomArea,
     elements::{focus_cell::FocusCell, vertical_split::VerticalSplit},
+    main_view::MainView,
     menu_bar::MenuBar,
     popups::confirm_close_popup::ConfirmClosePopup,
     ui_element::{HandleEventStatus, UIElement},
@@ -37,7 +37,7 @@ pub struct UIManager<W: AsyncWrite + Unpin + 'static> {
     users_watch: broadcast::Sender<(UserNotificationType, String, UserRole)>,
     auth_methods_watch: broadcast::Sender<(AuthMethod, bool)>,
     metrics_watch: watch::Sender<Metrics>,
-    root: FocusCell<VerticalSplit<MenuBar<W>, BottomArea>>,
+    root: FocusCell<VerticalSplit<MenuBar<W>, MainView>>,
     popup_receiver: mpsc::UnboundedReceiver<Popup>,
     popups: Vec<Popup>,
 }
@@ -93,7 +93,7 @@ impl<W: AsyncWrite + Unpin + 'static> UIManager<W> {
             buffer_size_watch.clone(),
             popup_sender,
         );
-        let bottom_area = BottomArea::new(Rc::clone(&redraw_notify));
+        let main_view = MainView::new(Rc::clone(&redraw_notify));
 
         Self {
             redraw_notify,
@@ -105,7 +105,7 @@ impl<W: AsyncWrite + Unpin + 'static> UIManager<W> {
             auth_methods_watch,
             buffer_size_watch,
             metrics_watch,
-            root: FocusCell::new(VerticalSplit::new(menu_bar, bottom_area, 2, 0)),
+            root: FocusCell::new(VerticalSplit::new(menu_bar, main_view, 2, 0)),
             popup_receiver,
             popups: Vec::new(),
         }

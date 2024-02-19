@@ -25,11 +25,9 @@ use crate::{
 
 use self::{event_receiver::TerminalEventReceiver, ui_manager::UIManager};
 
-mod bottom_area;
-mod colored_logs;
 mod elements;
 mod event_receiver;
-mod log_block;
+mod main_view;
 mod menu_bar;
 mod popups;
 mod pretty_print;

@@ -11,8 +11,7 @@ use ratatui::{
 use time::UtcOffset;
 use tokio::sync::Notify;
 
-use super::{
-    colored_logs::log_event_to_single_line,
+use crate::tui::{
     elements::{
         long_list::{LongList, LongListHandler},
         OnEnterResult,
@@ -20,6 +19,8 @@ use super::{
     text_wrapper::{wrap_lines_by_chars, StaticString},
     ui_element::{HandleEventStatus, UIElement},
 };
+
+use super::colored_logs::log_event_to_single_line;
 
 const MAXIMUM_EVENT_HISTORY_LENGTH: usize = 0x10000;
 const INITIAL_EVENT_HISTORY_CAPACITY: usize = 0x1000;

@@ -2,7 +2,7 @@ use dust_devil_core::{logging, socks5::SocksRequestAddress};
 use ratatui::style::{Color, Modifier, Style};
 use time::{OffsetDateTime, UtcOffset};
 
-use super::text_wrapper::StaticString;
+use crate::tui::text_wrapper::StaticString;
 
 pub const BOLD_ITALIC: Style = Style::reset().add_modifier(Modifier::BOLD).add_modifier(Modifier::ITALIC);
 pub const DEFAULT_STYLE: Style = Style::reset();
