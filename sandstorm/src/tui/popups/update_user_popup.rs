@@ -23,7 +23,8 @@ use crate::{
     tui::{
         elements::{
             arrow_selector::{ArrowSelector, ArrowSelectorHandler},
-            dual_buttons::DualButtonsHandler,
+            centered_button::{ButtonHandler, CenteredButton},
+            dual_buttons::{DualButtons, DualButtonsHandler},
             horizontal_split::HorizontalSplit,
             padded::Padded,
             text::{Text, TextLine},
@@ -39,9 +40,10 @@ use crate::{
 use super::{
     message_popup::{MessagePopup, ERROR_POPUP_TITLE, REQUEST_SEND_ERROR_MESSAGE},
     popup_base::PopupBaseController,
+    prompt_popup::PromptPopup,
     size_constraint::SizeConstraint,
-    yes_no_popup::{YesNoControllerInner, YesNoPopup, YesNoPopupController},
-    CANCEL_TITLE, CONFIRM_TITLE,
+    yes_no_popup::{YesNoControllerInner, YesNoPopupController},
+    CANCEL_NO_KEYS, CANCEL_TITLE, CONFIRM_TITLE, YES_KEYS,
 };
 
 const TITLE: &str = "─Update User";
@@ -69,6 +71,9 @@ const ROLE_ADMIN_SHORTCUT: Option<char> = Some('2');
 const USERNAME_LABEL: &str = "Username:";
 const PASSWORD_ENTRY_LABEL: &str = "Password:";
 const PASSWORD_ENTRY_MAX_LENGTH: usize = 255;
+
+const DELETE_TITLE: &str = "[delete? (d)]";
+const DELETE_SHORTCUT_KEY: Option<char> = Some('d');
 
 struct ControllerInner {
     base: YesNoControllerInner,
@@ -315,9 +320,11 @@ impl<W: AsyncWrite + Unpin + 'static> YesNoPopupController for Controller<W> {
 }
 
 pub struct UpdateUserPopup<W: AsyncWrite + Unpin + 'static> {
-    base: YesNoPopup<Controller<W>, Padded<Content<W>>, ButtonHandler<W>>,
+    base: PromptPopup<Controller<W>, Padded<PopupContent<W>>>,
     background_task: JoinHandle<()>,
 }
+
+type PopupContent<W> = VerticalSplit<DataEntries<W>, ButtonsOrTextLine<W>>;
 
 impl<W: AsyncWrite + Unpin + 'static> Drop for UpdateUserPopup<W> {
     fn drop(&mut self) {
@@ -347,15 +354,98 @@ async fn background_update_user<W: AsyncWrite + Unpin + 'static>(
     }
 }
 
+struct ButtonsOrTextLine<W: AsyncWrite + Unpin + 'static> {
+    buttons: VerticalSplit<DualButtons<AnyButtonHandler<W>>, CenteredButton<AnyButtonHandler<W>>>,
+    alternative_text: TextLine,
+}
+
+impl<W: AsyncWrite + Unpin + 'static> ButtonsOrTextLine<W> {
+    fn new(redraw_notify: Rc<Notify>, controller: Rc<Controller<W>>) -> Self {
+        let text_style = Style::new().fg(TEXT_COLOR);
+        let selected_text_style = text_style.bg(SELECTED_BACKGROUND_COLOR);
+
+        let dual_buttons = DualButtons::new(
+            Rc::clone(&redraw_notify),
+            CONFIRM_TITLE.into(),
+            CANCEL_TITLE.into(),
+            YES_KEYS,
+            CANCEL_NO_KEYS,
+            AnyButtonHandler {
+                controller: Rc::clone(&controller),
+            },
+            text_style,
+            selected_text_style,
+            text_style,
+            selected_text_style,
+        );
+
+        let delete_button = CenteredButton::new(
+            redraw_notify,
+            DELETE_TITLE.into(),
+            text_style,
+            selected_text_style,
+            DELETE_SHORTCUT_KEY,
+            AnyButtonHandler { controller },
+        );
+
+        let alternative_text = TextLine::new(UPDATING_MESSAGE.into(), text_style, Alignment::Center);
+
+        let buttons = VerticalSplit::new(dual_buttons, delete_button, 0, 1);
+
+        Self { buttons, alternative_text }
+    }
+}
+
+impl<W: AsyncWrite + Unpin + 'static> UIElement for ButtonsOrTextLine<W> {
+    fn resize(&mut self, area: Rect) {
+        self.buttons.resize(area);
+        self.alternative_text.resize(area);
+    }
+
+    fn render(&mut self, area: Rect, frame: &mut Frame) {
+        let controller = &self.buttons.upper.handlers.controller;
+        match controller.get_showing_buttons() {
+            true => self.buttons.render(area, frame),
+            false => self.alternative_text.render(area, frame),
+        }
+    }
+
+    fn handle_event(&mut self, event: &event::Event, is_focused: bool) -> HandleEventStatus {
+        let controller = &self.buttons.upper.handlers.controller;
+        match controller.get_showing_buttons() {
+            true => self.buttons.handle_event(event, is_focused),
+            false => self.alternative_text.handle_event(event, is_focused),
+        }
+    }
+
+    fn receive_focus(&mut self, focus_position: (u16, u16)) -> bool {
+        let controller = &self.buttons.upper.handlers.controller;
+        controller.get_showing_buttons() && self.buttons.receive_focus(focus_position)
+    }
+
+    fn focus_lost(&mut self) {
+        let controller = &self.buttons.upper.handlers.controller;
+        if controller.get_showing_buttons() {
+            self.buttons.focus_lost();
+        }
+    }
+}
+
+impl<W: AsyncWrite + Unpin + 'static> AutosizeUIElement for ButtonsOrTextLine<W> {
+    fn begin_resize(&mut self, width: u16, height: u16) -> (u16, u16) {
+        self.buttons.begin_resize(width, height)
+    }
+}
+
 type UsernameTextLine = HorizontalSplit<TextLine, Text>;
 type RoleSelectorLine<W> = HorizontalSplit<TextLine, ArrowSelector<RoleSelectorHandler<W>>>;
 type PasswordEntryLine<W> = HorizontalSplit<TextLine, TextEntry<TextHandler<W>>>;
 
-struct Content<W: AsyncWrite + Unpin + 'static> {
+struct DataEntries<W: AsyncWrite + Unpin + 'static> {
     inner: VerticalSplit<UsernameTextLine, VerticalSplit<RoleSelectorLine<W>, PasswordEntryLine<W>>>,
 }
 
-impl<W: AsyncWrite + Unpin + 'static> Content<W> {
+impl<W: AsyncWrite + Unpin + 'static> DataEntries<W> {
     fn new(redraw_notify: Rc<Notify>, controller: Rc<Controller<W>>) -> Self {
         let text_style = Style::new().fg(TEXT_COLOR);
         let selected_text_style = text_style.bg(SELECTED_BACKGROUND_COLOR);
@@ -410,7 +500,7 @@ impl<W: AsyncWrite + Unpin + 'static> Content<W> {
     }
 }
 
-impl<W: AsyncWrite + Unpin + 'static> UIElement for Content<W> {
+impl<W: AsyncWrite + Unpin + 'static> UIElement for DataEntries<W> {
     fn resize(&mut self, area: Rect) {
         self.inner.resize(area);
     }
@@ -446,7 +536,7 @@ impl<W: AsyncWrite + Unpin + 'static> UIElement for Content<W> {
     }
 }
 
-impl<W: AsyncWrite + Unpin + 'static> AutosizeUIElement for Content<W> {
+impl<W: AsyncWrite + Unpin + 'static> AutosizeUIElement for DataEntries<W> {
     fn begin_resize(&mut self, width: u16, height: u16) -> (u16, u16) {
         self.inner.begin_resize(width, height)
     }
@@ -488,17 +578,24 @@ impl<W: AsyncWrite + Unpin + 'static> TextEntryHandler for TextHandler<W> {
     }
 }
 
-struct ButtonHandler<W: AsyncWrite + Unpin + 'static> {
+struct AnyButtonHandler<W: AsyncWrite + Unpin + 'static> {
     controller: Rc<Controller<W>>,
 }
 
-impl<W: AsyncWrite + Unpin + 'static> DualButtonsHandler for ButtonHandler<W> {
+impl<W: AsyncWrite + Unpin + 'static> DualButtonsHandler for AnyButtonHandler<W> {
     fn on_left(&mut self) {
         self.controller.on_yes_selected();
     }
 
     fn on_right(&mut self) {
         self.controller.close_popup();
+    }
+}
+
+impl<W: AsyncWrite + Unpin + 'static> ButtonHandler for AnyButtonHandler<W> {
+    fn on_pressed(&mut self) -> OnEnterResult {
+        self.controller.on_yes_selected();
+        OnEnterResult::Handled
     }
 }
 
@@ -513,39 +610,27 @@ impl<W: AsyncWrite + Unpin + 'static> UpdateUserPopup<W> {
         let (controller, close_receiver) = Controller::new(Rc::clone(&redraw_notify), manager, user, users_watch, popup_sender);
         let controller = Rc::new(controller);
 
-        let button_handler = ButtonHandler {
-            controller: Rc::clone(&controller),
-        };
-
         let text_style = Style::new().fg(TEXT_COLOR);
-        let selected_text_style = text_style.bg(SELECTED_BACKGROUND_COLOR);
 
-        let content_inner = Content::new(Rc::clone(&redraw_notify), Rc::clone(&controller));
-        let content = Padded::new(Padding::horizontal(1), content_inner);
+        let content_inner = DataEntries::new(Rc::clone(&redraw_notify), Rc::clone(&controller));
+        let buttons = ButtonsOrTextLine::new(Rc::clone(&redraw_notify), Rc::clone(&controller));
+
+        let content = VerticalSplit::new(content_inner, buttons, 0, 1);
+        let content = Padded::new(Padding::new(1, 1, 0, 1), content);
 
         let controller_weak = Rc::downgrade(&controller);
         let users_watch_receiver = controller.users_watch.subscribe();
 
-        let base = YesNoPopup::new(
-            redraw_notify,
+        let base = PromptPopup::new(
             TITLE.into(),
             PROMPT_MESSAGE.into(),
             text_style,
             1,
-            CONFIRM_TITLE.into(),
-            CANCEL_TITLE.into(),
-            text_style,
-            selected_text_style,
-            text_style,
-            selected_text_style,
-            UPDATING_MESSAGE.into(),
-            text_style,
             TEXT_COLOR,
             BACKGROUND_COLOR,
             SizeConstraint::new(POPUP_WIDTH, u16::MAX),
             controller,
             content,
-            button_handler,
         );
 
         let background_task = tokio::task::spawn_local(async move {
