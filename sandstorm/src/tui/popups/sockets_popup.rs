@@ -68,6 +68,7 @@ const POPUP_WIDTH: u16 = 40;
 const MAX_POPUP_HEIGHT: u16 = 24;
 
 const IP_FILTER_LABEL: &str = "Filter:";
+const IP_FILTER_SHORTCUTS_LABEL: &str = "(1/4/6)";
 const FILTER_ALL_STR: &str = "[ALL]";
 const FILTER_ALL_SHORTCUT: Option<char> = Some('1');
 const FILTER_IPV4_STR: &str = "[IPv4]";
@@ -433,6 +434,7 @@ impl<W: AsyncWrite + Unpin + 'static> SocketPopupContent<W> {
             selected_text_style,
             selected_text_style,
             selected_text_style,
+            IP_FILTER_SHORTCUTS_LABEL.into(),
             false,
             FilterArrowHandler::new(Rc::clone(&controller)),
         );

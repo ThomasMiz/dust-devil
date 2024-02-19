@@ -22,6 +22,8 @@ pub struct ArrowSelector<H: ArrowSelectorHandler> {
     options_selecting_style: Style,
     arrows_selecting_style: Style,
     options_max_width: u16,
+    after_text: StaticString,
+    after_text_len: u16,
     autoselect: bool,
     pub handler: H,
     is_focused: bool,
@@ -39,6 +41,7 @@ impl<H: ArrowSelectorHandler> ArrowSelector<H> {
         options_focused_style: Style,
         options_selecting_style: Style,
         arrows_selecting_style: Style,
+        after_text: StaticString,
         autoselect: bool,
         handler: H,
     ) -> Self {
@@ -47,12 +50,14 @@ impl<H: ArrowSelectorHandler> ArrowSelector<H> {
         }
 
         let options_max_width = options.iter().map(|(s, _)| s.deref().chars().count()).max();
-        let options_max_width = options_max_width.unwrap_or(0).max(u16::MAX as usize) as u16;
+        let options_max_width = options_max_width.unwrap_or(0).min(u16::MAX as usize) as u16;
         let selected_index = selected_index.min(options.len());
 
         for (_, ch) in options.iter_mut() {
             *ch = ch.map(|c| c.to_ascii_lowercase());
         }
+
+        let after_text_len = after_text.chars().count().min(u16::MAX as usize) as u16;
 
         Self {
             redraw_notify,
@@ -63,6 +68,8 @@ impl<H: ArrowSelectorHandler> ArrowSelector<H> {
             options_selecting_style,
             arrows_selecting_style,
             options_max_width,
+            after_text,
+            after_text_len,
             autoselect,
             handler,
             is_focused: false,
@@ -105,13 +112,30 @@ impl<H: ArrowSelectorHandler> UIElement for ArrowSelector<H> {
             draw_x = x;
         }
 
+        if draw_x >= area.right() {
+            return;
+        }
+
         let option_str = self.options[self.selected_index].0.deref();
         let (x, _) = buf.set_stringn(draw_x, area.y, option_str, (area.right() - draw_x) as usize, options_style);
         draw_x = x;
 
-        if let Some(style) = arrows_style {
-            buf.set_stringn(draw_x, area.y, " →", (area.right() - draw_x) as usize, style);
+        if draw_x >= area.right() {
+            return;
         }
+
+        if let Some(style) = arrows_style {
+            let (x, _) = buf.set_stringn(draw_x, area.y, " →", (area.right() - draw_x) as usize, style);
+            draw_x = x;
+        }
+
+        draw_x += 1;
+        if draw_x >= area.right() {
+            return;
+        }
+
+        let after_str = self.after_text.deref();
+        buf.set_stringn(draw_x, area.y, after_str, (area.right() - draw_x) as usize, self.options_idle_style);
     }
 
     fn handle_event(&mut self, event: &event::Event, is_focused: bool) -> HandleEventStatus {
@@ -203,7 +227,7 @@ impl<H: ArrowSelectorHandler> UIElement for ArrowSelector<H> {
 
 impl<H: ArrowSelectorHandler> AutosizeUIElement for ArrowSelector<H> {
     fn begin_resize(&mut self, width: u16, _height: u16) -> (u16, u16) {
-        let desired_width = self.options_max_width.saturating_add(4);
+        let desired_width = self.options_max_width.saturating_add(4).saturating_add(self.after_text_len);
         (width.min(desired_width), 1)
     }
 }

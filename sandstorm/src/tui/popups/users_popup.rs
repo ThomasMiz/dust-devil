@@ -68,6 +68,7 @@ const ADMIN_USER_COLOR: Color = Color::Magenta;
 const SELECTED_ADMIN_USER_COLOR: Color = Color::LightMagenta;
 
 const ROLE_FILTER_LABEL: &str = "Role:";
+const ROLE_FILTER_SHORTCUTS_LABEL: &str = "(1/2/3)";
 const FILTER_ALL_STR: &str = "[ALL]";
 const FILTER_ALL_SHORTCUT: Option<char> = Some('1');
 const FILTER_REGULAR_STR: &str = "[REGULAR]";
@@ -438,6 +439,7 @@ impl<W: AsyncWrite + Unpin + 'static> UsersPopupContent<W> {
             selected_text_style,
             selected_text_style,
             selected_text_style,
+            ROLE_FILTER_SHORTCUTS_LABEL.into(),
             false,
             FilterArrowHandler::new(Rc::clone(&controller)),
         );

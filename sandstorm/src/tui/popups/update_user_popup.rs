@@ -65,6 +65,7 @@ const BIG_ERROR_POPUP_WIDTH: u16 = 48;
 const ERROR_POPUP_WIDTH: u16 = 40;
 
 const ROLE_SELECTOR_LABEL: &str = "Role:";
+const ROLE_SELECTOR_SHORTCUTS_LABEL: &str = "(1/2)";
 const ROLE_REGULAR_STR: &str = "[REGULAR]";
 const ROLE_REGULAR_SHORTCUT: Option<char> = Some('1');
 const ROLE_ADMIN_STR: &str = "[ADMIN]";
@@ -491,6 +492,7 @@ impl<W: AsyncWrite + Unpin + 'static> DataEntries<W> {
             selected_text_style,
             selected_text_style,
             selected_text_style,
+            ROLE_SELECTOR_SHORTCUTS_LABEL.into(),
             false,
             RoleSelectorHandler {
                 controller: Rc::clone(&controller),
