@@ -879,7 +879,7 @@ impl<W: AsyncWrite + Unpin + 'static> UsersPopup<W> {
             LOADING_STYLE,
             TEXT_COLOR,
             BACKGROUND_COLOR,
-            SizeConstraint::new().max(POPUP_WIDTH, MAX_POPUP_HEIGHT),
+            SizeConstraint::new(POPUP_WIDTH, MAX_POPUP_HEIGHT),
             controller,
             content,
         );

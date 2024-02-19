@@ -4,28 +4,16 @@ use ratatui::{layout::Rect, Frame};
 use crate::tui::ui_element::{AutosizeUIElement, HandleEventStatus, UIElement};
 
 pub struct SizeConstraint {
-    min: (u16, u16),
     max: (u16, u16),
 }
 
 impl SizeConstraint {
-    pub const fn new() -> Self {
-        Self {
-            min: (0, 0),
-            max: (u16::MAX, u16::MAX),
-        }
+    pub const fn empty() -> Self {
+        Self { max: (u16::MAX, u16::MAX) }
     }
 
-    pub const fn min(self, min_width: u16, min_height: u16) -> Self {
+    pub const fn new(max_width: u16, max_height: u16) -> Self {
         Self {
-            min: (min_width, min_height),
-            max: self.max,
-        }
-    }
-
-    pub const fn max(self, max_width: u16, max_height: u16) -> Self {
-        Self {
-            min: self.min,
             max: (max_width, max_height),
         }
     }
@@ -33,7 +21,7 @@ impl SizeConstraint {
 
 impl Default for SizeConstraint {
     fn default() -> Self {
-        Self::new()
+        Self::empty()
     }
 }
 
@@ -77,8 +65,8 @@ impl<T: AutosizeUIElement> AutosizeUIElement for ConstrainedPopupContent<T> {
 
         let (mut width, mut height) = self.inner.begin_resize(width, height);
 
-        width = width.clamp(self.size_constraint.min.0, self.size_constraint.max.0);
-        height = height.clamp(self.size_constraint.min.1, self.size_constraint.max.1);
+        width = width.min(self.size_constraint.max.0);
+        height = height.min(self.size_constraint.max.1);
 
         (width, height)
     }

@@ -521,7 +521,7 @@ impl<W: AsyncWrite + Unpin + 'static> AddUserPopup<W> {
             text_style,
             TEXT_COLOR,
             BACKGROUND_COLOR,
-            SizeConstraint::new().max(POPUP_WIDTH, u16::MAX),
+            SizeConstraint::new(POPUP_WIDTH, u16::MAX),
             controller,
             content,
             button_handler,

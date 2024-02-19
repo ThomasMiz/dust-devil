@@ -82,7 +82,7 @@ impl ConfirmClosePopup {
             Style::new(),
             Color::Reset,
             BACKGROUND_COLOR,
-            SizeConstraint::new().max(POPUP_WIDTH, u16::MAX),
+            SizeConstraint::new(POPUP_WIDTH, u16::MAX),
             controller,
             Empty,
             handlers,

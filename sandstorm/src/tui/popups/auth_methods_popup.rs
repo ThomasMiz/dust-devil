@@ -355,7 +355,7 @@ impl<W: AsyncWrite + Unpin + 'static> AuthMethodsPopup<W> {
             Style::new().fg(TEXT_COLOR),
             TEXT_COLOR,
             BACKGROUND_COLOR,
-            SizeConstraint::new().max(POPUP_WIDTH, MAX_POPUP_HEIGHT),
+            SizeConstraint::new(POPUP_WIDTH, MAX_POPUP_HEIGHT),
             controller,
             content,
         );

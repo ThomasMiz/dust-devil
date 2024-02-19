@@ -114,7 +114,7 @@ impl<T: AutosizeUIElement> MessagePopup<T> {
             Style::new().bg(ERROR_POPUP_SELECTED_COLOR),
             ERROR_POPUP_BORDER_COLOR,
             ERROR_POPUP_BACKGROUND_COLOR,
-            SizeConstraint::new().max(popup_width, u16::MAX),
+            SizeConstraint::new(popup_width, u16::MAX),
             content,
         )
     }

@@ -260,7 +260,7 @@ impl<W: AsyncWrite + Unpin + 'static> CloseSocketPopup<W> {
             text_style,
             TEXT_COLOR,
             BACKGROUND_COLOR,
-            SizeConstraint::new().max(POPUP_WIDTH, u16::MAX),
+            SizeConstraint::new(POPUP_WIDTH, u16::MAX),
             controller,
             Padded::new(Padding::horizontal(1), content),
             button_handler,
