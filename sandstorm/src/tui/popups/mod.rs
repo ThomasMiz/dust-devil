@@ -10,6 +10,7 @@ pub mod auth_methods_popup;
 pub mod buffer_size_popup;
 pub mod close_socket_popup;
 pub mod confirm_close_popup;
+pub mod delete_user_popup;
 pub mod loading_popup;
 pub mod message_popup;
 pub mod popup_base;

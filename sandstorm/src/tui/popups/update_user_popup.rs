@@ -38,6 +38,7 @@ use crate::{
 };
 
 use super::{
+    delete_user_popup::DeleteUserPopup,
     message_popup::{MessagePopup, ERROR_POPUP_TITLE, REQUEST_SEND_ERROR_MESSAGE},
     popup_base::PopupBaseController,
     prompt_popup::PromptPopup,
@@ -56,8 +57,8 @@ const SELECTED_BACKGROUND_COLOR: Color = Color::LightGreen;
 const TEXT_COLOR: Color = Color::Black;
 
 const SERVER_UPDATE_ERROR_MESSAGE: &str = "The user was not updated because the server rejected the operation:";
-const USER_NOT_FOUND_MESSAGE: &str = "No user was found with such username. Was it just deleted?";
-const CANNOT_DELETE_ONLY_ADMIN_MESSAGE: &str = "Cannot delete the only admin, that would leave the server inaccessible!";
+pub const USER_NOT_FOUND_MESSAGE: &str = "No user was found with such username. Was it just deleted?";
+pub const CANNOT_DELETE_ONLY_ADMIN_MESSAGE: &str = "Cannot delete the only admin, that would leave the server inaccessible!";
 const NOTHING_WAS_REQUESTED_MESSAGE: &str = "No changes were requested";
 const POPUP_WIDTH: u16 = 46;
 const BIG_ERROR_POPUP_WIDTH: u16 = 48;
@@ -176,6 +177,26 @@ impl<W: AsyncWrite + Unpin + 'static> Controller<W> {
 
         self.perform_request(password, selected_role);
         true
+    }
+
+    fn on_delete_selected(self: &Rc<Self>) {
+        let mut inner = self.inner.borrow_mut();
+        if inner.is_beeping_red || inner.is_doing_request {
+            return;
+        }
+
+        let popup = DeleteUserPopup::new(
+            Rc::clone(&inner.base.base.redraw_notify),
+            Weak::clone(&self.manager),
+            (self.username.clone(), inner.user_role),
+            self.users_watch.clone(),
+            self.popup_sender.clone(),
+        );
+
+        let _ = self.popup_sender.send(popup.into());
+
+        inner.is_doing_request = true;
+        inner.base.base.close_popup();
     }
 
     fn user_role_changed(&self, user_role: UserRole) {
@@ -594,7 +615,7 @@ impl<W: AsyncWrite + Unpin + 'static> DualButtonsHandler for AnyButtonHandler<W>
 
 impl<W: AsyncWrite + Unpin + 'static> ButtonHandler for AnyButtonHandler<W> {
     fn on_pressed(&mut self) -> OnEnterResult {
-        self.controller.on_yes_selected();
+        self.controller.on_delete_selected();
         OnEnterResult::Handled
     }
 }
