@@ -8,7 +8,7 @@ use std::{
 use crossterm::event;
 use dust_devil_core::socks5::AuthMethod;
 use ratatui::{
-    layout::Rect,
+    layout::{Alignment, Rect},
     style::{Color, Style},
     text::{Line, Span},
     Frame,
@@ -23,8 +23,8 @@ use crate::{
     sandstorm::MutexedSandstormRequestManager,
     tui::{
         elements::{
-            centered_text::CenteredText,
             long_list::{LongList, LongListHandler},
+            text::Text,
             vertical_split::VerticalSplit,
             OnEnterResult,
         },
@@ -392,14 +392,14 @@ impl<W: AsyncWrite + Unpin + 'static> UIElement for AuthMethodsPopup<W> {
 }
 
 struct AuthMethodsContent<W: AsyncWrite + Unpin + 'static> {
-    base: VerticalSplit<CenteredText, VerticalSplit<LongList<AuthListHandler<W>>, CenteredText>>,
+    base: VerticalSplit<Text, VerticalSplit<LongList<AuthListHandler<W>>, Text>>,
 }
 
 impl<W: AsyncWrite + Unpin + 'static> AuthMethodsContent<W> {
     fn new(redraw_notify: Rc<Notify>, controller: Rc<Controller<W>>) -> Self {
         let text_color = Style::new().fg(TEXT_COLOR);
-        let top_text = CenteredText::new(TOP_MESSAGE.into(), text_color);
-        let bottom_text = CenteredText::new(HELP_MESSAGE.into(), text_color);
+        let top_text = Text::new(TOP_MESSAGE.into(), text_color, Alignment::Center);
+        let bottom_text = Text::new(HELP_MESSAGE.into(), text_color, Alignment::Center);
 
         let list = LongList::new(redraw_notify, "".into(), 0, false, true, AuthListHandler { controller });
 

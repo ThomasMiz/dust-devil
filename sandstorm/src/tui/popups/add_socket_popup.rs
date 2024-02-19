@@ -8,7 +8,7 @@ use std::{
 
 use crossterm::event;
 use ratatui::{
-    layout::Rect,
+    layout::{Alignment, Rect},
     style::{Color, Style},
     widgets::Padding,
     Frame,
@@ -23,9 +23,9 @@ use crate::{
     sandstorm::MutexedSandstormRequestManager,
     tui::{
         elements::{
-            centered_text::CenteredText,
             dual_buttons::DualButtonsHandler,
             padded::Padded,
+            text::Text,
             text_entry::{CursorPosition, TextEntry, TextEntryController, TextEntryHandler},
             OnEnterResult,
         },
@@ -197,7 +197,10 @@ async fn add_socket_task<W: AsyncWrite + Unpin + 'static>(controller: Weak<Contr
             ERROR_POPUP_TITLE.into(),
             SERVER_ADD_ERROR_MESSAGE.into(),
             BIG_ERROR_POPUP_WIDTH,
-            Padded::new(Padding::new(0, 0, 0, 1), CenteredText::new(error.to_string().into(), Style::new())),
+            Padded::new(
+                Padding::new(0, 0, 0, 1),
+                Text::new(error.to_string().into(), Style::new(), Alignment::Center),
+            ),
         )
         .into(),
         Err(_) => MessagePopup::empty_error_message(

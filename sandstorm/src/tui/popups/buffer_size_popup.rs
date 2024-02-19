@@ -8,7 +8,7 @@ use crossterm::event;
 
 use dust_devil_core::buffer_size::parse_pretty_buffer_size;
 use ratatui::{
-    layout::Rect,
+    layout::{Alignment, Rect},
     style::{Color, Style},
     widgets::Padding,
     Frame,
@@ -23,10 +23,10 @@ use crate::{
     sandstorm::MutexedSandstormRequestManager,
     tui::{
         elements::{
-            centered_text::{CenteredText, CenteredTextLine},
             dual_buttons::DualButtonsHandler,
             horizontal_split::HorizontalSplit,
             padded::Padded,
+            text::{Text, TextLine},
             text_entry::{CursorPosition, TextEntry, TextEntryController, TextEntryHandler},
             vertical_split::VerticalSplit,
             OnEnterResult,
@@ -324,13 +324,13 @@ impl<W: AsyncWrite + Unpin + 'static> DualButtonsHandler for ButtonHandler<W> {
 }
 
 struct Content<W: AsyncWrite + Unpin + 'static> {
-    base: VerticalSplit<CenteredText, HorizontalSplit<CenteredTextLine, TextEntry<ContentTextHandler<W>>>>,
+    base: VerticalSplit<Text, HorizontalSplit<TextLine, TextEntry<ContentTextHandler<W>>>>,
     current_top_message: TopMessage,
 }
 
 impl<W: AsyncWrite + Unpin + 'static> Content<W> {
     fn new(redraw_notify: Rc<Notify>, controller: Rc<Controller<W>>) -> Self {
-        let new_size_label = CenteredTextLine::new(NEW_BUFFER_SIZE_LABEL.into(), Style::new());
+        let new_size_label = TextLine::new(NEW_BUFFER_SIZE_LABEL.into(), Style::new(), Alignment::Left);
         let text_entry = TextEntry::new(
             redraw_notify,
             String::new(),
@@ -342,7 +342,7 @@ impl<W: AsyncWrite + Unpin + 'static> Content<W> {
 
         let text_entry_line = HorizontalSplit::new(new_size_label, text_entry, 0, 1);
 
-        let offer_text = CenteredText::new(OFFER_MESSAGE.into(), Style::new());
+        let offer_text = Text::new(OFFER_MESSAGE.into(), Style::new(), Alignment::Center);
         let base = VerticalSplit::new(offer_text, text_entry_line, 0, 1);
 
         Self {

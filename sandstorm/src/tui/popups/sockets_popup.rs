@@ -10,7 +10,7 @@ use std::{
 use crossterm::event;
 use dust_devil_core::sandstorm::RemoveSocketResponse;
 use ratatui::{
-    layout::Rect,
+    layout::{Alignment, Rect},
     style::{Color, Style},
     text::Line,
     widgets::Padding,
@@ -28,10 +28,10 @@ use crate::{
         elements::{
             arrow_selector::{ArrowSelector, ArrowSelectorHandler},
             centered_button::{ButtonHandler, CenteredButton},
-            centered_text::{CenteredText, CenteredTextLine},
             horizontal_split::HorizontalSplit,
             long_list::{LongList, LongListHandler},
             padded::Padded,
+            text::{Text, TextLine},
             OnEnterResult,
         },
         text_wrapper::{wrap_lines_by_chars, StaticString},
@@ -350,10 +350,10 @@ impl<W: AsyncWrite + Unpin + 'static> Drop for SocketsPopup<W> {
 }
 
 struct SocketPopupContent<W: AsyncWrite + Unpin + 'static> {
-    top_text: CenteredText,
-    ip_filter: Padded<HorizontalSplit<CenteredTextLine, ArrowSelector<FilterArrowHandler<W>>>>,
+    top_text: Text,
+    ip_filter: Padded<HorizontalSplit<TextLine, ArrowSelector<FilterArrowHandler<W>>>>,
     socket_list: LongList<SocketListHandler<W>>,
-    help_text: Padded<CenteredText>,
+    help_text: Padded<Text>,
     add_button: Padded<CenteredButton<AddButtonHandler<W>>>,
     top_text_height: u16,
     socket_list_height: u16,
@@ -437,7 +437,7 @@ impl<W: AsyncWrite + Unpin + 'static> SocketPopupContent<W> {
             FilterArrowHandler::new(Rc::clone(&controller)),
         );
 
-        let ip_filter_label = CenteredTextLine::new(IP_FILTER_LABEL.into(), text_style);
+        let ip_filter_label = TextLine::new(IP_FILTER_LABEL.into(), text_style, Alignment::Left);
         let ip_filter_inner = HorizontalSplit::new(ip_filter_label, ip_filter_selector, 0, 1);
         let ip_filter = Padded::new(Padding::horizontal(1), ip_filter_inner);
 
@@ -450,7 +450,7 @@ impl<W: AsyncWrite + Unpin + 'static> SocketPopupContent<W> {
             SocketListHandler::new(Rc::clone(&controller)),
         );
 
-        let help_text_inner = CenteredText::new(HELP_MESSAGE.into(), HELP_MESSAGE_STYLE);
+        let help_text_inner = Text::new(HELP_MESSAGE.into(), HELP_MESSAGE_STYLE, Alignment::Center);
         let help_text = Padded::new(Padding::horizontal(1), help_text_inner);
 
         let add_button_inner = CenteredButton::new(
@@ -468,7 +468,7 @@ impl<W: AsyncWrite + Unpin + 'static> SocketPopupContent<W> {
             SocketPopupType::Sandstorm => SANDSTORM_TOP_MESSAGE,
         };
 
-        let top_text = CenteredText::new(top_message.into(), TOP_MESSAGE_STYLE);
+        let top_text = Text::new(top_message.into(), TOP_MESSAGE_STYLE, Alignment::Center);
 
         Self {
             top_text,

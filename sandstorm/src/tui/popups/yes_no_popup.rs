@@ -2,7 +2,7 @@ use std::{cell::RefCell, rc::Rc};
 
 use crossterm::event;
 use ratatui::{
-    layout::Rect,
+    layout::{Alignment, Rect},
     style::{Color, Style},
     widgets::Padding,
     Frame,
@@ -11,9 +11,9 @@ use tokio::sync::{oneshot, Notify};
 
 use crate::tui::{
     elements::{
-        centered_text::CenteredTextLine,
         dual_buttons::{DualButtons, DualButtonsHandler},
         padded::Padded,
+        text::TextLine,
         vertical_split::VerticalSplit,
     },
     text_wrapper::StaticString,
@@ -39,7 +39,7 @@ pub struct YesNoPopup<C: YesNoPopupController, T: AutosizeUIElement, H: DualButt
 struct ButtonsOrTextLine<C: YesNoPopupController, H: DualButtonsHandler> {
     controller: Rc<C>,
     buttons: DualButtons<H>,
-    alternative_text: CenteredTextLine,
+    alternative_text: TextLine,
 }
 
 impl<C: YesNoPopupController, H: DualButtonsHandler> UIElement for ButtonsOrTextLine<C, H> {
@@ -209,7 +209,7 @@ impl<C: YesNoPopupController, T: AutosizeUIElement, H: DualButtonsHandler> YesNo
                             no_style,
                             no_selected_style,
                         ),
-                        alternative_text: CenteredTextLine::new(alternative_text, alternative_text_style),
+                        alternative_text: TextLine::new(alternative_text, alternative_text_style, Alignment::Center),
                     },
                 ),
                 0,

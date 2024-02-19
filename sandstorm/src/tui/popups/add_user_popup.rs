@@ -8,7 +8,7 @@ use std::{
 use crossterm::event;
 use dust_devil_core::{sandstorm::AddUserResponse, users::UserRole};
 use ratatui::{
-    layout::Rect,
+    layout::{Alignment, Rect},
     style::{Color, Style},
     widgets::Padding,
     Frame,
@@ -24,10 +24,10 @@ use crate::{
     tui::{
         elements::{
             arrow_selector::{ArrowSelector, ArrowSelectorHandler},
-            centered_text::{CenteredText, CenteredTextLine},
             dual_buttons::DualButtonsHandler,
             horizontal_split::HorizontalSplit,
             padded::Padded,
+            text::{Text, TextLine},
             text_entry::{CursorPosition, TextEntry, TextEntryController, TextEntryHandler},
             vertical_split::VerticalSplit,
             OnEnterResult,
@@ -269,12 +269,13 @@ async fn add_user_task<W: AsyncWrite + Unpin + 'static>(
                 AddUserResponse::Ok => unreachable!(),
             };
 
+            let text = Text::new(error_message.into(), Style::new(), Alignment::Center);
             MessagePopup::error_message(
                 Rc::clone(&rc.inner.borrow().base.base.redraw_notify),
                 ERROR_POPUP_TITLE.into(),
                 SERVER_ADD_ERROR_MESSAGE.into(),
                 BIG_ERROR_POPUP_WIDTH,
-                Padded::new(Padding::new(0, 0, 0, 1), CenteredText::new(error_message.into(), Style::new())),
+                Padded::new(Padding::new(0, 0, 0, 1), text),
             )
             .into()
         }
@@ -334,9 +335,9 @@ pub struct AddUserPopup<W: AsyncWrite + Unpin + 'static> {
     base: YesNoPopup<Controller<W>, Padded<Content<W>>, ButtonHandler<W>>,
 }
 
-type RoleSelectorLine<W> = HorizontalSplit<CenteredTextLine, ArrowSelector<RoleSelectorHandler<W>>>;
-type UsernameEntryLine<W> = HorizontalSplit<CenteredTextLine, TextEntry<TextHandler<W>>>;
-type PasswordEntryLine<W> = HorizontalSplit<CenteredTextLine, TextEntry<TextHandler<W>>>;
+type RoleSelectorLine<W> = HorizontalSplit<TextLine, ArrowSelector<RoleSelectorHandler<W>>>;
+type UsernameEntryLine<W> = HorizontalSplit<TextLine, TextEntry<TextHandler<W>>>;
+type PasswordEntryLine<W> = HorizontalSplit<TextLine, TextEntry<TextHandler<W>>>;
 
 struct Content<W: AsyncWrite + Unpin + 'static> {
     inner: VerticalSplit<RoleSelectorLine<W>, VerticalSplit<UsernameEntryLine<W>, PasswordEntryLine<W>>>,
@@ -363,7 +364,7 @@ impl<W: AsyncWrite + Unpin + 'static> Content<W> {
                 controller: Rc::clone(&controller),
             },
         );
-        let role_selector_label = CenteredTextLine::new(ROLE_SELECTOR_LABEL.into(), text_style);
+        let role_selector_label = TextLine::new(ROLE_SELECTOR_LABEL.into(), text_style, Alignment::Left);
         let role_selector_line = HorizontalSplit::new(role_selector_label, role_selector, 0, 1);
 
         let username_entry = TextEntry::new(
@@ -377,7 +378,7 @@ impl<W: AsyncWrite + Unpin + 'static> Content<W> {
             },
         );
         let username_entry_controller = Rc::downgrade(username_entry.deref());
-        let username_label = CenteredTextLine::new(USERNAME_ENTRY_LABEL.into(), text_style);
+        let username_label = TextLine::new(USERNAME_ENTRY_LABEL.into(), text_style, Alignment::Left);
         let username_line = HorizontalSplit::new(username_label, username_entry, 0, 1);
 
         let password_entry = TextEntry::new(
@@ -391,7 +392,7 @@ impl<W: AsyncWrite + Unpin + 'static> Content<W> {
             },
         );
         let password_entry_controller = Rc::downgrade(password_entry.deref());
-        let password_label = CenteredTextLine::new(PASSWORD_ENTRY_LABEL.into(), text_style);
+        let password_label = TextLine::new(PASSWORD_ENTRY_LABEL.into(), text_style, Alignment::Left);
         let password_line = HorizontalSplit::new(password_label, password_entry, 0, 1);
 
         controller.set_text_entry_controllers(username_entry_controller, password_entry_controller);

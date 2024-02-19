@@ -7,7 +7,7 @@ use std::{
 use crossterm::event;
 use dust_devil_core::sandstorm::RemoveSocketResponse;
 use ratatui::{
-    layout::Rect,
+    layout::{Alignment, Rect},
     style::{Color, Style},
     widgets::Padding,
     Frame,
@@ -21,7 +21,7 @@ use tokio::{
 use crate::{
     sandstorm::MutexedSandstormRequestManager,
     tui::{
-        elements::{centered_text::CenteredText, dual_buttons::DualButtonsHandler, padded::Padded},
+        elements::{dual_buttons::DualButtonsHandler, padded::Padded, text::Text},
         ui_element::{HandleEventStatus, UIElement},
         ui_manager::Popup,
     },
@@ -194,7 +194,7 @@ impl<W: AsyncWrite + Unpin + 'static> Controller<W> {
 }
 
 pub struct CloseSocketPopup<W: AsyncWrite + Unpin + 'static> {
-    base: YesNoPopup<Controller<W>, Padded<CenteredText>, ButtonHandler<W>>,
+    base: YesNoPopup<Controller<W>, Padded<Text>, ButtonHandler<W>>,
 }
 
 struct ButtonHandler<W: AsyncWrite + Unpin + 'static> {
@@ -242,7 +242,7 @@ impl<W: AsyncWrite + Unpin + 'static> CloseSocketPopup<W> {
             controller: Rc::clone(&controller),
         };
 
-        let content = CenteredText::new(socket_address.to_string().into(), text_style);
+        let content = Text::new(socket_address.to_string().into(), text_style, Alignment::Center);
 
         let base = YesNoPopup::new(
             redraw_notify,

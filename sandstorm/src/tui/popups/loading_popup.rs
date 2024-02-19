@@ -2,7 +2,7 @@ use std::rc::Rc;
 
 use crossterm::event;
 use ratatui::{
-    layout::Rect,
+    layout::{Alignment, Rect},
     style::{Color, Style},
     widgets::Padding,
     Frame,
@@ -10,7 +10,7 @@ use ratatui::{
 use tokio::sync::{oneshot, Notify};
 
 use crate::tui::{
-    elements::{centered_text::CenteredText, padded::Padded},
+    elements::{padded::Padded, text::Text},
     text_wrapper::StaticString,
     ui_element::{AutosizeUIElement, HandleEventStatus, UIElement},
 };
@@ -85,7 +85,7 @@ impl<C: LoadingPopupController, T: AutosizeUIElement> LoadingPopup<C, T> {
     ) -> Self {
         let loading_content = LoadingContent {
             controller: Rc::clone(&controller),
-            loading_text: Padded::new(Padding::horizontal(1), CenteredText::new(loading_str, loading_style)),
+            loading_text: Padded::new(Padding::horizontal(1), Text::new(loading_str, loading_style, Alignment::Center)),
             content,
         };
 
@@ -96,7 +96,7 @@ impl<C: LoadingPopupController, T: AutosizeUIElement> LoadingPopup<C, T> {
 
 struct LoadingContent<C: LoadingPopupController, T: AutosizeUIElement> {
     controller: Rc<C>,
-    loading_text: Padded<CenteredText>,
+    loading_text: Padded<Text>,
     content: T,
 }
 
@@ -143,7 +143,7 @@ impl<C: LoadingPopupController, T: AutosizeUIElement> AutosizeUIElement for Load
             true => {
                 if let Some(new_loading_text) = self.controller.get_new_loading_text() {
                     let style = self.loading_text.inner.style();
-                    self.loading_text.inner = CenteredText::new(new_loading_text, style);
+                    self.loading_text.inner = Text::new(new_loading_text, style, Alignment::Center);
                 }
 
                 self.loading_text.begin_resize(width, height)

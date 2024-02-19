@@ -8,7 +8,7 @@ use std::{
 use crossterm::event;
 use dust_devil_core::users::UserRole;
 use ratatui::{
-    layout::Rect,
+    layout::{Alignment, Rect},
     style::{Color, Style},
     text::{Line, Span},
     widgets::Padding,
@@ -26,10 +26,10 @@ use crate::{
         elements::{
             arrow_selector::{ArrowSelector, ArrowSelectorHandler},
             centered_button::{ButtonHandler, CenteredButton},
-            centered_text::{CenteredText, CenteredTextLine},
             horizontal_split::HorizontalSplit,
             long_list::{LongList, LongListHandler},
             padded::Padded,
+            text::{Text, TextLine},
             text_entry::{CursorPosition, TextEntry, TextEntryController, TextEntryHandler},
             OnEnterResult,
         },
@@ -326,10 +326,10 @@ impl<W: AsyncWrite + Unpin + 'static> Drop for UsersPopup<W> {
 }
 
 struct UsersPopupContent<W: AsyncWrite + Unpin + 'static> {
-    role_filter: Padded<HorizontalSplit<CenteredTextLine, ArrowSelector<FilterArrowHandler<W>>>>,
-    username_filter: Padded<HorizontalSplit<CenteredTextLine, TextEntry<UsernameEntryHandler<W>>>>,
+    role_filter: Padded<HorizontalSplit<TextLine, ArrowSelector<FilterArrowHandler<W>>>>,
+    username_filter: Padded<HorizontalSplit<TextLine, TextEntry<UsernameEntryHandler<W>>>>,
     user_list: LongList<UserListHandler<W>>,
-    help_text: Padded<CenteredText>,
+    help_text: Padded<Text>,
     add_button: Padded<CenteredButton<AddButtonHandler<W>>>,
     user_list_height: u16,
     help_text_height: u16,
@@ -441,7 +441,7 @@ impl<W: AsyncWrite + Unpin + 'static> UsersPopupContent<W> {
             FilterArrowHandler::new(Rc::clone(&controller)),
         );
 
-        let role_filter_label = CenteredTextLine::new(ROLE_FILTER_LABEL.into(), text_style);
+        let role_filter_label = TextLine::new(ROLE_FILTER_LABEL.into(), text_style, Alignment::Left);
         let role_filter_inner = HorizontalSplit::new(role_filter_label, role_filter_selector, 0, 1);
         let role_filter = Padded::new(Padding::horizontal(1), role_filter_inner);
 
@@ -454,7 +454,7 @@ impl<W: AsyncWrite + Unpin + 'static> UsersPopupContent<W> {
             UsernameEntryHandler::new(Rc::clone(&controller)),
         );
 
-        let username_filter_label = CenteredTextLine::new(USERNAME_FILTER_LABEL.into(), text_style);
+        let username_filter_label = TextLine::new(USERNAME_FILTER_LABEL.into(), text_style, Alignment::Left);
         let username_filter_inner = HorizontalSplit::new(username_filter_label, username_filter_entry, 0, 1);
         let username_filter = Padded::new(Padding::horizontal(1), username_filter_inner);
 
@@ -467,7 +467,7 @@ impl<W: AsyncWrite + Unpin + 'static> UsersPopupContent<W> {
             UserListHandler::new(Rc::clone(&controller)),
         );
 
-        let help_text_inner = CenteredText::new(HELP_MESSAGE.into(), HELP_MESSAGE_STYLE);
+        let help_text_inner = Text::new(HELP_MESSAGE.into(), HELP_MESSAGE_STYLE, Alignment::Center);
         let help_text = Padded::new(Padding::horizontal(1), help_text_inner);
 
         let add_button_inner = CenteredButton::new(

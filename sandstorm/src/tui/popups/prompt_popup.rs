@@ -2,14 +2,14 @@ use std::rc::Rc;
 
 use crossterm::event;
 use ratatui::{
-    layout::Rect,
+    layout::{Alignment, Rect},
     style::{Color, Style},
     widgets::Padding,
     Frame,
 };
 
 use crate::tui::{
-    elements::{centered_text::CenteredText, padded::Padded, vertical_split::VerticalSplit},
+    elements::{padded::Padded, text::Text, vertical_split::VerticalSplit},
     text_wrapper::StaticString,
     ui_element::{AutosizeUIElement, HandleEventStatus, UIElement},
 };
@@ -20,7 +20,7 @@ use super::{
 };
 
 pub struct PromptPopup<C: PopupBaseController, T: AutosizeUIElement> {
-    base: PopupBase<C, VerticalSplit<Padded<CenteredText>, T>>,
+    base: PopupBase<C, VerticalSplit<Padded<Text>, T>>,
 }
 
 impl<C: PopupBaseController, T: AutosizeUIElement> PromptPopup<C, T> {
@@ -43,7 +43,7 @@ impl<C: PopupBaseController, T: AutosizeUIElement> PromptPopup<C, T> {
             size_constraint,
             controller,
             VerticalSplit::new(
-                Padded::new(Padding::horizontal(1), CenteredText::new(prompt_str, prompt_style)),
+                Padded::new(Padding::horizontal(1), Text::new(prompt_str, prompt_style, Alignment::Center)),
                 content,
                 0,
                 prompt_space,

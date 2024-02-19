@@ -1,42 +1,53 @@
 use std::ops::Deref;
 
 use crossterm::event;
-use ratatui::{layout::Rect, style::Style, Frame};
+use ratatui::{
+    layout::{Alignment, Rect},
+    style::Style,
+    Frame,
+};
 
 use crate::tui::{
     text_wrapper::{StaticString, WrapTextIter},
     ui_element::{AutosizeUIElement, HandleEventStatus, UIElement},
 };
 
-/// A single line of centered text.
-pub struct CenteredTextLine {
+/// A single-line text.
+pub struct TextLine {
     text: StaticString,
     style: Style,
+    alignment: Alignment,
     text_len: u16,
     current_width: u16,
     text_draw_offset: u16,
 }
 
-impl CenteredTextLine {
-    pub fn new(text: StaticString, style: Style) -> Self {
+impl TextLine {
+    pub fn new(text: StaticString, style: Style, alignment: Alignment) -> Self {
+        let text_len = text.chars().count().min(u16::MAX as usize) as u16;
         Self {
-            text_len: text.chars().count().min(u16::MAX as usize) as u16,
-            style,
             text,
+            style,
+            alignment,
+            text_len,
             current_width: 0,
             text_draw_offset: 0,
         }
     }
 }
 
-impl UIElement for CenteredTextLine {
+impl UIElement for TextLine {
     fn resize(&mut self, area: Rect) {
         if area.width == self.current_width {
             return;
         }
 
         self.current_width = area.width;
-        self.text_draw_offset = self.current_width.saturating_sub(self.text_len) / 2
+        self.text_draw_offset = match self.alignment {
+            Alignment::Left => 0,
+            Alignment::Center => self.current_width.saturating_sub(self.text_len) / 2,
+            Alignment::Right => self.current_width.saturating_sub(self.text_len),
+        };
     }
 
     fn render(&mut self, area: Rect, frame: &mut Frame) {
@@ -56,16 +67,17 @@ impl UIElement for CenteredTextLine {
     fn focus_lost(&mut self) {}
 }
 
-impl AutosizeUIElement for CenteredTextLine {
+impl AutosizeUIElement for TextLine {
     fn begin_resize(&mut self, width: u16, _height: u16) -> (u16, u16) {
         (width.min(self.text_len), 1)
     }
 }
 
 /// Multiple automatically word-wrapping lines of centered text.
-pub struct CenteredText {
+pub struct Text {
     text: StaticString,
     style: Style,
+    alignment: Alignment,
     lines: Vec<InnerLine>,
     current_width: u16,
 }
@@ -77,11 +89,12 @@ struct InnerLine {
     text_draw_offset: u16,
 }
 
-impl CenteredText {
-    pub fn new(text: StaticString, style: Style) -> Self {
+impl Text {
+    pub fn new(text: StaticString, style: Style, alignment: Alignment) -> Self {
         Self {
             text,
             style,
+            alignment,
             lines: Vec::new(),
             current_width: 0,
         }
@@ -105,7 +118,12 @@ impl CenteredText {
         self.lines.clear();
 
         for item in WrapTextIter::new(self.text.deref(), self.current_width as usize) {
-            let text_draw_offset = self.current_width.saturating_sub(item.len_chars as u16) / 2;
+            let text_draw_offset = match self.alignment {
+                Alignment::Left => 0,
+                Alignment::Center => self.current_width.saturating_sub(item.len_chars as u16) / 2,
+                Alignment::Right => self.current_width.saturating_sub(item.len_chars as u16),
+            };
+
             self.lines.push(InnerLine {
                 text_index: item.index_start,
                 text_len_bytes: item.len_bytes as u32,
@@ -124,7 +142,7 @@ impl CenteredText {
     }
 }
 
-impl UIElement for CenteredText {
+impl UIElement for Text {
     fn resize(&mut self, area: Rect) {
         self.resize_with_width(area.width);
     }
@@ -149,7 +167,7 @@ impl UIElement for CenteredText {
     fn focus_lost(&mut self) {}
 }
 
-impl AutosizeUIElement for CenteredText {
+impl AutosizeUIElement for Text {
     fn begin_resize(&mut self, width: u16, _height: u16) -> (u16, u16) {
         self.resize_with_width(width);
         let text_width = self.lines.iter().map(|line| line.text_draw_width).max();
