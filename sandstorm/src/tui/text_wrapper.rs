@@ -189,7 +189,7 @@ impl<'a> Iterator for WrapTextIter<'a> {
 
                     char_count += 1;
                     if char_count >= self.wrap_width {
-                        if !chars_iter.next().is_some_and(|(_i, c)| !c.is_whitespace()) {
+                        if split_at_index == 0 || !chars_iter.next().is_some_and(|(_i, c)| !c.is_whitespace()) {
                             split_at_index = index + c.len_utf8();
                             char_count_at_split_index = char_count;
                         }

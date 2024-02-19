@@ -71,6 +71,14 @@ impl<H: ArrowSelectorHandler> ArrowSelector<H> {
         }
     }
 
+    pub fn set_selected_index_no_redraw(&mut self, selected_index: usize) {
+        if selected_index >= self.options.len() {
+            panic!("Attempted to set selected index of arrow selector with selected_index >= options.len()");
+        }
+
+        self.selected_index = selected_index;
+    }
+
     fn get_focus_position(&self) -> (u16, u16) {
         self.current_position
     }

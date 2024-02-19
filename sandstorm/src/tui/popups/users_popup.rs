@@ -45,6 +45,7 @@ use super::{
     message_popup::REQUEST_SEND_ERROR_MESSAGE,
     popup_base::PopupBaseController,
     size_constraint::SizeConstraint,
+    update_user_popup::UpdateUserPopup,
 };
 
 const BACKGROUND_COLOR: Color = Color::Cyan;
@@ -757,21 +758,19 @@ impl<W: AsyncWrite + Unpin + 'static> LongListHandler for UserListHandler<W> {
         }
     }
 
-    fn on_enter(&mut self, _index: usize) -> OnEnterResult {
-        // TODO: Open the update/delete popup
-        /*let inner_guard = self.controller.inner.borrow();
+    fn on_enter(&mut self, index: usize) -> OnEnterResult {
+        let inner_guard = self.controller.inner.borrow();
         let inner = inner_guard.deref();
 
-        let popup = CloseSocketPopup::new(
+        let popup = UpdateUserPopup::new(
             Rc::clone(&inner.base.base.redraw_notify),
             Weak::clone(&self.controller.manager),
-            self.users_filtered[index],
-            self.controller.socket_type,
-            self.controller.sockets_watch.clone(),
+            self.users_filtered[index].clone(),
+            self.controller.users_watch.clone(),
             self.controller.popup_sender.clone(),
         );
 
-        let _ = self.controller.popup_sender.send(popup.into());*/
+        let _ = self.controller.popup_sender.send(popup.into());
 
         OnEnterResult::Handled
     }

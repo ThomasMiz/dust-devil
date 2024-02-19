@@ -198,7 +198,7 @@ async fn add_socket_task<W: AsyncWrite + Unpin + 'static>(controller: Weak<Contr
             SERVER_ADD_ERROR_MESSAGE.into(),
             BIG_ERROR_POPUP_WIDTH,
             Padded::new(
-                Padding::new(0, 0, 0, 1),
+                Padding::new(1, 1, 0, 1),
                 Text::new(error.to_string().into(), Style::new(), Alignment::Center),
             ),
         )
