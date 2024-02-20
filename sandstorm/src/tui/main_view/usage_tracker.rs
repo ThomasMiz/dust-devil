@@ -60,7 +60,7 @@ impl UsageTracker {
             history_by_second,
             history_start_timestamp: timestamp_now,
             history_by_unit: VecDeque::new(),
-            history_by_unit_start_timestamp: timestamp_now,
+            history_by_unit_start_timestamp: 0,
             unit_size_seconds: 1,
         }
     }
@@ -98,13 +98,14 @@ impl UsageTracker {
             let mut history_by_unit_end_timestamp =
                 (history_end_timestamp + self.unit_size_seconds - 1) / self.unit_size_seconds * self.unit_size_seconds;
 
-            while history_by_unit_end_timestamp < history_end_timestamp {
+            let history_by_unit_len = (history_by_unit_end_timestamp - self.history_by_unit_start_timestamp) / self.unit_size_seconds;
+            for _ in (self.history_by_unit.len() as i64)..history_by_unit_len {
                 history_by_unit_end_timestamp += self.unit_size_seconds;
                 self.history_by_unit.push_back(UsageMeasure::zero());
             }
 
             let timestamp_index = (timestamp - self.history_by_unit_start_timestamp) / self.unit_size_seconds;
-            let measure = &mut self.history_by_second[timestamp_index as usize];
+            let measure = &mut self.history_by_unit[timestamp_index as usize];
             measure.sent += bytes_sent;
             measure.received += bytes_received;
         }

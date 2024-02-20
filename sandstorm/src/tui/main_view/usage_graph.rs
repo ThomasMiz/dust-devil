@@ -110,7 +110,7 @@ impl UIElement for UsageGraph {
         let mut inner_guard = self.controller.inner.borrow_mut();
         let inner = inner_guard.deref_mut();
 
-        let history_vec = inner.history.get_usage_by_unit(1);
+        let history_vec = inner.history.get_usage_by_unit(3);
         let record_count = history_vec.len().min(area.width as usize);
         let max = history_vec.iter().rev().take(record_count).map(|m| m.sum()).max().unwrap_or(0);
         if max == 0 {
