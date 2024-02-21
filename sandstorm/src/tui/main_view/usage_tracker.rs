@@ -46,7 +46,7 @@ pub struct UsageTracker {
     history_start_timestamp: i64,
     history_by_unit: VecDeque<UsageMeasure>,
     history_by_unit_start_timestamp: i64,
-    unit_size_seconds: i64,
+    unit_size_seconds: u32,
 }
 
 impl UsageTracker {
@@ -89,35 +89,36 @@ impl UsageTracker {
         measure.received += bytes_received;
 
         if !self.history_by_unit.is_empty() {
-            while self.history_by_unit_start_timestamp + self.unit_size_seconds <= self.history_start_timestamp {
-                self.history_by_unit_start_timestamp += self.unit_size_seconds;
+            let unit_size_seconds = self.unit_size_seconds as i64;
+            while self.history_by_unit_start_timestamp + unit_size_seconds <= self.history_start_timestamp {
+                self.history_by_unit_start_timestamp += unit_size_seconds;
                 self.history_by_unit.pop_front();
             }
 
             let history_end_timestamp = self.history_start_timestamp + self.history_by_second.len() as i64;
-            let mut history_by_unit_end_timestamp =
-                (history_end_timestamp + self.unit_size_seconds - 1) / self.unit_size_seconds * self.unit_size_seconds;
+            let mut history_by_unit_end_timestamp = (history_end_timestamp + unit_size_seconds - 1) / unit_size_seconds * unit_size_seconds;
 
-            let history_by_unit_len = (history_by_unit_end_timestamp - self.history_by_unit_start_timestamp) / self.unit_size_seconds;
+            let history_by_unit_len = (history_by_unit_end_timestamp - self.history_by_unit_start_timestamp) / unit_size_seconds;
             for _ in (self.history_by_unit.len() as i64)..history_by_unit_len {
-                history_by_unit_end_timestamp += self.unit_size_seconds;
+                history_by_unit_end_timestamp += unit_size_seconds;
                 self.history_by_unit.push_back(UsageMeasure::zero());
             }
 
-            let timestamp_index = (timestamp - self.history_by_unit_start_timestamp) / self.unit_size_seconds;
+            let timestamp_index = (timestamp - self.history_by_unit_start_timestamp) / unit_size_seconds;
             let measure = &mut self.history_by_unit[timestamp_index as usize];
             measure.sent += bytes_sent;
             measure.received += bytes_received;
         }
     }
 
-    pub fn set_unit_size(&mut self, unit_size_seconds: i64) {
+    pub fn set_unit_size(&mut self, unit_size_seconds: u32) {
         self.history_by_unit.clear();
         self.unit_size_seconds = unit_size_seconds;
         if self.unit_size_seconds <= 1 {
             return;
         }
 
+        let unit_size_seconds = unit_size_seconds as i64;
         self.history_by_unit_start_timestamp = self.history_start_timestamp / unit_size_seconds * unit_size_seconds;
 
         let history_end_timestamp = self.history_start_timestamp + self.history_by_second.len() as i64;
@@ -139,7 +140,7 @@ impl UsageTracker {
         self.history_start_timestamp + self.history_by_second.len() as i64
     }
 
-    pub fn get_usage_by_unit(&mut self, unit_size_seconds: i64) -> &VecDeque<UsageMeasure> {
+    pub fn get_usage_by_unit(&mut self, unit_size_seconds: u32) -> &VecDeque<UsageMeasure> {
         if unit_size_seconds != self.unit_size_seconds {
             self.set_unit_size(unit_size_seconds);
         }
