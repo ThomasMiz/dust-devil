@@ -89,6 +89,12 @@ impl LogBlock {
     }
 
     pub fn new_stream_event(&mut self, event: logging::Event) {
+        match &event.data {
+            logging::EventData::ClientBytesSent(_, _) => return,
+            logging::EventData::ClientBytesReceived(_, _) => return,
+            _ => {}
+        }
+
         if self.list.handler.event_history.len() >= MAXIMUM_EVENT_HISTORY_LENGTH {
             self.list.handler.event_history.pop_front();
             self.list.on_item_removed(0);
