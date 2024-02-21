@@ -26,7 +26,7 @@ impl MainView {
         let log_block = LogBlock::new(Rc::clone(&redraw_notify));
         let usage_graph = UsageGraph::new(redraw_notify);
 
-        let base = HorizontalSplit::new(log_block, usage_graph, 0, 0);
+        let base = HorizontalSplit::new(log_block, usage_graph, 0, 1);
 
         Self { base }
     }
