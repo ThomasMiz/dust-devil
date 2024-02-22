@@ -14,7 +14,7 @@ use ratatui::{layout::Rect, Frame};
 use tokio::{
     io::AsyncWrite,
     select,
-    sync::{broadcast, mpsc, oneshot, watch, Notify},
+    sync::{broadcast, mpsc, oneshot, Notify},
 };
 
 use crate::{sandstorm::MutexedSandstormRequestManager, utils::futures::recv_many_with_index};
@@ -36,7 +36,6 @@ pub struct UIManager<W: AsyncWrite + Unpin + 'static> {
     buffer_size_watch: broadcast::Sender<u32>,
     users_watch: broadcast::Sender<(UserNotificationType, String, UserRole)>,
     auth_methods_watch: broadcast::Sender<(AuthMethod, bool)>,
-    metrics_watch: watch::Sender<Metrics>,
     root: FocusCell<VerticalSplit<MenuBar<W>, MainView>>,
     popup_receiver: mpsc::UnboundedReceiver<Popup>,
     popups: Vec<Popup>,
@@ -80,7 +79,6 @@ impl<W: AsyncWrite + Unpin + 'static> UIManager<W> {
         let (users_watch, _) = broadcast::channel(32);
         let (auth_methods_watch, _) = broadcast::channel(32);
         let (buffer_size_watch, _) = broadcast::channel(1);
-        let (metrics_watch, _metrics_watch_receiver) = watch::channel(metrics);
         let (popup_sender, popup_receiver) = mpsc::unbounded_channel();
 
         let menu_bar = MenuBar::new(
@@ -93,7 +91,7 @@ impl<W: AsyncWrite + Unpin + 'static> UIManager<W> {
             buffer_size_watch.clone(),
             popup_sender,
         );
-        let main_view = MainView::new(Rc::clone(&redraw_notify));
+        let main_view = MainView::new(Rc::clone(&redraw_notify), metrics);
 
         Self {
             redraw_notify,
@@ -104,7 +102,6 @@ impl<W: AsyncWrite + Unpin + 'static> UIManager<W> {
             users_watch,
             auth_methods_watch,
             buffer_size_watch,
-            metrics_watch,
             root: FocusCell::new(VerticalSplit::new(menu_bar, main_view, 2, 0)),
             popup_receiver,
             popups: Vec::new(),
@@ -162,38 +159,6 @@ impl<W: AsyncWrite + Unpin + 'static> UIManager<W> {
 
     pub fn handle_stream_event(&mut self, event: logging::Event) {
         match &event.data {
-            EventData::NewClientConnectionAccepted(_, _) => {
-                self.metrics_watch.send_modify(|metrics| {
-                    metrics.current_client_connections += 1;
-                    metrics.historic_client_connections += 1;
-                });
-            }
-            EventData::ClientConnectionFinished(_, _, _, _) => {
-                self.metrics_watch.send_modify(|metrics| {
-                    metrics.current_client_connections -= 1;
-                });
-            }
-            EventData::ClientBytesSent(_, count) => {
-                self.metrics_watch.send_modify(|metrics| {
-                    metrics.client_bytes_sent += count;
-                });
-            }
-            EventData::ClientBytesReceived(_, count) => {
-                self.metrics_watch.send_modify(|metrics| {
-                    metrics.client_bytes_received += count;
-                });
-            }
-            EventData::NewSandstormConnectionAccepted(_, _) => {
-                self.metrics_watch.send_modify(|metrics| {
-                    metrics.current_sandstorm_connections += 1;
-                    metrics.historic_sandstorm_connections += 1;
-                });
-            }
-            EventData::SandstormConnectionFinished(_, _) => {
-                self.metrics_watch.send_modify(|metrics| {
-                    metrics.current_sandstorm_connections -= 1;
-                });
-            }
             EventData::NewSocks5Socket(socket_address) => {
                 let _ = self.socks5_sockets_watch.send((*socket_address, true));
             }

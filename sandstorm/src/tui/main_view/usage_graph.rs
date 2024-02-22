@@ -27,8 +27,11 @@ use super::{
     GraphPrecisionOption,
 };
 
+pub const MIN_WIDTH: u16 = 16;
+pub const MIN_HEIGHT: u16 = 7;
+
 /// The amount of usage history stored, in seconds.
-pub const MAX_HISTORY_SECONDS: usize = 60 * 60 * 6; // 6 hours
+const MAX_HISTORY_SECONDS: usize = 60 * 60 * 6; // 6 hours
 
 const BLOCK_CHAR: char = '█';
 const HALF_BLOCK_CHAR: char = '▄';
@@ -38,7 +41,7 @@ const MARKER_ZERO: &str = "0B/s";
 
 /// The width of the area where the vertical axis' labels are located. This includes enough for a
 /// label (eg. "80.5MB/s") plus an additional space (right after which the vertical axis is drawn).
-const VERTICAL_LABELS_AREA_WIDTH: u16 = 9;
+pub const VERTICAL_LABELS_AREA_WIDTH: u16 = 9;
 
 const VERTICAL_CHAR: char = '│';
 const HORIZONTAL_CHAR: char = '─';
@@ -85,7 +88,7 @@ pub struct Controller {
 
 impl Controller {
     fn new(redraw_notify: Rc<Notify>) -> Self {
-        let precision_option = GraphPrecisionOption::OneSecond;
+        let precision_option = GraphPrecisionOption::default();
         let (unit_size_seconds, _, _, _) = precision_option.get_values();
 
         let inner = RefCell::new(ControllerInner {
@@ -216,7 +219,7 @@ fn write_timestamp_to_string(string: &mut String, timestamp: i64, utc_offset: Ut
 
 impl HorizontalAxis {
     fn new() -> Self {
-        let precision_option = GraphPrecisionOption::OneSecond;
+        let precision_option = GraphPrecisionOption::default();
         let (unit_size_seconds, labels_on_multiples_of, markers_on_multiples_of, print_seconds) = precision_option.get_values();
 
         Self {
