@@ -54,6 +54,15 @@ impl<H: ButtonHandler> CenteredButton<H> {
         }
     }
 
+    pub fn set_text_no_redraw(&mut self, text: StaticString) {
+        self.text_len_chars = text.deref().chars().count().min(u16::MAX as usize) as u16;
+        self.text = text;
+    }
+
+    pub fn set_shortcut(&mut self, shortcut_key: Option<char>) {
+        self.shortcut_key = shortcut_key;
+    }
+
     fn get_focus_position(&self) -> (u16, u16) {
         self.current_position
     }

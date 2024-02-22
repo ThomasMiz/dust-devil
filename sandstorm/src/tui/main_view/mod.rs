@@ -1,4 +1,4 @@
-use std::rc::Rc;
+use std::{cell::RefCell, rc::Rc};
 
 use crossterm::event;
 use dust_devil_core::{logging, sandstorm::Metrics};
@@ -36,8 +36,7 @@ const EXPAND_GRAPH_SHORTCUT: Option<char> = Some('g');
 const RETURN_TO_MAIN_VIEW_LABEL: &str = "[return to main view (q)]";
 const RETURN_TO_MAIN_VIEW_SHORTCUT: Option<char> = Some('q');
 const GRAPH_PRECISION_LABEL: &str = "Graph precision:";
-const PRECISION_SELECTOR_AFTER_TEXT: &str = "[change (p)]";
-const PRECISION_SELECTOR_SHORTCUT_KEY: char = 'p';
+const PRECISION_SELECTOR_AFTER_TEXT: &str = "[change (1/2/3...9)]";
 
 const SELECTED_BACKGROUND_COLOR: Color = Color::DarkGray;
 
@@ -114,18 +113,19 @@ impl GraphPrecisionOption {
 }
 
 pub struct MainView {
-    current_area: Rect,
     log_block: LogBlock,
     log_block_area: Rect,
     usage_graph: UsageGraph,
     usage_graph_area: Rect,
     metrics_display: MetricsDisplay,
     metrics_display_area: Rect,
-    client_activity_line: HorizontalSplit<TextLine, CenteredButton<StuffHandler>>,
+    client_activity_line: HorizontalSplit<TextLine, CenteredButton<ExpandButtonHandler>>,
     client_activity_line_area: Rect,
-    graph_precision_line: HorizontalSplit<TextLine, ArrowSelector<StuffHandler>>,
+    graph_precision_line: HorizontalSplit<TextLine, ArrowSelector<PrecisionSelectorHandler>>,
     graph_precision_line_area: Rect,
+    controller: Rc<Controller>,
     layout_mode: LayoutMode,
+    is_focused: bool,
     focused_element: FocusedElement,
 }
 
@@ -133,6 +133,7 @@ pub struct MainView {
 enum LayoutMode {
     Full,
     LogsOnly,
+    GraphExpanded,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -155,6 +156,11 @@ impl FocusedElement {
                 Self::ExpandButton => true,
                 Self::PrecisionSelector => false,
             },
+            LayoutMode::GraphExpanded => match self {
+                Self::LogBlock => false,
+                Self::ExpandButton => true,
+                Self::PrecisionSelector => true,
+            },
         }
     }
 
@@ -167,6 +173,9 @@ impl FocusedElement {
             LayoutMode::LogsOnly => match self {
                 Self::LogBlock | Self::PrecisionSelector => Some(Self::ExpandButton),
                 Self::ExpandButton => None,
+            },
+            LayoutMode::GraphExpanded => match self {
+                Self::LogBlock | Self::ExpandButton | Self::PrecisionSelector => None,
             },
         }
     }
@@ -181,6 +190,9 @@ impl FocusedElement {
                 Self::LogBlock => None,
                 Self::ExpandButton | Self::PrecisionSelector => Some(Self::LogBlock),
             },
+            LayoutMode::GraphExpanded => match self {
+                Self::LogBlock | Self::ExpandButton | Self::PrecisionSelector => None,
+            },
         }
     }
 
@@ -193,6 +205,10 @@ impl FocusedElement {
             LayoutMode::LogsOnly => match self {
                 Self::LogBlock | Self::ExpandButton | Self::PrecisionSelector => None,
             },
+            LayoutMode::GraphExpanded => match self {
+                Self::LogBlock | Self::ExpandButton => None,
+                Self::PrecisionSelector => Some(Self::ExpandButton),
+            },
         }
     }
 
@@ -204,6 +220,10 @@ impl FocusedElement {
             },
             LayoutMode::LogsOnly => match self {
                 Self::LogBlock | Self::ExpandButton | Self::PrecisionSelector => None,
+            },
+            LayoutMode::GraphExpanded => match self {
+                Self::LogBlock | Self::PrecisionSelector => None,
+                Self::ExpandButton => Some(Self::PrecisionSelector),
             },
         }
     }
@@ -219,30 +239,80 @@ impl FocusedElement {
                 Self::LogBlock => None,
                 Self::ExpandButton | Self::PrecisionSelector => Some(Self::LogBlock),
             },
+            LayoutMode::GraphExpanded => match self {
+                Self::LogBlock | Self::PrecisionSelector => None,
+                Self::ExpandButton => Some(Self::PrecisionSelector),
+            },
         }
     }
 }
 
-struct StuffHandler {}
+struct ControllerInner {
+    expanded: bool,
+}
 
-impl StuffHandler {
-    fn new() -> Self {
-        Self {}
+struct Controller {
+    redraw_notify: Rc<Notify>,
+    inner: RefCell<ControllerInner>,
+}
+
+impl Controller {
+    fn new(redraw_notify: Rc<Notify>) -> Self {
+        let inner = RefCell::new(ControllerInner { expanded: false });
+
+        Self { redraw_notify, inner }
+    }
+
+    fn toggle_expanded(&self) {
+        let mut inner = self.inner.borrow_mut();
+        inner.expanded = !inner.expanded;
+        self.redraw_notify.notify_one();
     }
 }
 
-impl ButtonHandler for StuffHandler {
+struct ExpandButtonHandler {
+    controller: Rc<Controller>,
+}
+
+impl ExpandButtonHandler {
+    fn new(controller: Rc<Controller>) -> Self {
+        Self { controller }
+    }
+}
+
+impl ButtonHandler for ExpandButtonHandler {
     fn on_pressed(&mut self) -> OnEnterResult {
-        OnEnterResult::Unhandled
+        self.controller.toggle_expanded();
+        OnEnterResult::Handled
     }
 }
 
-impl ArrowSelectorHandler for StuffHandler {
-    fn selection_changed(&mut self, selected_index: usize) {}
+struct PrecisionSelectorHandler {
+    redraw_notify: Rc<Notify>,
+    usage_graph_controller: Rc<usage_graph::Controller>,
+}
+
+impl PrecisionSelectorHandler {
+    fn new(redraw_notify: Rc<Notify>, usage_graph_controller: Rc<usage_graph::Controller>) -> Self {
+        Self {
+            redraw_notify,
+            usage_graph_controller,
+        }
+    }
+}
+
+impl ArrowSelectorHandler for PrecisionSelectorHandler {
+    fn selection_changed(&mut self, selected_index: usize) {
+        let precision_option = GraphPrecisionOption::from_index(selected_index as u8).unwrap();
+        self.usage_graph_controller.set_precision(precision_option);
+        self.redraw_notify.notify_one();
+    }
 }
 
 impl MainView {
     pub fn new(redraw_notify: Rc<Notify>, metrics: Metrics) -> Self {
+        let controller = Rc::new(Controller::new(Rc::clone(&redraw_notify)));
+
         let log_block = LogBlock::new(Rc::clone(&redraw_notify));
         let usage_graph = UsageGraph::new(Rc::clone(&redraw_notify));
         let metrics_display = MetricsDisplay::new(Rc::clone(&redraw_notify), metrics);
@@ -257,15 +327,19 @@ impl MainView {
             text_style,
             selected_text_style,
             EXPAND_GRAPH_SHORTCUT,
-            StuffHandler::new(),
+            ExpandButtonHandler::new(Rc::clone(&controller)),
         );
 
         let client_activity_line = HorizontalSplit::new(client_activity_label, expand_graph_button, CLIENT_ACTIVITY_LABEL.len() as u16, 1);
 
         let graph_precision_label = TextLine::new(GRAPH_PRECISION_LABEL.into(), text_style, Alignment::Left);
+        let options_iter = ALL_GRAPH_PRECISION_OPTIONS.iter();
+        let mut options_keys = '1'..='9';
+        let options_iter = options_iter.map(|x| (x.to_str().into(), options_keys.next()));
+
         let graph_precision_selector = ArrowSelector::new(
             Rc::clone(&redraw_notify),
-            ALL_GRAPH_PRECISION_OPTIONS.iter().map(|x| (x.to_str().into(), None)).collect(),
+            options_iter.collect(),
             0,
             text_style,
             selected_text_style,
@@ -273,7 +347,7 @@ impl MainView {
             selected_text_style,
             PRECISION_SELECTOR_AFTER_TEXT.into(),
             false,
-            StuffHandler::new(),
+            PrecisionSelectorHandler::new(redraw_notify, usage_graph.controller()),
         );
 
         let graph_precision_line = HorizontalSplit::new(
@@ -284,7 +358,6 @@ impl MainView {
         );
 
         Self {
-            current_area: Rect::default(),
             log_block,
             log_block_area: Rect::default(),
             usage_graph,
@@ -295,7 +368,9 @@ impl MainView {
             client_activity_line_area: Rect::default(),
             graph_precision_line,
             graph_precision_line_area: Rect::default(),
+            controller,
             layout_mode: LayoutMode::Full,
+            is_focused: false,
             focused_element: FocusedElement::LogBlock,
         }
     }
@@ -331,10 +406,6 @@ impl MainView {
     /// Lays out the elements and sets their areas to their respective `_area` variables. Empty
     /// rectangles indicate the element is not to be rendered.
     fn distribute_areas(&mut self, area: Rect) {
-        if area == self.current_area {
-            return;
-        }
-
         self.log_block_area = Rect::default();
         self.usage_graph_area = Rect::default();
         self.metrics_display_area = Rect::default();
@@ -342,6 +413,7 @@ impl MainView {
         self.graph_precision_line_area = Rect::default();
 
         if area.is_empty() {
+            self.layout_mode = LayoutMode::Full;
             return;
         }
 
@@ -411,11 +483,41 @@ impl MainView {
             self.layout_mode = LayoutMode::Full;
         }
     }
-}
 
-impl UIElement for MainView {
-    fn resize(&mut self, area: Rect) {
-        self.distribute_areas(area);
+    fn distribute_areas_expanded(&mut self, area: Rect) {
+        self.log_block_area = Rect::default();
+        self.usage_graph_area = Rect::default();
+        self.metrics_display_area = Rect::default();
+        self.client_activity_line_area = Rect::default();
+        self.graph_precision_line_area = Rect::default();
+
+        self.layout_mode = LayoutMode::GraphExpanded;
+
+        if area.height == 0 || area.width < usage_graph::VERTICAL_LABELS_AREA_WIDTH + 4 {
+            return;
+        }
+
+        // Apply horizontal padding, 1 on each side
+        let area = Rect::new(area.x + 1, area.y, area.width - 2, area.height);
+
+        let mut top_line = Rect::new(area.x, area.y, area.width, 1);
+
+        let (client_activity_line_width, _) = self.client_activity_line.begin_resize(top_line.width, 1);
+        let client_activity_line_width = top_line.width.min(client_activity_line_width);
+        self.client_activity_line_area = Rect::new(top_line.x, top_line.y, client_activity_line_width, 1);
+
+        top_line.x += client_activity_line_width + 3;
+        top_line.width = top_line.width.saturating_sub(client_activity_line_width + 3);
+        self.graph_precision_line_area = top_line;
+
+        self.usage_graph_area = Rect::new(area.x, area.y + 2, area.width, area.height.saturating_sub(2));
+    }
+
+    fn perform_resize(&mut self, area: Rect, expanded: bool) {
+        match expanded {
+            true => self.distribute_areas_expanded(area),
+            false => self.distribute_areas(area),
+        }
 
         if !self.log_block_area.is_empty() {
             self.log_block.resize(self.log_block_area);
@@ -437,13 +539,34 @@ impl UIElement for MainView {
             self.graph_precision_line.resize(self.graph_precision_line_area);
         }
 
-        if !self.focused_element.is_visible_in(self.layout_mode) {
+        if self.is_focused && !self.focused_element.is_visible_in(self.layout_mode) {
             self.focus_lost();
             self.receive_focus((0, 0));
         }
     }
+}
 
-    fn render(&mut self, _area: Rect, frame: &mut Frame) {
+impl UIElement for MainView {
+    fn resize(&mut self, area: Rect) {
+        let expanded = self.controller.inner.borrow().expanded;
+        self.perform_resize(area, expanded)
+    }
+
+    fn render(&mut self, area: Rect, frame: &mut Frame) {
+        let expanded = self.controller.inner.borrow().expanded;
+        let is_layout_expanded = self.layout_mode == LayoutMode::GraphExpanded;
+        if expanded != is_layout_expanded {
+            if expanded {
+                self.client_activity_line.right.set_text_no_redraw(RETURN_TO_MAIN_VIEW_LABEL.into());
+                self.client_activity_line.right.set_shortcut(RETURN_TO_MAIN_VIEW_SHORTCUT);
+            } else {
+                self.client_activity_line.right.set_text_no_redraw(EXPAND_GRAPH_LABEL.into());
+                self.client_activity_line.right.set_shortcut(EXPAND_GRAPH_SHORTCUT);
+            }
+
+            self.perform_resize(area, expanded);
+        }
+
         if !self.log_block_area.is_empty() {
             self.log_block.render(self.log_block_area, frame);
         }
@@ -458,6 +581,13 @@ impl UIElement for MainView {
 
         if !self.client_activity_line_area.is_empty() {
             self.client_activity_line.render(self.client_activity_line_area, frame);
+            if expanded {
+                let x = self.client_activity_line_area.right() + 1;
+                if x < area.right() {
+                    let y = self.client_activity_line_area.y;
+                    frame.buffer_mut().get_mut(x, y).set_char('|');
+                }
+            }
         }
 
         if !self.graph_precision_line_area.is_empty() {
@@ -522,6 +652,7 @@ impl UIElement for MainView {
     }
 
     fn receive_focus(&mut self, focus_position: (u16, u16)) -> bool {
+        self.is_focused = true;
         let mut receive_order = [FocusedElement::LogBlock; 3];
 
         let receive_order_count = match self.layout_mode {
@@ -551,6 +682,15 @@ impl UIElement for MainView {
 
                 2
             }
+            LayoutMode::GraphExpanded => {
+                let return_button_first = focus_position.0 < self.client_activity_line_area.right() + 2;
+                (receive_order[0], receive_order[1]) = match return_button_first {
+                    true => (FocusedElement::ExpandButton, FocusedElement::PrecisionSelector),
+                    false => (FocusedElement::PrecisionSelector, FocusedElement::ExpandButton),
+                };
+
+                2
+            }
         };
 
         for ele in receive_order[0..receive_order_count].iter() {
@@ -566,10 +706,12 @@ impl UIElement for MainView {
             }
         }
 
+        self.is_focused = false;
         false
     }
 
     fn focus_lost(&mut self) {
+        self.is_focused = false;
         match self.focused_element {
             FocusedElement::LogBlock => self.log_block.focus_lost(),
             FocusedElement::ExpandButton => self.client_activity_line.focus_lost(),

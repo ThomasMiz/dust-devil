@@ -366,7 +366,7 @@ impl HorizontalAxis {
             if width != 0 {
                 buf.set_stringn(label_x + 1, y, label, width, LABEL_STYLE);
             }
-            label_x -= label_spacing;
+            label_x = label_x.saturating_sub(label_spacing);
         }
     }
 }
