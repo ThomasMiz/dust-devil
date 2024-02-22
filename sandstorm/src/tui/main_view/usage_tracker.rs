@@ -137,7 +137,7 @@ impl UsageTracker {
     }
 
     pub fn get_latest_timestamp(&self) -> i64 {
-        self.history_start_timestamp + self.history_by_second.len() as i64
+        self.history_start_timestamp + self.history_by_second.len().saturating_sub(1) as i64
     }
 
     pub fn get_usage_by_unit(&mut self, unit_size_seconds: u32) -> &VecDeque<UsageMeasure> {

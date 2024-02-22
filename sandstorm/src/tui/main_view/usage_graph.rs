@@ -22,26 +22,49 @@ use crate::tui::{
     ui_element::{HandleEventStatus, UIElement},
 };
 
-use super::usage_tracker::{UsageMeasure, UsageTracker};
+use super::{
+    usage_tracker::{UsageMeasure, UsageTracker},
+    GraphPrecisionOption,
+};
 
+/// The amount of usage history stored, in seconds.
 pub const MAX_HISTORY_SECONDS: usize = 60 * 60 * 6; // 6 hours
 
 const BLOCK_CHAR: char = '█';
 const HALF_BLOCK_CHAR: char = '▄';
 
+/// The string for the vertical axis marker at the bottom.
 const MARKER_ZERO: &str = "0B/s";
 
+/// The width of the area where the vertical axis' labels are located. This includes enough for a
+/// label (eg. "80.5MB/s") plus an additional space (right after which the vertical axis is drawn).
 const VERTICAL_LABELS_AREA_WIDTH: u16 = 9;
+
 const VERTICAL_CHAR: char = '│';
 const HORIZONTAL_CHAR: char = '─';
 const CROSS_CHAR: char = '┼';
 
+/// The style used for rendering both the vertical and horizontal labels.
 const LABEL_STYLE: Style = Style::new();
+/// The style used for rendering both the vertical and horizontal axis.
 const AXIS_STYLE: Style = Style::new();
 
+/// The color used for the send bar part of the graph.
 const SEND_COLOR: Color = Color::LightGreen;
+// The color used for the receive bar part of the graph.
 const RECEIVE_COLOR: Color = Color::LightBlue;
 
+/// The frequency with which the background ticker runs. This background ticker will periodically
+/// check the current time, and move the graph forward if needed. If the server is constantly
+/// sending events to the graph then this will not be necessary, but we also need something to
+/// ensure the graph moves forward even when nothing is happening.
+///
+/// Note: The reason why this is a small amount and not exactly one second is because there's an
+/// easy way to "tick once every second", but not a way to "tick at the start of every second".
+const GRAPH_TICK_PERIOD_MILLIS: u64 = 100;
+
+/// Rounds the provided value upwards. Used to determine the graph's vertical scale based on the
+/// maximum measure to display. Returns 0 when passed 0.
 fn pretty_round_max_bytes_value(max: u64) -> u64 {
     match max {
         0 => 0,
@@ -51,19 +74,34 @@ fn pretty_round_max_bytes_value(max: u64) -> u64 {
 
 struct ControllerInner {
     history: UsageTracker,
+    precision_option: GraphPrecisionOption,
+    unit_size_seconds: u32,
 }
 
-struct Controller {
+pub struct Controller {
     inner: RefCell<ControllerInner>,
     redraw_notify: Rc<Notify>,
 }
 
 impl Controller {
     fn new(redraw_notify: Rc<Notify>) -> Self {
-        let history = UsageTracker::new(MAX_HISTORY_SECONDS);
-        let inner = RefCell::new(ControllerInner { history });
+        let precision_option = GraphPrecisionOption::OneSecond;
+        let (unit_size_seconds, _, _, _) = precision_option.get_values();
+
+        let inner = RefCell::new(ControllerInner {
+            history: UsageTracker::new(MAX_HISTORY_SECONDS),
+            precision_option,
+            unit_size_seconds,
+        });
 
         Self { inner, redraw_notify }
+    }
+
+    pub fn set_precision(&self, precision_option: GraphPrecisionOption) {
+        let mut inner = self.inner.borrow_mut();
+        let (unit_size_seconds, _, _, _) = precision_option.get_values();
+        inner.precision_option = precision_option;
+        inner.unit_size_seconds = unit_size_seconds;
     }
 }
 
@@ -154,6 +192,7 @@ impl VerticalAxis {
 
 struct HorizontalAxis {
     utc_offset: UtcOffset,
+    precision_option: GraphPrecisionOption,
     unit_size_seconds: u32,
     labels_on_multiples_of: u32,
     markers_on_multiples_of: u32,
@@ -177,12 +216,16 @@ fn write_timestamp_to_string(string: &mut String, timestamp: i64, utc_offset: Ut
 
 impl HorizontalAxis {
     fn new() -> Self {
+        let precision_option = GraphPrecisionOption::OneSecond;
+        let (unit_size_seconds, labels_on_multiples_of, markers_on_multiples_of, print_seconds) = precision_option.get_values();
+
         Self {
             utc_offset: UtcOffset::current_local_offset().unwrap_or(UtcOffset::UTC),
-            unit_size_seconds: 0,
-            labels_on_multiples_of: 0,
-            markers_on_multiples_of: 0,
-            print_seconds: false,
+            precision_option,
+            unit_size_seconds,
+            labels_on_multiples_of,
+            markers_on_multiples_of,
+            print_seconds,
             label_strings: VecDeque::with_capacity(16),
             latest_label_timestamp: 0,
             string_recycle_bin: None,
@@ -193,57 +236,68 @@ impl HorizontalAxis {
         self.string_recycle_bin.take().unwrap_or_default()
     }
 
-    fn recalculate_if_needed(&mut self, unit_size_seconds: u32, latest_timestamp: i64) {
-        if self.unit_size_seconds == unit_size_seconds {
+    fn recycle_string(&mut self, s: Option<String>) {
+        if self.string_recycle_bin.is_none() {
+            self.string_recycle_bin = s;
+        }
+    }
+
+    fn recalculate_if_needed(&mut self, precision_option: GraphPrecisionOption, latest_timestamp: i64) {
+        if self.precision_option == precision_option {
             return;
         }
 
-        //self.unit_size_seconds = unit_size_seconds;
-        // TODO: Properly set unit_size_seconds and choose the following values based on it
-        self.unit_size_seconds = 1;
-        self.labels_on_multiples_of = 15;
-        self.markers_on_multiples_of = 5;
-        self.print_seconds = true;
+        let (unit_size_seconds, labels_on_multiples_of, markers_on_multiples_of, print_seconds) = precision_option.get_values();
+        self.precision_option = precision_option;
+        self.unit_size_seconds = unit_size_seconds;
+        self.labels_on_multiples_of = labels_on_multiples_of;
+        self.markers_on_multiples_of = markers_on_multiples_of;
+        self.print_seconds = print_seconds;
 
-        let labels_on_multiples_of = self.labels_on_multiples_of as i64;
-        let latest_label_timestamp = latest_timestamp / labels_on_multiples_of * labels_on_multiples_of;
+        let labels_on_multiples_of = labels_on_multiples_of as i64;
+        self.latest_label_timestamp = latest_timestamp / labels_on_multiples_of * labels_on_multiples_of;
 
         let mut deque_index = self.label_strings.len();
-        if self.label_strings.is_empty() {
-            self.latest_label_timestamp = latest_label_timestamp;
-            let mut s = self.get_new_string();
-            write_timestamp_to_string(&mut s, latest_label_timestamp, self.utc_offset, self.print_seconds);
-            self.label_strings.push_back(s);
-        }
-
-        let mut label_timestamp = latest_label_timestamp;
+        let mut label_timestamp = self.latest_label_timestamp;
         while deque_index > 0 {
             deque_index -= 1;
-            label_timestamp -= labels_on_multiples_of;
             let s = &mut self.label_strings[deque_index];
             write_timestamp_to_string(s, label_timestamp, self.utc_offset, self.print_seconds);
+            label_timestamp -= labels_on_multiples_of;
         }
     }
 
     fn ensure_has_labels(&mut self, oldest_label_timestamp: i64, latest_label_timestamp: i64) {
         let labels_on_multiples_of = self.labels_on_multiples_of as i64;
 
+        if !self.label_strings.is_empty() {
+            let len_minus_one = self.label_strings.len() as i64 - 1;
+            let mut current_oldest_label_timestamp = self.latest_label_timestamp - len_minus_one * labels_on_multiples_of;
+
+            // Remove any label strings too old
+            while current_oldest_label_timestamp < oldest_label_timestamp {
+                let s = self.label_strings.pop_front();
+                self.recycle_string(s);
+                current_oldest_label_timestamp += labels_on_multiples_of;
+            }
+
+            // Remove any label strings too new
+            while self.latest_label_timestamp > latest_label_timestamp {
+                let s = self.label_strings.pop_back();
+                self.recycle_string(s);
+                self.latest_label_timestamp -= labels_on_multiples_of;
+            }
+        }
+
+        if self.label_strings.is_empty() {
+            self.latest_label_timestamp = latest_label_timestamp;
+            let mut s = self.get_new_string();
+            write_timestamp_to_string(&mut s, self.latest_label_timestamp, self.utc_offset, self.print_seconds);
+            self.label_strings.push_back(s);
+        }
+
         let len_minus_one = self.label_strings.len() as i64 - 1;
         let mut current_oldest_label_timestamp = self.latest_label_timestamp - len_minus_one * labels_on_multiples_of;
-
-        // Remove any label strings too old
-        while current_oldest_label_timestamp < oldest_label_timestamp {
-            let s = self.label_strings.pop_front();
-            self.string_recycle_bin = self.string_recycle_bin.take().or(s);
-            current_oldest_label_timestamp += labels_on_multiples_of;
-        }
-
-        // Remove any label strings too new
-        while self.latest_label_timestamp > latest_label_timestamp {
-            let s = self.label_strings.pop_back();
-            self.string_recycle_bin = self.string_recycle_bin.take().or(s);
-            current_oldest_label_timestamp -= labels_on_multiples_of;
-        }
 
         // Add any missing old label strings
         while current_oldest_label_timestamp > oldest_label_timestamp {
@@ -262,38 +316,39 @@ impl HorizontalAxis {
         }
     }
 
-    fn render(&mut self, latest_timestamp: i64, unit_size_seconds: u32, area: Rect, buf: &mut Buffer) {
-        self.recalculate_if_needed(unit_size_seconds, latest_timestamp);
+    fn render(&mut self, latest_timestamp: i64, precision_option: GraphPrecisionOption, area: Rect, buf: &mut Buffer) {
+        self.recalculate_if_needed(precision_option, latest_timestamp);
 
-        let unit_size_seconds = unit_size_seconds as i64;
+        let unit_size_seconds = self.unit_size_seconds as i64;
         let labels_on_multiples_of = self.labels_on_multiples_of as i64;
         let markers_on_multiples_of = self.markers_on_multiples_of as i64;
 
-        let mut content_i = buf.index_of(area.right() - 1, area.y);
-        let ch = match latest_timestamp % markers_on_multiples_of {
+        let penultimate_char_timestamp = (latest_timestamp - unit_size_seconds) / unit_size_seconds * unit_size_seconds;
+        let oldest_char_timestamp = penultimate_char_timestamp - (area.width as i64 - 11) * unit_size_seconds;
+
+        let content_i = buf.index_of(area.right() - 1, area.y);
+        let ch = match (penultimate_char_timestamp + unit_size_seconds) % markers_on_multiples_of {
             0 => CROSS_CHAR,
             _ => HORIZONTAL_CHAR,
         };
         buf.content[content_i].set_char(ch).set_style(AXIS_STYLE);
 
-        let mut timestamp_i = (latest_timestamp - 1) / unit_size_seconds * unit_size_seconds;
-        for _ in 0..(area.width - 11) {
+        let mut timestamp_i = penultimate_char_timestamp;
+        for cell in buf.content[..content_i].iter_mut().rev().take(area.width as usize - 11) {
             let ch = match timestamp_i % markers_on_multiples_of {
                 0 => CROSS_CHAR,
                 _ => HORIZONTAL_CHAR,
             };
             timestamp_i -= unit_size_seconds;
-
-            content_i -= 1;
-            buf.content[content_i].set_char(ch).set_style(AXIS_STYLE);
+            cell.set_char(ch).set_style(AXIS_STYLE);
         }
 
-        let oldest_char_timestamp = latest_timestamp - (area.width as i64 - 10) * unit_size_seconds;
         let oldest_label_timestamp = (oldest_char_timestamp + labels_on_multiples_of - 1) / labels_on_multiples_of * labels_on_multiples_of;
         let latest_label_timestamp = latest_timestamp / labels_on_multiples_of * labels_on_multiples_of;
         self.ensure_has_labels(oldest_label_timestamp, latest_label_timestamp);
 
-        let latest_label_x = area.right() - 1 - (latest_timestamp - latest_label_timestamp) as u16;
+        let latest_label_offset = ((latest_timestamp - latest_label_timestamp) / unit_size_seconds) as u16;
+        let latest_label_x = area.right() - 1 - latest_label_offset;
 
         let y = area.y + 1;
         let mut label_x = latest_label_x;
@@ -347,10 +402,14 @@ impl UsageGraph {
         inner.history.record_usage(timestamp, bytes_sent, bytes_received);
         self.controller.redraw_notify.notify_one();
     }
+
+    pub fn controller(&self) -> Rc<Controller> {
+        Rc::clone(&self.controller)
+    }
 }
 
 async fn background_ticker(controller: Weak<Controller>) {
-    let mut interval = tokio::time::interval(Duration::from_secs(1));
+    let mut interval = tokio::time::interval(Duration::from_millis(GRAPH_TICK_PERIOD_MILLIS));
     interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
     loop {
@@ -363,8 +422,10 @@ async fn background_ticker(controller: Weak<Controller>) {
 
         let timestamp_now = time::OffsetDateTime::now_utc().unix_timestamp();
         let mut inner = rc.inner.borrow_mut();
-        inner.history.record_usage(timestamp_now, 0, 0);
-        rc.redraw_notify.notify_one();
+        if timestamp_now > inner.history.get_latest_timestamp() {
+            inner.history.record_usage(timestamp_now, 0, 0);
+            rc.redraw_notify.notify_one();
+        }
     }
 }
 
@@ -427,7 +488,7 @@ fn render_graph_plot(history: &VecDeque<UsageMeasure>, record_count: usize, max:
 
 impl UIElement for UsageGraph {
     fn resize(&mut self, area: Rect) {
-        let (_previous_width, previous_height) = (self.current_area.width, self.current_area.height);
+        let previous_height = self.current_area.height;
         self.current_area = area;
 
         if previous_height != area.height {
@@ -450,7 +511,7 @@ impl UIElement for UsageGraph {
         let mut inner_guard = self.controller.inner.borrow_mut();
         let inner = inner_guard.deref_mut();
 
-        let history = inner.history.get_usage_by_unit(1);
+        let history = inner.history.get_usage_by_unit(inner.unit_size_seconds);
         let record_count = history.len().min(plot_area.width as usize);
         let max = history.iter().rev().take(record_count).map(|m| m.sum()).max().unwrap_or(0);
         let max = pretty_round_max_bytes_value(max);
@@ -462,8 +523,12 @@ impl UIElement for UsageGraph {
         self.vertical_axis.render(max, vertical_axis_area, buf);
 
         let horizontal_axis_area = Rect::new(area.x, area.bottom() - 2, area.width, 2);
-        self.horizontal_aixs
-            .render(inner.history.get_latest_timestamp(), 1, horizontal_axis_area, buf);
+        self.horizontal_aixs.render(
+            inner.history.get_latest_timestamp(),
+            inner.precision_option,
+            horizontal_axis_area,
+            buf,
+        );
     }
 
     fn handle_event(&mut self, _event: &event::Event, _is_focused: bool) -> HandleEventStatus {
