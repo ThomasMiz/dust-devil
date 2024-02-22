@@ -109,6 +109,7 @@ impl Controller {
 
 struct VerticalAxis {
     current_max: u64,
+    current_unit_size_seconds: u32,
     distance_between_markers: u16,
     marker_labels: Vec<String>,
 }
@@ -117,6 +118,7 @@ impl VerticalAxis {
     fn new() -> Self {
         Self {
             current_max: 0,
+            current_unit_size_seconds: 0,
             distance_between_markers: 0,
             marker_labels: Vec::with_capacity(16),
         }
@@ -124,6 +126,7 @@ impl VerticalAxis {
 
     fn resize(&mut self, height: u16) {
         self.current_max = 0;
+        self.current_unit_size_seconds = 0;
 
         self.distance_between_markers = match height.saturating_sub(1) {
             h if h % 3 == 0 => 3,
@@ -145,12 +148,21 @@ impl VerticalAxis {
         }
     }
 
-    fn recalculate_if_needed(&mut self, max: u64, height: u16) {
-        if self.current_max == max {
+    fn recalculate_if_needed(&mut self, max: u64, unit_size_seconds: u32, height: u16) {
+        if self.current_max == max && self.current_unit_size_seconds == unit_size_seconds {
             return;
         }
 
         self.current_max = max;
+        self.current_unit_size_seconds = unit_size_seconds;
+        let unit_size_seconds = unit_size_seconds as u64;
+
+        let unit_char = match unit_size_seconds {
+            1 => 's',
+            60 => 'm',
+            _ => 'u',
+        };
+
         let height = height.saturating_sub(1) as u64;
         if max != 0 {
             let mut marker_height = self.distance_between_markers as u64;
@@ -158,13 +170,13 @@ impl VerticalAxis {
                 let bytes = max * marker_height / height;
                 marker_height += self.distance_between_markers as u64;
                 label.clear();
-                let _ = write!(label, "{}/s", PrettyByteDisplayer(bytes as usize));
+                let _ = write!(label, "{}/{unit_char}", PrettyByteDisplayer(bytes as usize));
             }
         }
     }
 
-    fn render(&mut self, max: u64, area: Rect, buf: &mut Buffer) {
-        self.recalculate_if_needed(max, area.height);
+    fn render(&mut self, max: u64, unit_size_seconds: u32, area: Rect, buf: &mut Buffer) {
+        self.recalculate_if_needed(max, unit_size_seconds, area.height);
 
         let mut y = area.bottom() - 1;
         buf.set_string(area.right() - 3 - MARKER_ZERO.len() as u16, y, MARKER_ZERO, LABEL_STYLE);
@@ -526,7 +538,7 @@ impl UIElement for UsageGraph {
         render_graph_plot(history, record_count, max, plot_area, buf);
 
         let vertical_axis_area = Rect::new(area.x, area.y, VERTICAL_LABELS_AREA_WIDTH + 1, area.height - 1);
-        self.vertical_axis.render(max, vertical_axis_area, buf);
+        self.vertical_axis.render(max, inner.unit_size_seconds, vertical_axis_area, buf);
 
         let horizontal_axis_area = Rect::new(area.x, area.bottom() - 2, area.width, 2);
         self.horizontal_aixs.render(
