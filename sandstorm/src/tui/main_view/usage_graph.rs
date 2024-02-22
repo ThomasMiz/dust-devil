@@ -27,7 +27,6 @@ use super::{
     GraphPrecisionOption,
 };
 
-pub const MIN_WIDTH: u16 = 16;
 pub const MIN_HEIGHT: u16 = 7;
 
 /// The amount of usage history stored, in seconds.

@@ -21,7 +21,7 @@ use super::{
         text::TextLine,
         OnEnterResult,
     },
-    ui_element::{HandleEventStatus, UIElement},
+    ui_element::{HandleEventStatus, PassFocusDirection, UIElement},
 };
 
 mod colored_logs;
@@ -33,6 +33,8 @@ mod usage_tracker;
 const CLIENT_ACTIVITY_LABEL: &str = "Client Activity";
 const EXPAND_GRAPH_LABEL: &str = "[expand graph (g)]";
 const EXPAND_GRAPH_SHORTCUT: Option<char> = Some('g');
+const RETURN_TO_MAIN_VIEW_LABEL: &str = "[return to main view (q)]";
+const RETURN_TO_MAIN_VIEW_SHORTCUT: Option<char> = Some('q');
 const GRAPH_PRECISION_LABEL: &str = "Graph precision:";
 const PRECISION_SELECTOR_AFTER_TEXT: &str = "[change (p)]";
 const PRECISION_SELECTOR_SHORTCUT_KEY: char = 'p';
@@ -123,6 +125,102 @@ pub struct MainView {
     client_activity_line_area: Rect,
     graph_precision_line: HorizontalSplit<TextLine, ArrowSelector<StuffHandler>>,
     graph_precision_line_area: Rect,
+    layout_mode: LayoutMode,
+    focused_element: FocusedElement,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum LayoutMode {
+    Full,
+    LogsOnly,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum FocusedElement {
+    LogBlock,
+    ExpandButton,
+    PrecisionSelector,
+}
+
+impl FocusedElement {
+    fn is_visible_in(self, layout_mode: LayoutMode) -> bool {
+        match layout_mode {
+            LayoutMode::Full => match self {
+                Self::LogBlock => true,
+                Self::ExpandButton => true,
+                Self::PrecisionSelector => true,
+            },
+            LayoutMode::LogsOnly => match self {
+                Self::LogBlock => true,
+                Self::ExpandButton => true,
+                Self::PrecisionSelector => false,
+            },
+        }
+    }
+
+    fn up(self, layout_mode: LayoutMode) -> Option<Self> {
+        match layout_mode {
+            LayoutMode::Full => match self {
+                Self::LogBlock | Self::ExpandButton => None,
+                Self::PrecisionSelector => Some(Self::ExpandButton),
+            },
+            LayoutMode::LogsOnly => match self {
+                Self::LogBlock | Self::PrecisionSelector => Some(Self::ExpandButton),
+                Self::ExpandButton => None,
+            },
+        }
+    }
+
+    fn down(self, layout_mode: LayoutMode) -> Option<Self> {
+        match layout_mode {
+            LayoutMode::Full => match self {
+                Self::LogBlock | Self::PrecisionSelector => None,
+                Self::ExpandButton => Some(Self::PrecisionSelector),
+            },
+            LayoutMode::LogsOnly => match self {
+                Self::LogBlock => None,
+                Self::ExpandButton | Self::PrecisionSelector => Some(Self::LogBlock),
+            },
+        }
+    }
+
+    fn left(self, layout_mode: LayoutMode) -> Option<Self> {
+        match layout_mode {
+            LayoutMode::Full => match self {
+                Self::LogBlock => None,
+                Self::ExpandButton | Self::PrecisionSelector => Some(Self::LogBlock),
+            },
+            LayoutMode::LogsOnly => match self {
+                Self::LogBlock | Self::ExpandButton | Self::PrecisionSelector => None,
+            },
+        }
+    }
+
+    fn right(self, layout_mode: LayoutMode) -> Option<Self> {
+        match layout_mode {
+            LayoutMode::Full => match self {
+                Self::LogBlock => Some(Self::PrecisionSelector),
+                Self::ExpandButton | Self::PrecisionSelector => None,
+            },
+            LayoutMode::LogsOnly => match self {
+                Self::LogBlock | Self::ExpandButton | Self::PrecisionSelector => None,
+            },
+        }
+    }
+
+    fn forward(self, layout_mode: LayoutMode) -> Option<Self> {
+        match layout_mode {
+            LayoutMode::Full => match self {
+                Self::LogBlock => Some(Self::ExpandButton),
+                Self::ExpandButton => Some(Self::PrecisionSelector),
+                Self::PrecisionSelector => None,
+            },
+            LayoutMode::LogsOnly => match self {
+                Self::LogBlock => None,
+                Self::ExpandButton | Self::PrecisionSelector => Some(Self::LogBlock),
+            },
+        }
+    }
 }
 
 struct StuffHandler {}
@@ -197,6 +295,8 @@ impl MainView {
             client_activity_line_area: Rect::default(),
             graph_precision_line,
             graph_precision_line_area: Rect::default(),
+            layout_mode: LayoutMode::Full,
+            focused_element: FocusedElement::LogBlock,
         }
     }
 
@@ -261,8 +361,17 @@ impl MainView {
             // Don't show the graph nor metrics, show just the log block with the expand graph label above it.
             let mut remaining_height = area.height;
             self.client_activity_line_area = Rect::new(area.x, area.y, area.width, remaining_height.min(1));
+            if !self.client_activity_line_area.is_empty() {
+                // Center the client activity line in the available width
+                let (line_width, _) = self.client_activity_line.begin_resize(area.width, 1);
+                let extra_width = area.width.saturating_sub(line_width);
+                self.client_activity_line_area.x += extra_width / 2;
+                self.client_activity_line_area.width -= extra_width;
+            }
+
             remaining_height = remaining_height.saturating_sub(2);
             self.log_block_area = Rect::new(area.x, area.y + 2, area.width, remaining_height);
+            self.layout_mode = LayoutMode::LogsOnly;
         } else {
             self.log_block_area = log_block_area;
             let mut remaining_height = right_area.height;
@@ -280,6 +389,26 @@ impl MainView {
             self.graph_precision_line_area = Rect::new(right_area.x, right_area.y + 1, right_area.width, remaining_height.min(1));
             remaining_height -= 2;
             self.usage_graph_area = Rect::new(right_area.x, right_area.y + 3, right_area.width, remaining_height);
+
+            // Offset both labels a bit to look aligned with the graph's vertical axis
+            let mut labels_offset_x = usage_graph::VERTICAL_LABELS_AREA_WIDTH;
+
+            let (width, height) = (self.client_activity_line_area.width, self.client_activity_line_area.height);
+            let (line_width, _) = self.client_activity_line.begin_resize(width, height);
+            let extra_width = width.saturating_sub(line_width);
+            self.client_activity_line_area.width -= extra_width;
+            labels_offset_x = labels_offset_x.min(extra_width);
+
+            let (width, height) = (self.graph_precision_line_area.width, self.graph_precision_line_area.height);
+            let (line_width, _) = self.graph_precision_line.begin_resize(width, height);
+            let extra_width = width.saturating_sub(line_width);
+            self.graph_precision_line_area.width -= extra_width;
+            labels_offset_x = labels_offset_x.min(extra_width);
+
+            self.graph_precision_line_area.x += labels_offset_x;
+            self.client_activity_line_area.x += labels_offset_x;
+
+            self.layout_mode = LayoutMode::Full;
         }
     }
 }
@@ -300,31 +429,17 @@ impl UIElement for MainView {
             self.metrics_display.resize(self.metrics_display_area);
         }
 
-        let mut labels_offset_x = usage_graph::VERTICAL_LABELS_AREA_WIDTH;
         if !self.client_activity_line_area.is_empty() {
-            let (width, height) = (self.client_activity_line_area.width, self.client_activity_line_area.height);
-            let (line_width, _) = self.client_activity_line.begin_resize(width, height);
-            let extra_width = width.saturating_sub(line_width);
-            self.client_activity_line_area.width -= extra_width;
-            labels_offset_x = labels_offset_x.min(extra_width);
-        }
-
-        if !self.graph_precision_line_area.is_empty() {
-            let (width, height) = (self.graph_precision_line_area.width, self.graph_precision_line_area.height);
-            let (line_width, _) = self.graph_precision_line.begin_resize(width, height);
-            let extra_width = width.saturating_sub(line_width);
-            self.graph_precision_line_area.width -= extra_width;
-            labels_offset_x = labels_offset_x.min(extra_width);
-        }
-
-        if !self.client_activity_line_area.is_empty() {
-            self.client_activity_line_area.x += labels_offset_x;
             self.client_activity_line.resize(self.client_activity_line_area);
         }
 
         if !self.graph_precision_line_area.is_empty() {
-            self.graph_precision_line_area.x += labels_offset_x;
             self.graph_precision_line.resize(self.graph_precision_line_area);
+        }
+
+        if !self.focused_element.is_visible_in(self.layout_mode) {
+            self.focus_lost();
+            self.receive_focus((0, 0));
         }
     }
 
@@ -351,14 +466,114 @@ impl UIElement for MainView {
     }
 
     fn handle_event(&mut self, event: &event::Event, is_focused: bool) -> HandleEventStatus {
-        self.log_block.handle_event(event, is_focused)
+        if is_focused {
+            let status = match self.focused_element {
+                FocusedElement::LogBlock => self.log_block.handle_event(event, true),
+                FocusedElement::ExpandButton => self.client_activity_line.handle_event(event, true),
+                FocusedElement::PrecisionSelector => self.graph_precision_line.handle_event(event, true),
+            };
+
+            match status {
+                HandleEventStatus::Handled => return HandleEventStatus::Handled,
+                HandleEventStatus::PassFocus(focus_position, direction) => {
+                    let mut try_focused_element = self.focused_element;
+
+                    loop {
+                        let next_focused_element = match direction {
+                            PassFocusDirection::Up => try_focused_element.up(self.layout_mode),
+                            PassFocusDirection::Down => try_focused_element.down(self.layout_mode),
+                            PassFocusDirection::Left => try_focused_element.left(self.layout_mode),
+                            PassFocusDirection::Right => try_focused_element.right(self.layout_mode),
+                            PassFocusDirection::Forward => try_focused_element.forward(self.layout_mode),
+                            PassFocusDirection::Away => None,
+                        };
+
+                        try_focused_element = match next_focused_element {
+                            Some(ele) => ele,
+                            None => return status,
+                        };
+
+                        let focus_passed = match try_focused_element {
+                            FocusedElement::LogBlock => self.log_block.receive_focus(focus_position),
+                            FocusedElement::ExpandButton => self.client_activity_line.receive_focus(focus_position),
+                            FocusedElement::PrecisionSelector => self.graph_precision_line.receive_focus(focus_position),
+                        };
+
+                        if focus_passed {
+                            match self.focused_element {
+                                FocusedElement::LogBlock => self.log_block.focus_lost(),
+                                FocusedElement::ExpandButton => self.client_activity_line.focus_lost(),
+                                FocusedElement::PrecisionSelector => self.graph_precision_line.focus_lost(),
+                            }
+
+                            self.focused_element = try_focused_element;
+                            return HandleEventStatus::Handled;
+                        }
+                    }
+                }
+                HandleEventStatus::Unhandled => {}
+            }
+        }
+
+        self.log_block
+            .handle_event(event, false)
+            .or_else(|| self.client_activity_line.handle_event(event, false))
+            .or_else(|| self.graph_precision_line.handle_event(event, false))
     }
 
     fn receive_focus(&mut self, focus_position: (u16, u16)) -> bool {
-        self.log_block.receive_focus(focus_position)
+        let mut receive_order = [FocusedElement::LogBlock; 3];
+
+        let receive_order_count = match self.layout_mode {
+            LayoutMode::Full => {
+                let log_block_first = focus_position.0 <= self.log_block_area.right();
+                let expand_button_first = focus_position.1 <= self.client_activity_line_area.y;
+
+                let i = match log_block_first {
+                    true => 1,
+                    false => 0,
+                };
+                (receive_order[i], receive_order[i + 1]) = match expand_button_first {
+                    true => (FocusedElement::ExpandButton, FocusedElement::PrecisionSelector),
+                    false => (FocusedElement::PrecisionSelector, FocusedElement::ExpandButton),
+                };
+
+                3
+            }
+            LayoutMode::LogsOnly => {
+                let log_block_first = focus_position.1 > self.log_block_area.y;
+
+                let i = match log_block_first {
+                    true => 1,
+                    false => 0,
+                };
+                receive_order[i] = FocusedElement::ExpandButton;
+
+                2
+            }
+        };
+
+        for ele in receive_order[0..receive_order_count].iter() {
+            let focus_received = match *ele {
+                FocusedElement::LogBlock => self.log_block.receive_focus(focus_position),
+                FocusedElement::ExpandButton => self.client_activity_line.receive_focus(focus_position),
+                FocusedElement::PrecisionSelector => self.graph_precision_line.receive_focus(focus_position),
+            };
+
+            if focus_received {
+                self.focused_element = *ele;
+                return true;
+            }
+        }
+
+        false
     }
 
     fn focus_lost(&mut self) {
-        self.log_block.focus_lost();
+        match self.focused_element {
+            FocusedElement::LogBlock => self.log_block.focus_lost(),
+            FocusedElement::ExpandButton => self.client_activity_line.focus_lost(),
+            FocusedElement::PrecisionSelector => self.graph_precision_line.focus_lost(),
+        }
     }
 }
