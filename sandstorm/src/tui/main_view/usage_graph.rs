@@ -126,15 +126,17 @@ impl VerticalAxis {
     fn resize(&mut self, height: u16) {
         self.current_max = 0;
 
-        self.distance_between_markers = match height {
+        self.distance_between_markers = match height.saturating_sub(1) {
             h if h % 3 == 0 => 3,
             h if h % 4 == 0 => 4,
+            h if h % 5 == 0 => 5,
+            h if h % 2 == 0 => 2,
             h if (h - 1) % 3 == 0 => 3,
             h if (h - 1) % 4 == 0 => 4,
             _ => 3,
         };
 
-        let marker_count = ((height - 1) / self.distance_between_markers) as usize;
+        let marker_count = (height.saturating_sub(1) / self.distance_between_markers) as usize;
         if self.marker_labels.len() < marker_count {
             while self.marker_labels.len() < marker_count {
                 self.marker_labels.push(String::new());
@@ -144,16 +146,18 @@ impl VerticalAxis {
         }
     }
 
-    fn recalculate_if_needed(&mut self, max: u64) {
+    fn recalculate_if_needed(&mut self, max: u64, height: u16) {
         if self.current_max == max {
             return;
         }
 
         self.current_max = max;
+        let height = height.saturating_sub(1) as u64;
         if max != 0 {
-            let marker_count = self.marker_labels.len() as u64;
-            for (i, label) in self.marker_labels.iter_mut().enumerate() {
-                let bytes = max * (i + 1) as u64 / marker_count;
+            let mut marker_height = self.distance_between_markers as u64;
+            for label in self.marker_labels.iter_mut() {
+                let bytes = max * marker_height / height;
+                marker_height += self.distance_between_markers as u64;
                 label.clear();
                 let _ = write!(label, "{}/s", PrettyByteDisplayer(bytes as usize));
             }
@@ -161,7 +165,7 @@ impl VerticalAxis {
     }
 
     fn render(&mut self, max: u64, area: Rect, buf: &mut Buffer) {
-        self.recalculate_if_needed(max);
+        self.recalculate_if_needed(max, area.height);
 
         let mut y = area.bottom() - 1;
         buf.set_string(area.right() - 3 - MARKER_ZERO.len() as u16, y, MARKER_ZERO, LABEL_STYLE);
@@ -172,7 +176,7 @@ impl VerticalAxis {
 
         let x = area.right() - 1;
         if max == 0 {
-            for i in 1..=(area.height - 1) {
+            for i in 1..area.height {
                 buf.get_mut(x, area.bottom() - 1 - i).set_char(VERTICAL_CHAR).set_style(AXIS_STYLE);
             }
         } else {
@@ -181,7 +185,7 @@ impl VerticalAxis {
                 buf.set_string(area.right() - 2 - label.len() as u16, y, label, LABEL_STYLE);
             }
 
-            for i in 1..=(area.height - 1) {
+            for i in 1..area.height {
                 let ch = match i % self.distance_between_markers {
                     0 => CROSS_CHAR,
                     _ => VERTICAL_CHAR,
