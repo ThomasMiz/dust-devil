@@ -685,9 +685,6 @@ impl<H: LongListHandler> LongList<H> {
         for _ in 0..(-remaining_lower_lines_count) {
             iter.next();
         }
-        for _ in 0..(-remaining_higher_lines_count) {
-            iter.next_back();
-        }
 
         // Still, in some edge cases (an item with more lines than needed_line_count) we might end
         // up with more lines than we should. We can simply limit the iterator to fix this.
