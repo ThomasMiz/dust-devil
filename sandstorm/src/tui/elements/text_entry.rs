@@ -263,11 +263,13 @@ impl<H: TextEntryHandler> UIElement for TextEntry<H> {
         };
 
         let mut needs_notify = false;
-        let mut text_changed = true;
+        let mut text_changed = false;
 
         match key_event.code {
-            KeyCode::Char(c) if self.controller.inner.borrow().text_len_chars < self.max_length => {
-                if self.handler.on_char(&self.controller, c, cursor_position) {
+            KeyCode::Char(c) => {
+                if self.controller.inner.borrow().text_len_chars < self.max_length
+                    && self.handler.on_char(&self.controller, c, cursor_position)
+                {
                     let mut inner_guard = self.controller.inner.borrow_mut();
                     let inner = inner_guard.deref_mut();
                     inner.text.insert(cursor_position.index_bytes, c);

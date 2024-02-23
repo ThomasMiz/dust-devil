@@ -2,6 +2,7 @@ use std::{
     cell::RefCell,
     ops::{Deref, DerefMut},
     rc::{Rc, Weak},
+    time::Duration,
 };
 
 use crossterm::event;
@@ -142,6 +143,37 @@ impl<W: AsyncWrite + Unpin + 'static> Controller<W> {
         inner.password_entry_controller = password_entry_controller;
     }
 
+    fn text_entry_beep_red(self: &Rc<Self>, text_controller: Rc<TextEntryController>) {
+        const BEEP_DELAY_MILLIS: u64 = 200;
+
+        let mut inner = self.inner.borrow_mut();
+        inner.is_beeping_red = true;
+        inner.base.base.redraw_notify();
+        drop(inner);
+
+        let original_idle_bg = text_controller.get_idle_style().bg;
+        let original_typing_bg = text_controller.get_typing_style().bg;
+
+        let self_rc = Rc::clone(self);
+        let handle = tokio::task::spawn_local(async move {
+            for _ in 0..2 {
+                text_controller.modify_idle_style(|style| style.bg = Some(Color::Red));
+                text_controller.modify_typing_style(|style| style.bg = Some(Color::Red));
+                tokio::time::sleep(Duration::from_millis(BEEP_DELAY_MILLIS)).await;
+                text_controller.modify_idle_style(|style| style.bg = Some(BACKGROUND_COLOR));
+                text_controller.modify_typing_style(|style| style.bg = Some(BACKGROUND_COLOR));
+                tokio::time::sleep(Duration::from_millis(BEEP_DELAY_MILLIS)).await;
+            }
+
+            text_controller.modify_idle_style(|style| style.bg = original_idle_bg);
+            text_controller.modify_typing_style(|style| style.bg = original_typing_bg);
+
+            self_rc.inner.borrow_mut().is_beeping_red = false;
+        });
+
+        self.inner.borrow_mut().current_task = Some(handle);
+    }
+
     fn perform_request(self: &Rc<Self>, password: Option<String>, role: Option<UserRole>) {
         let mut inner = self.inner.borrow_mut();
         inner.is_doing_request = true;
@@ -172,6 +204,12 @@ impl<W: AsyncWrite + Unpin + 'static> Controller<W> {
             true => None,
             false => Some(String::from(text)),
         });
+
+        if password.as_deref().is_some_and(|pw| pw.len() > u8::MAX as usize) {
+            drop(inner);
+            self.text_entry_beep_red(password_controller);
+            return false;
+        }
 
         let selected_role = inner.selected_role;
         drop(inner);
@@ -592,8 +630,9 @@ impl<W: AsyncWrite + Unpin + 'static> TextEntryHandler for TextHandler<W> {
         }
     }
 
-    fn on_char(&mut self, _controller: &Rc<TextEntryController>, _c: char, _cursor: &CursorPosition) -> bool {
-        true
+    fn on_char(&mut self, controller: &Rc<TextEntryController>, c: char, _cursor: &CursorPosition) -> bool {
+        let text_len = controller.with_text(|text| text.len());
+        text_len + c.len_utf8() <= u8::MAX as usize
     }
 
     fn on_text_changed(&mut self, _controller: &Rc<TextEntryController>) -> bool {

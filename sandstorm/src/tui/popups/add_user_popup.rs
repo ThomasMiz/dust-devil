@@ -202,13 +202,13 @@ impl<W: AsyncWrite + Unpin + 'static> Controller<W> {
         drop(inner);
 
         let username = username_controller.with_text(|text| String::from(text));
-        if username.is_empty() {
+        if username.is_empty() || username.len() > u8::MAX as usize {
             self.text_entry_beep_red(username_controller);
             return false;
         }
 
         let password = password_controller.with_text(|text| String::from(text));
-        if password.is_empty() {
+        if password.is_empty() || password.len() > u8::MAX as usize {
             self.text_entry_beep_red(password_controller);
             return false;
         }
@@ -464,8 +464,9 @@ impl<W: AsyncWrite + Unpin + 'static> TextEntryHandler for TextHandler<W> {
         }
     }
 
-    fn on_char(&mut self, _controller: &Rc<TextEntryController>, _c: char, _cursor: &CursorPosition) -> bool {
-        true
+    fn on_char(&mut self, controller: &Rc<TextEntryController>, c: char, _cursor: &CursorPosition) -> bool {
+        let text_len = controller.with_text(|text| text.len());
+        text_len + c.len_utf8() <= u8::MAX as usize
     }
 
     fn on_text_changed(&mut self, _controller: &Rc<TextEntryController>) -> bool {
