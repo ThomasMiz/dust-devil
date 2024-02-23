@@ -25,9 +25,10 @@ use std::{
 
 use crossterm::event::{self, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseEvent, MouseEventKind};
 use ratatui::{
+    buffer::Buffer,
     layout::Rect,
     text::Line,
-    widgets::{Block, BorderType, Borders, Scrollbar, ScrollbarOrientation, ScrollbarState},
+    widgets::{Block, BorderType, Borders},
     Frame,
 };
 use tokio::sync::Notify;
@@ -734,6 +735,51 @@ impl<H: LongListHandler> Deref for LongList<H> {
     }
 }
 
+fn render_scrollbar(buf: &mut Buffer, area: Rect, lowest_index: usize, highest_index: usize, item_count: usize) {
+    const fn rounded_divide(a: usize, b: usize) -> usize {
+        (a + (b / 2)) / b
+    }
+
+    const ARROW_UP: char = '↑';
+    const ARROW_DOWN: char = '↓';
+    const TRACK: char = '║';
+    const THUMB: char = '█';
+
+    let track_len = area.height.saturating_sub(2) as usize;
+
+    let thumb_start = rounded_divide(lowest_index * track_len, item_count - 1);
+    let thumb_end = rounded_divide(highest_index * track_len, item_count - 1);
+
+    let thumb_start = thumb_start.min(track_len.saturating_sub(1));
+    let thumb_end = thumb_end.max(thumb_start + 1);
+
+    let track_start_len = thumb_start;
+    let thumb_len = thumb_end - thumb_start;
+    let track_end_len = track_len - thumb_start - thumb_len;
+
+    let x = area.right().saturating_sub(1);
+    let mut y = area.y;
+    buf.get_mut(x, y).set_char(ARROW_UP);
+    y += 1;
+
+    for _ in 0..track_start_len {
+        buf.get_mut(x, y).set_char(TRACK);
+        y += 1;
+    }
+
+    for _ in 0..thumb_len {
+        buf.get_mut(x, y).set_char(THUMB);
+        y += 1;
+    }
+
+    for _ in 0..track_end_len {
+        buf.get_mut(x, y).set_char(TRACK);
+        y += 1;
+    }
+
+    buf.get_mut(x, y).set_char(ARROW_DOWN);
+}
+
 impl<H: LongListHandler> UIElement for LongList<H> {
     fn resize(&mut self, area: Rect) {
         let previous_area = self.current_area;
@@ -756,23 +802,7 @@ impl<H: LongListHandler> UIElement for LongList<H> {
         let list_area = block.inner(area);
         frame.render_widget(block, area);
 
-        let selected_index = inner.selected_index;
-        let scrollbar_content_length = inner.item_count.saturating_sub(list_area.height as usize);
-        let scrollbar_position = match selected_index {
-            Some(idx) => scrollbar_content_length * idx / (inner.item_count - 1).max(1),
-            None => scrollbar_content_length,
-        };
-
-        let mut scrollbar_state = ScrollbarState::new(scrollbar_content_length)
-            .viewport_content_length(list_area.height as usize)
-            .position(scrollbar_position);
-
-        let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
-            .begin_symbol(Some("↑"))
-            .end_symbol(Some("↓"));
-        frame.render_stateful_widget(scrollbar, area, &mut scrollbar_state);
-
-        let center_item_index = selected_index.unwrap_or_else(|| inner.selection_start_index().unwrap_or(0));
+        let center_item_index = inner.selected_index.unwrap_or_else(|| inner.selection_start_index().unwrap_or(0));
         drop(inner_guard);
 
         let buf = frame.buffer_mut();
@@ -781,6 +811,17 @@ impl<H: LongListHandler> UIElement for LongList<H> {
             buf.set_line(list_area.left(), y, line, list_area.width);
             y += 1;
         });
+
+        let inner_guard = self.inner.borrow();
+        let inner = inner_guard.deref();
+        if inner.lines.len() >= list_area.height as usize {
+            let lowest_index = inner.lines.front().unwrap().1;
+            let highest_index = inner.lines.back().unwrap().1;
+
+            if lowest_index > 0 || highest_index + 1 < inner.item_count || inner.lines.len() > list_area.height as usize {
+                render_scrollbar(frame.buffer_mut(), area, lowest_index, highest_index, inner.item_count);
+            }
+        }
     }
 
     fn handle_event(&mut self, event: &event::Event, is_focused: bool) -> HandleEventStatus {
