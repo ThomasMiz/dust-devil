@@ -1,15 +1,22 @@
 [package]
 name = "dust-devil-sandstorm"
-version = "1.0.0"
+version = "1.1.0"
 edition = "2021"
 description = "A remote monitoring client for the dust-devil socks5 server."
 license = "MIT OR Apache-2.0"
+readme = "./README.md"
+repository = "https://github.com/ThomasMiz/dust-devil"
+keywords = ["server", "socks", "socsk5", "proxy"]
+categories = ["network-programming"]
+rust-version = "1.76.0"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[[bin]]
+path = "src/main.rs"
+name = "sandstorm"
 
 [dependencies]
-dust-devil-core = { path = "../dust-devil-core", version = "1" }
-tokio = { version = "1", features = ["rt", "net", "sync", "time", "signal", "macros"] }
-time = { version = "0", features = ["local-offset"] }
-crossterm = { version = "0" }
-ratatui = { version = "0", features = ["crossterm"] }
+dust-devil-core = { path = "../dust-devil-core", version = "1.1" }
+tokio = { version = "1.36", features = ["rt", "net", "sync", "time", "signal", "macros"] }
+time = { version = "0.3.34", features = ["local-offset"] }
+crossterm = { version = "0.27.0" }
+ratatui = { version = "0.26.1", features = ["crossterm"] }

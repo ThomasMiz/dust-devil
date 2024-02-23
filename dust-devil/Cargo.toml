@@ -1,15 +1,19 @@
 [package]
 name = "dust-devil"
-version = "1.0.0"
+version = "1.1.0"
 edition = "2021"
 description = "A socks5 proxy server with advanced remote monitoring capabilities."
 license = "MIT OR Apache-2.0"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+readme = "./README.md"
+repository = "https://github.com/ThomasMiz/dust-devil"
+keywords = ["server", "socks", "socsk5", "proxy"]
+categories = ["network-programming"]
+default-run = "dust-devil"
+rust-version = "1.76.0"
 
 [dependencies]
-dust-devil-core = { path = "../dust-devil-core", version = "1" }
-tokio = { version = "1", features = ["rt-multi-thread", "io-std", "net", "sync", "fs", "signal", "io-util", "macros", "parking_lot"] }
-tokio-util = { version = "0", features = [] }
-dashmap = "5"
-time = { version = "0", features = ["local-offset"] }
+dust-devil-core = { path = "../dust-devil-core", version = "1.1" }
+tokio = { version = "1.36", features = ["rt-multi-thread", "io-std", "net", "sync", "fs", "signal", "io-util", "macros", "parking_lot"] }
+tokio-util = { version = "0.7.10", features = [] }
+dashmap = "5.5"
+time = { version = "0.3.34", features = ["local-offset"] }

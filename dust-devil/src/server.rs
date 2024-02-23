@@ -65,6 +65,7 @@ async fn run_server_inner(startup_args: StartupArguments, logger: Option<&LogMan
 
     let mut socks_listeners = bind_socks_sockets(startup_args.verbose, startup_args.socks5_bind_sockets, &log_sender).await;
     if socks_listeners.is_empty() {
+        eprintln!("Failed to bind any socks5 socket! Aborting");
         sendif!(log_sender, EventData::FailedBindAnySocketAborting);
         return;
     }
