@@ -90,7 +90,7 @@ impl UsageTracker {
 
         if !self.history_by_unit.is_empty() {
             let unit_size_seconds = self.unit_size_seconds as i64;
-            while self.history_by_unit_start_timestamp + unit_size_seconds <= self.history_start_timestamp {
+            while self.history_by_unit_start_timestamp + unit_size_seconds < self.history_start_timestamp {
                 self.history_by_unit_start_timestamp += unit_size_seconds;
                 self.history_by_unit.pop_front();
             }
