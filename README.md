@@ -35,7 +35,7 @@ In addition to this, the client may enable _event streaming_, which makes the se
 _Note: events are serialized in an efficient binary format, but still, if a client's connection to the server isn't fast enough to handle the rate at which events are generated, the client's connection will be abruptly terminated._
 
 # Installation and Usage
-The easiest way to install is with `cargo` from crates.io:
+The recommended way to install is with `cargo` from crates.io:
 ```
 cargo install dust-devil
 ```
@@ -58,6 +58,9 @@ cargo install --git https://github.com/ThomasMiz/dust-devil.git sandstorm
 ```
 
 Either one of these will download and compile the client's code and all its dependencies. Once this is done, the client's executable will become available under the name `sandstorm`.
+
+## Downloading binaries
+If you don't have `cargo` installed, pre-compiled binaries are available for x84_64 Windows and Linux [in the releases page](https://github.com/ThomasMiz/dust-devil/releases).
 
 ## Server Usage
 The server can be ran as-is without any setup, using default configuration, and will start outputting logs to standard output immediately:
