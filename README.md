@@ -1,8 +1,9 @@
-# Dust Devil
-
+![monitoring](https://raw.githubusercontent.com/ThomasMiz/dust-devil/main/images/monitoring.gif)
 [![Crates.io](https://img.shields.io/crates/v/dust-devil.svg)](https://crates.io/crates/dust-devil)
 
-Dust Devil is a SOCKS5 proxy server, the spiritual successor of [TornadoProxy](https://github.com/ThomasMiz/TornadoProxy.git), written in [Rust](https://www.rust-lang.org/) with the intent of learning said language. The project includes a custom TCP-based monitoring protocol called Sandstorm which allows managing and monitoring the server in real time. This protocol is implemented in the server, and a client application for it is provided too, including an advanced TUI (Terminal User Interface).
+# Dust Devil
+
+Dust Devil is a SOCKS5 proxy server, the spiritual successor of [TornadoProxy](https://github.com/ThomasMiz/TornadoProxy), written in [Rust](https://www.rust-lang.org/) with the intent of learning said language. The project includes a custom TCP-based monitoring protocol called Sandstorm which allows managing and monitoring the server in real time. This protocol is implemented in the server, and a client application for it is provided too, including an advanced TUI (Terminal User Interface).
 
 Dust Devil has the following features:
 
